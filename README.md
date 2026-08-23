@@ -44,7 +44,7 @@ Rome is a guardrailed environment where human and agent collaborate, and the col
 <p align="center">
   <a href="https://www.youtube.com/watch?v=lyNGYEw4a6Y">
     <img
-      src="https://img.youtube.com/vi/lyNGYEw4a6Y/maxresdefault.jpg"
+      src="docs/assets/rome-overview-video.jpg"
       alt="Watch Rome, an OS for Recursive Agents"
       width="800"
     />
