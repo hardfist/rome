@@ -294,7 +294,9 @@ echo "  ${ROME_REPO_URL}"
 if [[ -t 1 && -r /dev/tty ]]; then
   repo_slug="${ROME_REPO_URL#https://github.com/}"
   gh_ready="false"
-  if command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com >/dev/null 2>&1; then
+  # Probe the credential the PUT will use: gh auth status exits 1 when any
+  # known github.com account is stale, even while the active account works.
+  if command -v gh >/dev/null 2>&1 && gh api --hostname github.com user >/dev/null 2>&1; then
     gh_ready="true"
   fi
   if [[ "$gh_ready" == "true" ]]; then
