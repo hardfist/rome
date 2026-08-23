@@ -13,6 +13,18 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/rome-os/rome/actions/workflows/ci.yml">
+    <img alt="CI" src="https://github.com/rome-os/rome/actions/workflows/ci.yml/badge.svg" />
+  </a>
+  <a href="LICENSE">
+    <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg" />
+  </a>
+  <a href="https://x.com/RomeAILab">
+    <img alt="Follow Rome on X" src="https://img.shields.io/badge/follow-%40RomeAILab-black?logo=x&amp;logoColor=white" />
+  </a>
+</p>
+
+<p align="center">
   <a href="https://romeos.cc/">Website</a>
   ·
   <a href="https://romeos.cc/login">Try Rome Cloud</a>
