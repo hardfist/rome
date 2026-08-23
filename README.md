@@ -41,6 +41,17 @@ Most progress in AI comes from scaling models. Rome scales the other axis, the e
 
 Rome is a guardrailed environment where human and agent collaborate, and the collaboration compounds. Agents build their own harnesses, design their own SOPs, and orchestrate workflows under your guidance. Proven capabilities stick. Every interaction raises the ceiling for the next.
 
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=lyNGYEw4a6Y">
+    <img
+      src="https://img.youtube.com/vi/lyNGYEw4a6Y/maxresdefault.jpg"
+      alt="Watch Rome, an OS for Recursive Agents"
+      width="800"
+    />
+  </a>
+</p>
+
+
 ## Get started
 
 ### Rome Cloud
