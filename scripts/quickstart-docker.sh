@@ -287,17 +287,37 @@ echo "  Dashboard : http://localhost:${host_port}"
 echo "  Logs      : docker logs -f ${container_name}"
 echo "  Stop      : docker stop ${container_name}"
 echo ""
-echo "If Rome looks useful, a GitHub star helps other people find it:"
+echo "If it looks good, could you star the repo so more people can find it?"
 echo "  ${ROME_REPO_URL}"
 # /dev/tty, not stdin: under `curl | bash` stdin is the script itself. Skip
 # the prompt entirely when no terminal is attached.
 if [[ -t 1 && -r /dev/tty ]]; then
+  repo_slug="${ROME_REPO_URL#https://github.com/}"
+  gh_ready="false"
+  if command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com >/dev/null 2>&1; then
+    gh_ready="true"
+  fi
+  if [[ "$gh_ready" == "true" ]]; then
+    prompt="Star ${repo_slug} now? [Y/n] "
+  else
+    prompt="Open ${ROME_REPO_URL} in your browser to leave a star? [Y/n] "
+  fi
   reply=""
-  read -r -p "Open ${ROME_REPO_URL} in your browser to leave a star? [Y/n] " reply </dev/tty || reply="n"
+  read -r -p "$prompt" reply </dev/tty || reply="n"
   case "$reply" in
     [Nn]*) ;;
     *)
-      open_url "$ROME_REPO_URL"
+      if [[ "$gh_ready" == "true" ]]; then
+        if gh api --method PUT "user/starred/${repo_slug}" >/dev/null 2>&1; then
+          echo "Starred ${repo_slug} — thank you!"
+        else
+          # auth status passes on tokens that lack the starring scope.
+          echo "quickstart-docker: gh could not star ${repo_slug} — opening it in your browser instead." >&2
+          open_url "$ROME_REPO_URL"
+        fi
+      else
+        open_url "$ROME_REPO_URL"
+      fi
       ;;
   esac
 fi
