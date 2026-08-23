@@ -41,6 +41,64 @@ Most progress in AI comes from scaling models. Rome scales the other axis, the e
 
 Rome is a guardrailed environment where human and agent collaborate, and the collaboration compounds. Agents build their own harnesses, design their own SOPs, and orchestrate workflows under your guidance. Proven capabilities stick. Every interaction raises the ceiling for the next.
 
+## Get started
+
+### Rome Cloud
+
+Rome Cloud provisions a private Rome environment for each guardian. It is currently
+available as a preview.
+
+[Join the preview →](https://romeos.cc/login)
+
+### Run with Docker
+
+One script checks for Docker, pulls the published image, and starts Rome:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rome-os/rome/main/scripts/quickstart-docker.sh | bash
+```
+
+Or clone the repository and run the script from it:
+
+```bash
+git clone https://github.com/rome-os/rome.git
+cd rome
+./scripts/quickstart-docker.sh
+```
+
+The dashboard comes up at `http://localhost:7663`, bound to loopback only —
+first-run onboarding is open to whoever reaches it first, so exposing it
+beyond the machine takes an explicit `--bind`. State lives in named Docker
+volumes, so re-running the script upgrades the container without losing data.
+Telemetry export stays off unless you set `OTEL_EXPORTER_OTLP_ENDPOINT`. Run
+the script with `--help` for ports, profiles, and the other settings it
+forwards.
+
+### Run the development environment
+
+To run this repository from source, you need:
+
+- Node.js 24 or newer
+- Corepack and pnpm 11.6
+- Docker with Docker Compose
+
+From a checkout of this repository:
+
+```bash
+corepack enable
+pnpm install
+pnpm dev:all
+```
+
+`pnpm dev:all` starts the production-shaped local stack: Rome, observability,
+routing, and the web development server. It connects to `https://romeos.cc` by
+default; set `ROME_DEV_PANTHEON_ORIGIN` to use another Rome Cloud deployment.
+The script prints the local URLs and development credentials when startup completes.
+
+This is the contributor development path, not the final production self-hosting
+distribution. See [`CLAUDE.md`](CLAUDE.md) for the complete development loop,
+container commands, and validation requirements.
+
 ## Rome Apps
 
 **Rome App is the new way to interact with your agent.**
@@ -111,124 +169,19 @@ Browse the [Rome App Store](https://romeos.cc/store), read the
 
 These are the kinds of requests Rome is designed to follow through on:
 
-| | |
-| --- | --- |
-| **Run the code review loop**<br><br>“Fix all P1 and P2 review comments until there are no merge blockers left. Let me know when you finish.” | **Organize your email**<br><br>“Sort my inbox. Archive the noise, flag anything urgent, and draft replies for messages that need me.” |
-| **Track a game's price**<br><br>“Track the price of this game and let me know when it drops below $30.” | **Interview your customers**<br><br>“Interview five customers about onboarding. Ask follow-up questions and summarize what we should improve.” |
+<table>
+  <tr>
+    <td><strong>Run the code review loop</strong><br><br>“Fix all P1 and P2 review comments until there are no merge blockers left. Let me know when you finish.”</td>
+    <td><strong>Organize your email</strong><br><br>“Sort my inbox. Archive the noise, flag anything urgent, and draft replies for messages that need me.”</td>
+  </tr>
+  <tr>
+    <td><strong>Track a game's price</strong><br><br>“Track the price of this game and let me know when it drops below $30.”</td>
+    <td><strong>Interview your customers</strong><br><br>“Interview five customers about onboarding. Ask follow-up questions and summarize what we should improve.”</td>
+  </tr>
+</table>
 
 Rome can handle one-off tasks, scheduled work, long-running follow-through, and
 purpose-built app experiences without forcing everything into one chat window.
-
-## How Rome works
-
-Rome gives each guardian a dedicated runtime with explicit boundaries between
-identity, reasoning, execution, and durable state.
-
-```text
-+----------------------------- Applications -----------------------------+
-| System Apps  | Chat / Projects / Browser / ...                         |
-| Custom Apps  | Developer / Finance / Email / Game                      |
-+------------------------------------------------------------------------+
-                                    |
-+------------------------------ Rome Core -------------------------------+
-| Agent Runtime / Action Engine / Channels                               |
-| App SDK / Web UI SDK / ...                                             |
-+------------------------------------------------------------------------+
-                                    |
-+---------------------------- Infrastructure ----------------------------+
-| Codex / Claude / Models / Storage / Tools / ...                        |
-+------------------------------------------------------------------------+
-```
-
-### Core design decisions
-
-- **Every environment has a guardian.** The guardian controls configuration,
-  memory, policies, and sensitive actions for their Rome instance.
-- **Channels share one identity system.** Platform-specific messages are normalized
-  into a common format, then mapped to people and evaluated by the same policy engine.
-- **Reasoning and execution are separate.** Agents decide what to do; typed actions
-  define what code, routines, apps, and agents can execute.
-- **Memory is local and inspectable.** Important context survives sessions in a
-  git-tracked memory directory rather than living only inside a model conversation.
-- **Trust is structural.** Sender identity, bond levels, policy routing, sentinel
-  review, and approvals are runtime mechanisms—not reminders hidden in a prompt.
-- **Apps are runtime extensions.** Apps add agents, actions, skills, hooks, APIs,
-  databases, and web UIs without changing Rome Core.
-- **Durable work does not depend on an open tab.** Events, routines, app state, and
-  action execution live in the runtime and continue independently of the browser.
-
-The detailed contracts live in [`docs/concepts/`](docs/concepts/index.md) and
-[`docs/architecture/`](docs/architecture/index.md).
-
-### The compounding loop
-
-1. A request arrives through a channel, an event, or a Rome App.
-2. Rome resolves identity and policy before an agent handles the request.
-3. Rome discovers which capabilities from earlier work apply, reusing,
-   adapting, or combining them before building anything new.
-4. The agent reasons, invokes actions, and asks for approval when required.
-5. Useful behavior can become a saved workflow, a reusable skill, or a Rome App.
-6. Memory and app data persist, so the next task starts from a higher baseline.
-
-Start with one workflow. Rome keeps what works and compounds from there.
-
-## Get started
-
-### Rome Cloud
-
-Rome Cloud provisions a private Rome environment for each guardian. It is currently
-available as a preview.
-
-[Join the preview →](https://romeos.cc/login)
-
-### Run with Docker
-
-One script checks for Docker, pulls the published image, and starts Rome:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/rome-os/rome/main/scripts/quickstart-docker.sh | bash
-```
-
-Or clone the repository and run the script from it:
-
-```bash
-git clone https://github.com/rome-os/rome.git
-cd rome
-./scripts/quickstart-docker.sh
-```
-
-The dashboard comes up at `http://localhost:7663`, bound to loopback only —
-first-run onboarding is open to whoever reaches it first, so exposing it
-beyond the machine takes an explicit `--bind`. State lives in named Docker
-volumes, so re-running the script upgrades the container without losing data.
-Telemetry export stays off unless you set `OTEL_EXPORTER_OTLP_ENDPOINT`. Run
-the script with `--help` for ports, profiles, and the other settings it
-forwards.
-
-### Run the development environment
-
-To run this repository from source, you need:
-
-- Node.js 24 or newer
-- Corepack and pnpm 11.6
-- Docker with Docker Compose
-
-From a checkout of this repository:
-
-```bash
-corepack enable
-pnpm install
-pnpm dev:all
-```
-
-`pnpm dev:all` starts the production-shaped local stack: Rome, observability,
-routing, and the web development server. It connects to `https://romeos.cc` by
-default; set `ROME_DEV_PANTHEON_ORIGIN` to use another Rome Cloud deployment.
-The script prints the local URLs and development credentials when startup completes.
-
-This is the contributor development path, not the final production self-hosting
-distribution. See [`CLAUDE.md`](CLAUDE.md) for the complete development loop,
-container commands, and validation requirements.
 
 ## Repository map
 
