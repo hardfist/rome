@@ -308,7 +308,9 @@ if [[ -t 1 && -r /dev/tty ]]; then
     [Nn]*) ;;
     *)
       if [[ "$gh_ready" == "true" ]]; then
-        if gh api --method PUT "user/starred/${repo_slug}" >/dev/null 2>&1; then
+        # Pin the host: gh api honors GH_HOST, and the readiness check above
+        # validated the github.com login specifically.
+        if gh api --hostname github.com --method PUT "user/starred/${repo_slug}" >/dev/null 2>&1; then
           echo "Starred ${repo_slug} — thank you!"
         else
           # auth status passes on tokens that lack the starring scope.
