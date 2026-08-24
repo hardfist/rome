@@ -273,6 +273,10 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
    * array therefore empties the thread — callers must not pass one for a
    * snapshot that merely failed to report a participant list.
    *
+   * The whole replace runs in one transaction, so the set flips as a unit. A
+   * failure part-way through would otherwise leave the thread over-inclusive:
+   * the new members added, the departed ones never deleted.
+   *
    * Identity rows outlive membership: a person dropped from one thread keeps
    * their row for the other threads they are in.
    */
@@ -286,61 +290,64 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
     const unique = new Map(participants.map((p) => [p.participantId, p]));
     const ids = [...unique.keys()];
 
-    for (const chunk of chunked([...unique.values()], UPSERT_CHUNK)) {
-      await this.db
-        .insert(linkedinParticipants)
-        .values(
-          chunk.map((p) => ({
-            participantId: p.participantId,
-            name: p.name ?? null,
-            headline: p.headline ?? null,
-            type: p.type ?? null,
-            isSelf: p.isSelf ?? false,
-            firstSyncedAt: now,
-            updatedAt: now,
-          })),
-        )
-        // coalesce(excluded, existing) for the same reason as threads: a
-        // snapshot that omits a field never wipes one an earlier snapshot
-        // learned. `is_self` is derived from the viewer, not the snapshot's
-        // completeness, so it always wins.
-        .onConflictDoUpdate({
-          target: linkedinParticipants.participantId,
-          set: {
-            name: sql`coalesce(excluded.name, name)`,
-            headline: sql`coalesce(excluded.headline, headline)`,
-            type: sql`coalesce(excluded.type, type)`,
-            isSelf: sql`excluded.is_self`,
-            updatedAt: sql`excluded.updated_at`,
-          },
-        });
+    await this.db.transaction((tx) => {
+      for (const chunk of chunked([...unique.values()], UPSERT_CHUNK)) {
+        tx.insert(linkedinParticipants)
+          .values(
+            chunk.map((p) => ({
+              participantId: p.participantId,
+              name: p.name ?? null,
+              headline: p.headline ?? null,
+              type: p.type ?? null,
+              isSelf: p.isSelf,
+              firstSyncedAt: now,
+              updatedAt: now,
+            })),
+          )
+          // coalesce(excluded, existing) for the same reason as threads: a
+          // snapshot that omits a field never wipes one an earlier snapshot
+          // learned. `is_self` takes the new value verbatim because it
+          // describes the viewer rather than the snapshot, which is why the
+          // input type makes it required.
+          .onConflictDoUpdate({
+            target: linkedinParticipants.participantId,
+            set: {
+              name: sql`coalesce(excluded.name, name)`,
+              headline: sql`coalesce(excluded.headline, headline)`,
+              type: sql`coalesce(excluded.type, type)`,
+              isSelf: sql`excluded.is_self`,
+              updatedAt: sql`excluded.updated_at`,
+            },
+          })
+          .run();
 
-      await this.db
-        .insert(linkedinThreadParticipants)
-        .values(
-          chunk.map((p) => ({
-            threadId,
-            participantId: p.participantId,
-            firstSyncedAt: now,
-          })),
-        )
-        // Membership carries no mutable facts, so a re-snapshot is a no-op
-        // that preserves the original first-seen time.
-        .onConflictDoNothing();
-    }
+        tx.insert(linkedinThreadParticipants)
+          .values(
+            chunk.map((p) => ({
+              threadId,
+              participantId: p.participantId,
+              firstSyncedAt: now,
+            })),
+          )
+          // Membership carries no mutable facts, so a re-snapshot is a no-op
+          // that preserves the original first-seen time.
+          .onConflictDoNothing()
+          .run();
+      }
 
-    // Drop whoever left the thread. Deleting by "not in the new set" rather
-    // than clearing first keeps `first_synced_at` intact for those who stayed.
-    await this.db
-      .delete(linkedinThreadParticipants)
-      .where(
-        ids.length === 0
-          ? eq(linkedinThreadParticipants.threadId, threadId)
-          : and(
-              eq(linkedinThreadParticipants.threadId, threadId),
-              notInArray(linkedinThreadParticipants.participantId, ids),
-            ),
-      );
+      // Drop whoever left the thread. Deleting by "not in the new set" rather
+      // than clearing first keeps `first_synced_at` intact for those who stayed.
+      tx.delete(linkedinThreadParticipants)
+        .where(
+          ids.length === 0
+            ? eq(linkedinThreadParticipants.threadId, threadId)
+            : and(
+                eq(linkedinThreadParticipants.threadId, threadId),
+                notInArray(linkedinThreadParticipants.participantId, ids),
+              ),
+        )
+        .run();
+    });
   }
 
   /** One thread's participants with their person-level facts, by member id. */

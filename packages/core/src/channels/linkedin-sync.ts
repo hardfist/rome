@@ -50,8 +50,14 @@ export interface LinkedInParticipantInput {
   headline?: string | null;
   /** `member` | `organization` | `agent` | `custom`. */
   type?: string | null;
-  /** True for the account owner's own entry in the participant list. */
-  isSelf?: boolean;
+  /**
+   * True for the account owner's own entry in the participant list. Required,
+   * unlike the fields around it: the store takes the newest answer verbatim
+   * rather than coalescing it, so an omitted value would silently clear a
+   * stored `true` rather than leave it alone. A participant list always marks
+   * its own viewer, so the producer can always answer.
+   */
+  isSelf: boolean;
 }
 
 /** One participant of a thread, person-level facts folded in. */

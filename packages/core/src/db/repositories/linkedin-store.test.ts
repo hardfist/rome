@@ -346,6 +346,51 @@ describe("LinkedInStoreRepository", () => {
       expect(await repo.getParticipantThreadIds(ada.participantId)).toEqual([]);
     });
 
+    it("a failure part-way through a replace leaves the previous set intact", async () => {
+      await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+      await repo.upsertThreadParticipants("t1", [grace]);
+
+      // More than one chunk, with the failure in the last one: without a
+      // transaction the earlier chunks land and the thread ends up
+      // over-inclusive — new members added, the departed one never deleted.
+      const many = Array.from({ length: 200 }, (_, i) => ({
+        participantId: `ACoAAFill${String(i).padStart(4, "0")}`,
+        name: `Filler ${i}`,
+        headline: null,
+        type: "member",
+        isSelf: false,
+      }));
+      // better-sqlite3 refuses to bind an object, so this throws mid-replace.
+      const unbindable = {
+        participantId: {} as unknown as string,
+        name: "Boom",
+        headline: null,
+        type: "member",
+        isSelf: false,
+      };
+
+      await expect(repo.upsertThreadParticipants("t1", [...many, unbindable])).rejects.toThrow();
+
+      expect((await repo.getThreadParticipants("t1")).map((p) => p.participantId)).toEqual([
+        grace.participantId,
+      ]);
+      const identities = testDb.db.all(sql`
+        SELECT COUNT(*) AS c FROM linkedin_participants
+      `) as Array<{ c: number }>;
+      expect(Number(identities[0].c)).toBe(1);
+    });
+
+    it("is_self survives a re-snapshot and follows the viewer's answer", async () => {
+      await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+      await repo.upsertThreadParticipants("t1", [ada, self]);
+      // A later snapshot reporting the same set must not flip the owner's row.
+      await repo.upsertThreadParticipants("t1", [ada, self]);
+
+      const after = await repo.getThreadParticipants("t1");
+      expect(after.find((p) => p.participantId === self.participantId)?.isSelf).toBe(true);
+      expect(after.find((p) => p.participantId === ada.participantId)?.isSelf).toBe(false);
+    });
+
     it("membership is per thread — one thread's set never disturbs another's", async () => {
       await repo.upsertThreads([
         thread("t1", new Date("2026-08-19T20:00:00Z")),
