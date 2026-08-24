@@ -22,6 +22,9 @@
   <a href="https://x.com/RomeAILab">
     <img alt="Follow Rome on X" src="https://img.shields.io/badge/follow-%40RomeAILab-black?logo=x&amp;logoColor=white" />
   </a>
+  <a href="https://discord.gg/g7EFmEtmqc">
+    <img alt="Join the Rome Discord server" src="https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&amp;logoColor=white" />
+  </a>
 </p>
 
 <p align="center">
