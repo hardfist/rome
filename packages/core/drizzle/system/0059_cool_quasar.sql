@@ -1,0 +1,1 @@
+ALTER TABLE `linkedin_threads` DROP COLUMN `participant_count`;

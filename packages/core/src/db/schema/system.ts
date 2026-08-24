@@ -189,8 +189,10 @@ export const linkedinThreads = sqliteTable("linkedin_threads", {
   // LinkedIn's own group flag from the thread snapshot; null until the first
   // snapshot reports it (inbox listings carry no group information).
   isGroup: integer("is_group", { mode: "boolean" }),
-  // Participants including the account owner, per the thread snapshot.
-  participantCount: integer("participant_count"),
+  // Deliberately no participant_count column. How many people are on a thread
+  // is counted from `linkedin_thread_participants` when it is read, so the
+  // membership and its size are one fact and cannot drift apart. The snapshot
+  // still reports a count; the mirror no longer keeps a second copy of it.
   lastMessagePreview: text("last_message_preview"),
   lastMessageAt: integer("last_message_at", { mode: "timestamp" }),
   unread: integer("unread", { mode: "boolean" }).notNull().default(false),

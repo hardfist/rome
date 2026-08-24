@@ -255,6 +255,12 @@ export interface LinkedInSnapshotMessage {
   conversationTitle: string | null;
   /** LinkedIn's own group flag; null when the installed plugin predates it. */
   conversationIsGroup: boolean | null;
+  /**
+   * What the snapshot page claimed, reported as the plugin sends it. The
+   * mirror does not store this: the count a reader sees is counted from the
+   * membership `linkedin thread-participants` reads, so a thread has exactly
+   * one answer to how many people are on it.
+   */
   participantCount: number | null;
   messageId: string;
   sentAt: Date | null;

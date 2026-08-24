@@ -33,6 +33,13 @@ export interface LinkedInThreadRow {
   unread: boolean;
   /** LinkedIn's group flag; null until the first snapshot reports it. */
   isGroup: boolean | null;
+  /**
+   * How many people are on the thread, counted from the stored membership —
+   * null until that membership has been read authoritatively. Null therefore
+   * means "not known yet", never "nobody": a thread only seeded from stored
+   * messages has rows but no count, because senders prove who has posted and
+   * say nothing about who else is listening.
+   */
   participantCount: number | null;
   counterpartyType: string | null;
   category: string | null;
@@ -193,12 +200,15 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
     opts: {
       conversationTitle?: string | null;
       isGroup?: boolean | null;
-      participantCount?: number | null;
     },
   ): Promise<void> {
     const now = new Date();
     // Null metadata means "the snapshot did not say" (an older plugin, an
     // untitled thread), so it never clears what an earlier snapshot learned.
+    //
+    // A snapshot's participant count is deliberately not stored: the count a
+    // reader sees is derived from `linkedin_thread_participants`, and taking a
+    // second, unverifiable copy from here is exactly what let the two disagree.
     await this.db
       .update(linkedinThreads)
       .set({
@@ -206,7 +216,6 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
         updatedAt: now,
         ...(opts.conversationTitle ? { conversationName: opts.conversationTitle } : {}),
         ...(opts.isGroup != null ? { isGroup: opts.isGroup } : {}),
-        ...(opts.participantCount != null ? { participantCount: opts.participantCount } : {}),
       })
       .where(sql`${linkedinThreads.threadId} = ${threadId}`);
   }
@@ -227,7 +236,10 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
         t.last_message_at AS lastMessageAt,
         t.unread AS unread,
         t.is_group AS isGroup,
-        t.participant_count AS participantCount,
+        CASE WHEN t.participants_last_read_at IS NULL THEN NULL ELSE (
+          SELECT COUNT(*) FROM linkedin_thread_participants tp
+          WHERE tp.thread_id = t.thread_id
+        ) END AS participantCount,
         t.counterparty_type AS counterpartyType,
         t.category AS category,
         (SELECT COUNT(*) FROM linkedin_messages m WHERE m.thread_id = t.thread_id)

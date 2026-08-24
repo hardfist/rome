@@ -98,7 +98,11 @@ export interface LinkedInSyncSink {
   getThreadCursors(threadIds: string[]): Promise<Map<string, LinkedInThreadCursor>>;
   /** Record a completed thread snapshot (advances `lastSyncedAt`). Metadata
    *  fields update only when known — null means "the snapshot did not say",
-   *  never "unset what an earlier snapshot learned". */
+   *  never "unset what an earlier snapshot learned".
+   *
+   *  The snapshot's participant count is deliberately absent: how many people
+   *  are on a thread follows from the membership `upsertThreadParticipants`
+   *  stores, and a scalar copied off the snapshot could only disagree with it. */
   markThreadSynced(
     threadId: string,
     opts: {
@@ -106,7 +110,6 @@ export interface LinkedInSyncSink {
       conversationTitle?: string | null;
       /** LinkedIn's authoritative group flag; null when the snapshot predates it. */
       isGroup?: boolean | null;
-      participantCount?: number | null;
     },
   ): Promise<void>;
   /** Mirrored history, newest last; `threadId: null` spans every thread. */

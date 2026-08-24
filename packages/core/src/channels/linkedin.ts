@@ -223,10 +223,12 @@ export class LinkedInInboxPoller {
         reactionCount: m.reactionCount,
       })),
     );
+    // The snapshot's own participant count is not persisted: the thread's
+    // membership read below is what the count is derived from, so storing the
+    // snapshot's number too would just be a second answer to the same question.
     await this.sink.markThreadSynced(row.threadId, {
       conversationTitle: messages.find((m) => m.conversationTitle)?.conversationTitle ?? null,
       isGroup: messages.find((m) => m.conversationIsGroup != null)?.conversationIsGroup ?? null,
-      participantCount: messages.find((m) => m.participantCount != null)?.participantCount ?? null,
     });
     await this.syncThreadParticipants(row, signal);
   }

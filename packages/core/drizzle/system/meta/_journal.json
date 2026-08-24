@@ -407,6 +407,13 @@
       "when": 1787563091626,
       "tag": "0058_wet_rockslide",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1787564333900,
+      "tag": "0059_cool_quasar",
+      "breakpoints": true
     }
   ]
 }

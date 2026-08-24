@@ -188,11 +188,12 @@ describe("LinkedInInboxPoller.pollOnce", () => {
     expect(sink.synced).toEqual(["t1"]);
     // The snapshot's group verdict reaches the watermark write: a 1:1 thread
     // records isGroup false, and its display-ladder conversation_name (the
-    // counterparty's name) never lands as a title.
+    // counterparty's name) never lands as a title. Its participant count does
+    // not: the count is derived from the membership the participant read
+    // stores, so a scalar copied from here could only disagree with it.
     expect(sink.syncedMeta.get("t1")).toEqual({
       conversationTitle: null,
       isGroup: false,
-      participantCount: 2,
     });
   });
 
