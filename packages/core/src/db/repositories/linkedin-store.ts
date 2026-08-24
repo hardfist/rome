@@ -53,6 +53,34 @@ export interface LinkedInMessageRow {
   reactionCount: number | null;
 }
 
+/** One thread's membership paired with the age of the read that produced it. */
+export interface LinkedInThreadParticipantSet {
+  participants: LinkedInParticipantRow[];
+  /** When the membership was last read from LinkedIn; null when never. */
+  lastReadAt: Date | null;
+}
+
+/** What one backfill pass touched. */
+export interface LinkedInParticipantBackfillResult {
+  /** Threads seeded — threads already read authoritatively are skipped. */
+  threads: number;
+  /** Distinct identities the seed proved. */
+  participants: number;
+}
+
+// The obfuscated member id inside a mirrored profile URL —
+// `https://www.linkedin.com/in/ACoAA…/`. A vanity handle (`/in/ada-lovelace`)
+// deliberately does not match: it is a public alias, not the member id these
+// tables key on, and storing one would break the correspondence with
+// `channel_mappings.channel_user_id`.
+const MEMBER_ID_IN_PROFILE_URL = /\/in\/(ACoAA[A-Za-z0-9_-]+)/;
+
+/** The bare LinkedIn member id inside a stored profile URL, or null. */
+export function linkedInMemberIdFromProfileUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return MEMBER_ID_IN_PROFILE_URL.exec(url)?.[1] ?? null;
+}
+
 function chunked<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
@@ -279,6 +307,11 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
    *
    * Identity rows outlive membership: a person dropped from one thread keeps
    * their row for the other threads they are in.
+   *
+   * The same transaction stamps the thread's `participants_last_read_at`. Every
+   * call here IS an authoritative read of the membership, and recording it
+   * atomically with the set makes it impossible to claim a read that did not
+   * land — or to land a set that then looks like it was never read.
    */
   async upsertThreadParticipants(
     threadId: string,
@@ -347,7 +380,116 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
               ),
         )
         .run();
+
+      // The membership is only as good as the read it came from, so the age of
+      // that read is stored with it. A no-op when the listing has not created
+      // the thread row yet — the next listing will.
+      tx.update(linkedinThreads)
+        .set({ participantsLastReadAt: now, updatedAt: now })
+        .where(eq(linkedinThreads.threadId, threadId))
+        .run();
     });
+  }
+
+  /**
+   * One thread's membership together with when it was read. Prefer this over
+   * {@link getThreadParticipants} wherever the answer's authority matters: a
+   * null `lastReadAt` means nothing has ever read this thread's membership, so
+   * the rows are at best a seed inferred from stored messages.
+   */
+  async getThreadParticipantSet(threadId: string): Promise<LinkedInThreadParticipantSet> {
+    const [participants, rows] = await Promise.all([
+      this.getThreadParticipants(threadId),
+      this.db
+        .select({ participantsLastReadAt: linkedinThreads.participantsLastReadAt })
+        .from(linkedinThreads)
+        .where(eq(linkedinThreads.threadId, threadId))
+        .limit(1),
+    ]);
+    return { participants, lastReadAt: rows[0]?.participantsLastReadAt ?? null };
+  }
+
+  /**
+   * Seed the participant tables from messages already mirrored. Every sender
+   * the mirror recorded carries their member id inside
+   * `linkedin_messages.sender_profile_url`, so an inbox that has been polled
+   * for a while already knows most of its participants without a new crawl.
+   *
+   * Two properties keep the seed honest:
+   *   - it is additive (insert-or-ignore, never a delete), because senders
+   *     prove presence but their absence proves nothing; and
+   *   - it never stamps `participants_last_read_at`, and skips any thread that
+   *     already carries one. A real read is authoritative and must not be
+   *     re-polluted by a member who has since left but whose messages remain.
+   */
+  async backfillParticipantsFromMessages(): Promise<LinkedInParticipantBackfillResult> {
+    const now = new Date();
+    // Newest message last, so a later message's facts win for a given sender.
+    const rows = (await this.db.all(sql`
+      SELECT
+        m.thread_id AS threadId,
+        m.sender_profile_url AS senderProfileUrl,
+        m.sender_name AS senderName,
+        m.sender_headline AS senderHeadline,
+        m.sender_type AS senderType,
+        m.sender_is_self AS senderIsSelf
+      FROM linkedin_messages m
+      JOIN linkedin_threads t ON t.thread_id = m.thread_id
+      WHERE t.participants_last_read_at IS NULL
+        AND m.sender_profile_url IS NOT NULL
+      ORDER BY coalesce(m.sent_at, m.created_at) ASC, m.rowid ASC
+    `)) as Array<Record<string, unknown>>;
+
+    const identities = new Map<string, LinkedInParticipantInput>();
+    const memberships = new Map<string, { threadId: string; participantId: string }>();
+    for (const row of rows) {
+      const participantId = linkedInMemberIdFromProfileUrl(row.senderProfileUrl as string | null);
+      if (!participantId) continue;
+      const threadId = String(row.threadId);
+      identities.set(participantId, {
+        participantId,
+        name: (row.senderName as string | null) ?? null,
+        headline: (row.senderHeadline as string | null) ?? null,
+        type: (row.senderType as string | null) ?? null,
+        isSelf: Boolean(row.senderIsSelf),
+      });
+      memberships.set(`${threadId}\u0000${participantId}`, { threadId, participantId });
+    }
+    if (memberships.size === 0) return { threads: 0, participants: 0 };
+
+    await this.db.transaction((tx) => {
+      for (const chunk of chunked([...identities.values()], UPSERT_CHUNK)) {
+        tx.insert(linkedinParticipants)
+          .values(
+            chunk.map((p) => ({
+              participantId: p.participantId,
+              name: p.name ?? null,
+              headline: p.headline ?? null,
+              type: p.type ?? null,
+              isSelf: p.isSelf,
+              firstSyncedAt: now,
+              updatedAt: now,
+            })),
+          )
+          // A sender row is weaker evidence than a participant read, so it only
+          // fills gaps: an existing fact — including `is_self`, which a real
+          // read answers for the viewer — is left exactly as it was.
+          .onConflictDoNothing()
+          .run();
+      }
+
+      for (const chunk of chunked([...memberships.values()], UPSERT_CHUNK)) {
+        tx.insert(linkedinThreadParticipants)
+          .values(chunk.map((m) => ({ ...m, firstSyncedAt: now })))
+          .onConflictDoNothing()
+          .run();
+      }
+    });
+
+    return {
+      threads: new Set([...memberships.values()].map((m) => m.threadId)).size,
+      participants: identities.size,
+    };
   }
 
   /** One thread's participants with their person-level facts, by member id. */

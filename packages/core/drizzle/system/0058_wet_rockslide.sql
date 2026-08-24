@@ -1,0 +1,1 @@
+ALTER TABLE `linkedin_threads` ADD `participants_last_read_at` integer;

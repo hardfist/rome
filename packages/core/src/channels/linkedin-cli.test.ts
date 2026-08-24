@@ -4,8 +4,10 @@ import {
   OpencliCommandError,
   parseInbox,
   parseSafeSend,
+  parseThreadParticipants,
   parseThreadSnapshot,
   parseWhoami,
+  readLinkedInThreadParticipants,
   safeSendLinkedInReply,
   type OpencliResult,
 } from "./linkedin-cli.js";
@@ -259,5 +261,137 @@ describe("safeSendLinkedInReply", () => {
         ),
       ),
     ).toThrow(OpencliCommandError);
+  });
+});
+
+describe("parseThreadParticipants", () => {
+  const row = (overrides: Record<string, unknown> = {}) => ({
+    thread_url: "https://www.linkedin.com/messaging/thread/2-abc==/",
+    thread_id: "2-abc==",
+    participant_index: 1,
+    participant_count: 2,
+    participant_id: "ACoAAAda0001",
+    name: "Ada Lovelace",
+    headline: "Engineer",
+    type: "member",
+    is_self: false,
+    profile_url: "https://www.linkedin.com/in/ACoAAAda0001/",
+    ...overrides,
+  });
+
+  it("returns one record per participant, member id first", () => {
+    const participants = parseThreadParticipants(
+      ok(
+        JSON.stringify([
+          row(),
+          row({
+            participant_index: 2,
+            participant_id: "ACoAASelf0003",
+            name: "Jane Doe",
+            headline: "",
+            is_self: true,
+          }),
+        ]),
+      ),
+    );
+
+    expect(participants).toEqual([
+      {
+        threadId: "2-abc==",
+        participantId: "ACoAAAda0001",
+        name: "Ada Lovelace",
+        headline: "Engineer",
+        type: "member",
+        isSelf: false,
+        profileUrl: "https://www.linkedin.com/in/ACoAAAda0001/",
+      },
+      {
+        threadId: "2-abc==",
+        participantId: "ACoAASelf0003",
+        name: "Jane Doe",
+        // The plugin writes "" for a field it could not read; the mirror stores
+        // "not known" as null so a later read can still fill it in.
+        headline: null,
+        type: "member",
+        isSelf: true,
+        profileUrl: "https://www.linkedin.com/in/ACoAAAda0001/",
+      },
+    ]);
+  });
+
+  it("keeps a participant who has sent no message in the thread", () => {
+    // The conversation payload names everyone; a lurker only ever appears here.
+    const participants = parseThreadParticipants(
+      ok(JSON.stringify([row(), row({ participant_index: 2, participant_id: "ACoAALurk0002" })])),
+    );
+    expect(participants.map((p) => p.participantId)).toEqual(["ACoAAAda0001", "ACoAALurk0002"]);
+  });
+
+  it("drops rows with no member id rather than storing a blank identity", () => {
+    const participants = parseThreadParticipants(
+      ok(JSON.stringify([row(), row({ participant_index: 2, participant_id: "" })])),
+    );
+    expect(participants.map((p) => p.participantId)).toEqual(["ACoAAAda0001"]);
+  });
+
+  it("fails closed on an auth wall, matching thread-snapshot", () => {
+    expect(() =>
+      parseThreadParticipants({
+        code: 1,
+        stdout: "",
+        stderr: "AuthRequiredError: authwall — sign in to LinkedIn",
+      }),
+    ).toThrow(OpencliAuthError);
+  });
+
+  it("fails on an unexpected output shape", () => {
+    expect(() => parseThreadParticipants(ok(JSON.stringify([{ name: "Ada" }])))).toThrow(
+      OpencliCommandError,
+    );
+  });
+
+  it("fails when the thread reports no participants at all", () => {
+    // An empty read must never reach the store: the store treats an empty set
+    // as "everyone left" and would wipe the thread's membership.
+    expect(() => parseThreadParticipants(ok(JSON.stringify([])))).toThrow(OpencliCommandError);
+  });
+});
+
+describe("readLinkedInThreadParticipants", () => {
+  it("invokes the thread-participants command for the requested thread", async () => {
+    const run = vi.fn(async () =>
+      ok(
+        JSON.stringify([
+          {
+            thread_url: "https://www.linkedin.com/messaging/thread/2-abc==/",
+            thread_id: "2-abc==",
+            participant_index: 1,
+            participant_count: 1,
+            participant_id: "ACoAAAda0001",
+            name: "Ada Lovelace",
+            headline: "Engineer",
+            type: "member",
+            is_self: false,
+            profile_url: "https://www.linkedin.com/in/ACoAAAda0001/",
+          },
+        ]),
+      ),
+    );
+
+    const participants = await readLinkedInThreadParticipants(
+      { threadUrl: "https://www.linkedin.com/messaging/thread/2-abc==/" },
+      run,
+    );
+
+    expect(run).toHaveBeenCalledWith(
+      [
+        "linkedin",
+        "thread-participants",
+        "--thread-url",
+        "https://www.linkedin.com/messaging/thread/2-abc==/",
+      ],
+      {},
+    );
+    expect(participants.map((p) => p.participantId)).toEqual(["ACoAAAda0001"]);
   });
 });

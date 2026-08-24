@@ -113,10 +113,19 @@ export interface LinkedInSyncSink {
   fetchHistory?(threadId: string | null, since: Date): Promise<LinkedInHistoryMessage[]>;
   /**
    * Replace a thread's membership with exactly `participants` (an empty array
-   * empties the thread). Optional: no poller writes participants yet.
+   * empties the thread) and record that the membership was read just now.
+   *
+   * Optional, and the poller treats it as a capability probe: a sink that
+   * cannot store membership is never made to pay for the crawl that produces
+   * it.
    */
   upsertThreadParticipants?(
     threadId: string,
     participants: LinkedInParticipantInput[],
   ): Promise<void>;
+  /**
+   * Seed participants from messages the sink already holds — no opencli call.
+   * The poller runs this once per start, before it crawls anything.
+   */
+  backfillParticipantsFromMessages?(): Promise<unknown>;
 }

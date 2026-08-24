@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
-import { LinkedInStoreRepository } from "./linkedin-store.js";
+import { LinkedInStoreRepository, linkedInMemberIdFromProfileUrl } from "./linkedin-store.js";
 
 describe("LinkedInStoreRepository", () => {
   let testDb: TestDb;
@@ -266,6 +266,13 @@ describe("LinkedInStoreRepository", () => {
       expect(byName.get("idx_linkedin_thread_participants_participant")).toBe("index");
     });
 
+    it("the migrations add the per-thread membership read timestamp", () => {
+      const columns = testDb.db.all(
+        sql`SELECT name FROM pragma_table_info('linkedin_threads')`,
+      ) as Array<{ name: string }>;
+      expect(columns.map((c) => c.name)).toContain("participants_last_read_at");
+    });
+
     it("upserting the same participant set twice leaves one row per participant", async () => {
       await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
       await repo.upsertThreadParticipants("t1", [ada, grace, self]);
@@ -407,5 +414,218 @@ describe("LinkedInStoreRepository", () => {
       ]);
       expect(await repo.getParticipantThreadIds(ada.participantId)).toEqual(["t1"]);
     });
+
+    // These tables are a cache of a pull-only mirror, so a read of them has to
+    // say when it was taken. `getThreadParticipantSet` pairs the membership
+    // with that timestamp; a null one means "never authoritatively read".
+    describe("membership freshness", () => {
+      it("a thread that has never been read reports a null last-read time", async () => {
+        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+
+        const set = await repo.getThreadParticipantSet("t1");
+        expect(set.participants).toEqual([]);
+        expect(set.lastReadAt).toBeNull();
+      });
+
+      it("replacing a thread's participants records when the membership was read", async () => {
+        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+        const before = Date.now();
+        await repo.upsertThreadParticipants("t1", [ada, self]);
+        const after = Date.now();
+
+        const set = await repo.getThreadParticipantSet("t1");
+        expect(set.participants.map((p) => p.participantId)).toEqual([
+          ada.participantId,
+          self.participantId,
+        ]);
+        const readAt = set.lastReadAt?.getTime() ?? 0;
+        // Second-resolution storage: floor the window so a read taken at
+        // x.9s and stored as x.0s still lands inside it.
+        expect(readAt).toBeGreaterThanOrEqual(Math.floor(before / 1000) * 1000);
+        expect(readAt).toBeLessThanOrEqual(after);
+      });
+
+      it("a later read advances the last-read time", async () => {
+        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+        await repo.upsertThreadParticipants("t1", [ada]);
+        // Backdate the first read so the second is unambiguously newer than it.
+        testDb.db.run(
+          sql`UPDATE linkedin_threads SET participants_last_read_at = 1000 WHERE thread_id = 't1'`,
+        );
+
+        await repo.upsertThreadParticipants("t1", [ada, grace]);
+
+        const set = await repo.getThreadParticipantSet("t1");
+        expect(set.lastReadAt?.getTime()).toBeGreaterThan(1000 * 1000);
+      });
+
+      it("a re-read whose membership changed leaves the stored set matching it", async () => {
+        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+        await repo.upsertThreadParticipants("t1", [ada, grace, self]);
+        // Grace left, a new member joined.
+        await repo.upsertThreadParticipants("t1", [
+          ada,
+          self,
+          { ...grace, participantId: "ACoAANew00004", name: "New Person" },
+        ]);
+
+        const set = await repo.getThreadParticipantSet("t1");
+        expect(set.participants.map((p) => p.participantId).sort()).toEqual([
+          ada.participantId,
+          "ACoAANew00004",
+          self.participantId,
+        ]);
+        expect(set.lastReadAt).not.toBeNull();
+      });
+    });
+
+    // Every sender the mirror already stored carries its member id inside
+    // `linkedin_messages.sender_profile_url`, so the tables can be seeded from
+    // data on disk rather than a fresh crawl.
+    describe("backfill from stored messages", () => {
+      const message = (
+        threadId: string,
+        messageId: string,
+        overrides: Record<string, unknown> = {},
+      ) => ({
+        messageId,
+        threadId,
+        sentAt: new Date("2026-08-19T19:00:00Z"),
+        senderName: "Ada Lovelace",
+        senderProfileUrl: "https://www.linkedin.com/in/ACoAAAda0001/",
+        senderHeadline: "Engineer",
+        senderType: "member",
+        senderIsSelf: false,
+        text: "hi",
+        subject: null,
+        reactionCount: null,
+        ...overrides,
+      });
+
+      it("seeds participants and membership from stored messages", async () => {
+        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+        await repo.upsertMessages([
+          message("t1", "m1"),
+          message("t1", "m2", {
+            senderName: "Me Myself",
+            senderProfileUrl: "https://www.linkedin.com/in/ACoAASelf0003/",
+            senderIsSelf: true,
+            senderHeadline: null,
+          }),
+        ]);
+
+        const result = await repo.backfillParticipantsFromMessages();
+        expect(result.threads).toBe(1);
+        expect(result.participants).toBe(2);
+
+        const set = await repo.getThreadParticipantSet("t1");
+        expect(set.participants.map((p) => p.participantId)).toEqual([
+          "ACoAAAda0001",
+          "ACoAASelf0003",
+        ]);
+        const seeded = set.participants.find((p) => p.participantId === "ACoAAAda0001");
+        expect(seeded?.name).toBe("Ada Lovelace");
+        expect(seeded?.headline).toBe("Engineer");
+        expect(seeded?.type).toBe("member");
+        expect(set.participants.find((p) => p.participantId === "ACoAASelf0003")?.isSelf).toBe(
+          true,
+        );
+      });
+
+      it("a seeded thread is not marked as read — the seed is not an authoritative read", async () => {
+        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+        await repo.upsertMessages([message("t1", "m1")]);
+
+        await repo.backfillParticipantsFromMessages();
+
+        // Senders alone cannot prove membership: a lurker is invisible here, so
+        // the set must not claim the authority of a real participant read.
+        expect((await repo.getThreadParticipantSet("t1")).lastReadAt).toBeNull();
+      });
+
+      it("skips a thread whose membership has already been read", async () => {
+        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+        // The authoritative read says Grace is the only member; Ada has since
+        // left, even though her messages are still mirrored.
+        await repo.upsertThreadParticipants("t1", [grace]);
+        await repo.upsertMessages([message("t1", "m1")]);
+
+        const result = await repo.backfillParticipantsFromMessages();
+        expect(result.threads).toBe(0);
+
+        expect((await repo.getThreadParticipants("t1")).map((p) => p.participantId)).toEqual([
+          grace.participantId,
+        ]);
+      });
+
+      it("is idempotent and never duplicates an identity across threads", async () => {
+        await repo.upsertThreads([
+          thread("t1", new Date("2026-08-19T20:00:00Z")),
+          thread("t2", new Date("2026-08-18T20:00:00Z")),
+        ]);
+        await repo.upsertMessages([message("t1", "m1"), message("t2", "m2")]);
+
+        await repo.backfillParticipantsFromMessages();
+        await repo.backfillParticipantsFromMessages();
+
+        const identities = testDb.db.all(
+          sql`SELECT participant_id FROM linkedin_participants`,
+        ) as Array<{ participant_id: string }>;
+        expect(identities.map((r) => r.participant_id)).toEqual(["ACoAAAda0001"]);
+        expect(await repo.getParticipantThreadIds("ACoAAAda0001")).toEqual(["t1", "t2"]);
+      });
+
+      it("keeps facts an authoritative read already learned", async () => {
+        await repo.upsertThreads([
+          thread("t1", new Date("2026-08-19T20:00:00Z")),
+          thread("t2", new Date("2026-08-18T20:00:00Z")),
+        ]);
+        // t1 was read properly and learned Ada's headline; t2 only has her
+        // messages, which report a stale headline.
+        await repo.upsertThreadParticipants("t1", [{ ...ada, headline: "Countess of Lovelace" }]);
+        await repo.upsertMessages([message("t2", "m1", { senderHeadline: "Engineer" })]);
+
+        await repo.backfillParticipantsFromMessages();
+
+        const t2 = await repo.getThreadParticipants("t2");
+        expect(t2[0]?.headline).toBe("Countess of Lovelace");
+      });
+
+      it("ignores senders whose profile URL carries no member id", async () => {
+        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+        await repo.upsertMessages([
+          // A vanity URL is a public handle, not the member id the participant
+          // tables key on, so it must not become a participant_id.
+          message("t1", "m1", { senderProfileUrl: "https://www.linkedin.com/in/ada-lovelace/" }),
+          message("t1", "m2", { senderProfileUrl: null }),
+          message("t1", "m3"),
+        ]);
+
+        const result = await repo.backfillParticipantsFromMessages();
+        expect(result.participants).toBe(1);
+        expect((await repo.getThreadParticipants("t1")).map((p) => p.participantId)).toEqual([
+          "ACoAAAda0001",
+        ]);
+      });
+    });
+  });
+});
+
+describe("linkedInMemberIdFromProfileUrl", () => {
+  it("extracts the member id from the stored profile URL forms", () => {
+    expect(linkedInMemberIdFromProfileUrl("https://www.linkedin.com/in/ACoAAAda0001/")).toBe(
+      "ACoAAAda0001",
+    );
+    expect(
+      linkedInMemberIdFromProfileUrl("https://www.linkedin.com/in/ACoAAAda0001?trk=messaging"),
+    ).toBe("ACoAAAda0001");
+    expect(linkedInMemberIdFromProfileUrl("/in/ACoAAAda0001/")).toBe("ACoAAAda0001");
+  });
+
+  it("returns null for anything that is not a member id", () => {
+    expect(linkedInMemberIdFromProfileUrl("https://www.linkedin.com/in/ada-lovelace/")).toBeNull();
+    expect(linkedInMemberIdFromProfileUrl("https://www.linkedin.com/company/acme/")).toBeNull();
+    expect(linkedInMemberIdFromProfileUrl(null)).toBeNull();
+    expect(linkedInMemberIdFromProfileUrl("")).toBeNull();
   });
 });

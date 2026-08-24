@@ -199,6 +199,12 @@ export const linkedinThreads = sqliteTable("linkedin_threads", {
   // LinkedIn inbox categories, e.g. 'INBOX,PRIMARY_INBOX'.
   category: text("category"),
   lastSyncedAt: integer("last_synced_at", { mode: "timestamp" }),
+  // When this thread's membership was last read from LinkedIn. The participant
+  // tables are a cache of a pull-only mirror, so a reader has to be able to
+  // tell how old the set is. Null means the membership has never been read
+  // authoritatively — including a thread seeded from stored messages, where
+  // senders alone cannot prove membership and a lurker is invisible.
+  participantsLastReadAt: integer("participants_last_read_at", { mode: "timestamp" }),
   firstSyncedAt: integer("first_synced_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
