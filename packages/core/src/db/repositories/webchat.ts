@@ -859,30 +859,37 @@ export class WebChatRepository {
     createdAt?: Date;
   }): Promise<{ inserted: boolean }> {
     const createdAt = input.createdAt ?? new Date();
-    const rows = await this.db
-      .insert(romeAgentMessages)
-      .values({
-        id: conversationPlatformMessageId(input.sessionId, input.platformMessageId),
-        sessionId: input.sessionId,
-        turnId: null,
-        role: input.role,
-        content: input.content,
-        platformMessageId: input.platformMessageId,
-        senderId: input.senderId ?? null,
-        senderName: input.senderName ?? null,
-        replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
-        contextInjectedTurnId: null,
-        createdAt,
-      })
-      .onConflictDoNothing()
-      .returning({ id: romeAgentMessages.id });
-    if (rows.length > 0) {
-      await this.db
-        .update(romeSessions)
+    // The row and the session activity it advances are one fact. Splitting them
+    // across two writes lets a failure in between store the message against
+    // stale activity, which sorts the conversation by the wrong timestamp.
+    return this.db.transaction((tx) => {
+      const rows = tx
+        .insert(romeAgentMessages)
+        .values({
+          id: conversationPlatformMessageId(input.sessionId, input.platformMessageId),
+          sessionId: input.sessionId,
+          turnId: null,
+          role: input.role,
+          content: input.content,
+          platformMessageId: input.platformMessageId,
+          senderId: input.senderId ?? null,
+          senderName: input.senderName ?? null,
+          replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
+          contextInjectedTurnId: null,
+          createdAt,
+        })
+        .onConflictDoNothing()
+        .returning({ id: romeAgentMessages.id })
+        .all();
+      // A platform message id we already stored is a redelivery, not new
+      // activity — leave the session's timestamp where it is.
+      if (rows.length === 0) return { inserted: false };
+      tx.update(romeSessions)
         .set(advanceSessionActivitySet(createdAt))
-        .where(eq(romeSessions.id, input.sessionId));
-    }
-    return { inserted: rows.length > 0 };
+        .where(eq(romeSessions.id, input.sessionId))
+        .run();
+      return { inserted: true };
+    });
   }
 
   async promoteConversationMessageToUser(
