@@ -68,7 +68,10 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
   returns every field visible to the signed-in account, including websites, email addresses,
   phone numbers, addresses, birthdays, connected dates, and other displayed contact fields.
 - `opencli linkedin thread-snapshot --thread-url URL [--limit N]` — returns the latest messages
-  from one exact LinkedIn thread with sender, timestamp, profile, and reaction metadata.
+  from one exact LinkedIn thread with sender, timestamp, profile, participant id, and reaction
+  metadata.
+- `opencli linkedin thread-participants --thread-url URL` — returns one row per participant of an
+  exact LinkedIn thread, including participants who have never sent a message.
 - `opencli craigslist locations [QUERY]` — discovers site codes from Craigslist's worldwide
   directory; `categories --site SITE` lists the category codes available at that site.
 - `opencli craigslist search [QUERY] --site SITE [options]` — searches public listings across
@@ -166,6 +169,10 @@ The command returns one row per message in chronological order. `--limit` select
 100 messages and defaults to 20. Each row includes the sender, sender profile, self/other direction,
 delivery time, stable message ID, subject, and reaction count.
 
+`sender_participant_id` carries LinkedIn's obfuscated member id for the sender — the bare `ACoAA…`
+segment that also sits inside `sender_profile_url` — so a caller can use it as a stable
+`channel_user_id`. It is empty when the sender is not among the participants the response resolved.
+
 `conversation_name` is a display ladder — the conversation title when LinkedIn has one, else the
 joined counterparty names — so a 1:1 thread carries the counterparty's name there and the field is
 never a group signal. Group-ness rides separately: `conversation_is_group` reads the API's own
@@ -177,6 +184,27 @@ mislabeling the conversation as 1:1.
 ```bash
 opencli linkedin thread-snapshot --thread-url "https://www.linkedin.com/messaging/thread/2-.../"
 opencli linkedin thread-snapshot --thread-url "https://www.linkedin.com/messaging/thread/2-.../" --limit 50 -f json
+```
+
+### LinkedIn Thread Participants
+
+`thread-participants` answers "who is on this thread" directly. It shares `thread-snapshot`'s read
+path — same navigation, same thread-identity check, same two normalized messaging endpoints — and
+returns one row per participant instead of one row per message.
+
+The conversation response is the authoritative source, because its participant reference list names
+everyone on the thread including members who have never sent a message. When that metadata is
+unavailable, the command falls back to the participants the message response proves and reports
+those rather than failing. A 1:1 thread returns both the account owner (`is_self`) and the
+counterparty.
+
+Each row carries `participant_id`: LinkedIn's obfuscated member id, emitted bare so it can be used
+as a `channel_user_id`. Like `thread-snapshot`, the command fails closed on an authentication wall
+and when the browser did not land on the exact requested thread.
+
+```bash
+opencli linkedin thread-participants --thread-url "https://www.linkedin.com/messaging/thread/2-.../"
+opencli linkedin thread-participants --thread-url "https://www.linkedin.com/messaging/thread/2-.../" -f json
 ```
 
 ### Craigslist

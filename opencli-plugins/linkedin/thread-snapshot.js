@@ -1,122 +1,30 @@
 // Overrides clis/linkedin/thread-snapshot.js from @yunfanye/opencli 1.8.7.
 // Keep the API URL discovery in sync when upstream changes LinkedIn messaging queries.
-import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+import { ArgumentError, CommandExecutionError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
 import {
+  LINKEDIN_DOMAIN,
+  fetchFirstConversationPayload,
+  fetchThreadPayload,
+  openThread,
+  readThreadCsrf,
+  requireCurrentThread,
+  requireThreadUrl,
+  waitForThreadProbe,
+} from "./thread-read.mjs";
+import {
   DEFAULT_THREAD_MESSAGE_LIMIT,
-  LINKEDIN_MESSAGING_URL,
   MAX_THREAD_MESSAGE_LIMIT,
-  canonicalizeLinkedInThreadUrl,
   countThreadMessagesInPayload,
   discoverOlderThreadApi,
-  fetchLinkedInConversationApi,
-  fetchLinkedInThreadApi,
-  inspectLinkedInThreadPage,
-  isThreadConversationApiUrl,
-  isThreadMessageApiUrl,
   linkedInThreadId,
   normalizeThreadMessageLimit,
   parseThreadMessagePayloads,
   unwrapThreadBrowserResult,
-  validateThreadConversationPayload,
 } from "./thread-snapshot-helpers.mjs";
 
-const LINKEDIN_DOMAIN = "www.linkedin.com";
+const COMMAND = "thread-snapshot";
 const MAX_API_DISCOVERY_ROUNDS = Math.ceil(MAX_THREAD_MESSAGE_LIMIT / 20) + 3;
-
-function requireThreadUrl(value) {
-  const threadUrl = canonicalizeLinkedInThreadUrl(value);
-  if (!threadUrl) {
-    throw new ArgumentError(
-      "--thread-url must be an exact https://www.linkedin.com/messaging/thread/<id>/ URL",
-    );
-  }
-  return threadUrl;
-}
-
-async function readThreadProbe(page, threadId) {
-  return unwrapThreadBrowserResult(await page.evaluate(inspectLinkedInThreadPage, threadId));
-}
-
-async function waitForThreadProbe(page, threadId) {
-  let probe = null;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    probe = await readThreadProbe(page, threadId);
-    if (probe?.auth_wall || probe?.initial_url) return probe;
-    await page.wait(1);
-  }
-  return probe;
-}
-
-function requireCurrentThread(probe, expectedUrl) {
-  if (probe?.auth_wall) {
-    throw new AuthRequiredError(
-      LINKEDIN_DOMAIN,
-      "LinkedIn thread-snapshot requires an active signed-in LinkedIn browser session.",
-    );
-  }
-  const actualUrl = canonicalizeLinkedInThreadUrl(probe?.current_url || "");
-  if (!actualUrl || actualUrl !== expectedUrl) {
-    throw new CommandExecutionError(
-      "LinkedIn thread-snapshot blocked: thread_url_mismatch",
-      `Expected ${expectedUrl}; actual ${actualUrl || probe?.current_url || "not_available"}`,
-    );
-  }
-  return actualUrl;
-}
-
-async function fetchThreadPayload(page, apiUrl, csrf, threadId) {
-  if (!isThreadMessageApiUrl(apiUrl, threadId)) {
-    throw new CommandExecutionError(
-      "LinkedIn thread-snapshot blocked an API response for a different thread",
-    );
-  }
-  const response = unwrapThreadBrowserResult(
-    await page.evaluate(fetchLinkedInThreadApi, apiUrl, csrf),
-  );
-  if (response?.auth_required) {
-    throw new AuthRequiredError(
-      LINKEDIN_DOMAIN,
-      `LinkedIn messaging API authentication failed: ${response.error || "access denied"}`,
-    );
-  }
-  if (!response?.json || response.error) {
-    throw new CommandExecutionError(
-      `LinkedIn messaging API returned an unexpected response: ${response?.error || "no data"}`,
-    );
-  }
-  if (!Array.isArray(response.json.included)) {
-    throw new CommandExecutionError(
-      "LinkedIn messaging API returned a malformed normalized payload",
-    );
-  }
-  return response.json;
-}
-
-async function fetchConversationPayload(page, apiUrl, csrf, threadId) {
-  if (!isThreadConversationApiUrl(apiUrl)) {
-    throw new CommandExecutionError("LinkedIn thread-snapshot blocked an unsafe conversation URL");
-  }
-  const response = unwrapThreadBrowserResult(
-    await page.evaluate(fetchLinkedInConversationApi, apiUrl, csrf, threadId),
-  );
-  if (response?.auth_required) {
-    throw new AuthRequiredError(
-      LINKEDIN_DOMAIN,
-      `LinkedIn messaging API authentication failed: ${response.error || "access denied"}`,
-    );
-  }
-  if (!response?.json || response.error) {
-    throw new CommandExecutionError(
-      `LinkedIn conversation API returned an unexpected response: ${response?.error || "no data"}`,
-    );
-  }
-  try {
-    return validateThreadConversationPayload(response.json, threadId);
-  } catch (error) {
-    throw new CommandExecutionError(error instanceof Error ? error.message : String(error));
-  }
-}
 
 cli({
   site: "linkedin",
@@ -153,6 +61,7 @@ cli({
     "returned_message_count",
     "message_id",
     "sent_at",
+    "sender_participant_id",
     "sender_name",
     "sender_type",
     "sender_profile_url",
@@ -177,49 +86,34 @@ cli({
       throw new ArgumentError(error instanceof Error ? error.message : String(error));
     }
 
-    await page.goto(LINKEDIN_MESSAGING_URL);
-    await page.wait(4);
-    await page.goto(threadUrl);
-    await page.wait(4);
+    await openThread(page, threadUrl);
 
     const probe = await waitForThreadProbe(page, threadId);
-    requireCurrentThread(probe, threadUrl);
+    requireCurrentThread(probe, threadUrl, COMMAND);
     if (!probe?.initial_url) {
       throw new CommandExecutionError(
         "LinkedIn did not issue a message request for the requested thread.",
       );
     }
 
-    const cookies = await page.getCookies({ url: "https://www.linkedin.com" });
-    const jsession = cookies.find((cookie) => cookie.name === "JSESSIONID")?.value;
-    if (!jsession) {
-      throw new AuthRequiredError(
-        LINKEDIN_DOMAIN,
-        "LinkedIn JSESSIONID cookie not found. Please sign in to LinkedIn.",
-      );
-    }
-    const csrf = jsession.replace(/^"|"$/g, "");
+    const csrf = await readThreadCsrf(page);
     const payloads = [];
     const fetchedUrls = new Set();
 
-    for (const apiUrl of Array.isArray(probe.conversation_urls) ? probe.conversation_urls : []) {
-      try {
-        const conversationPayload = await fetchConversationPayload(page, apiUrl, csrf, threadId);
-        if (conversationPayload) {
-          payloads.push(conversationPayload);
-          break;
-        }
-      } catch (error) {
-        if (error instanceof AuthRequiredError) throw error;
-        if (!(error instanceof CommandExecutionError)) throw error;
-        // Performance entries can be stale. Optional metadata must not block message retrieval.
-      }
-    }
+    // Optional metadata must not block message retrieval.
+    const conversationPayload = await fetchFirstConversationPayload(
+      page,
+      probe,
+      csrf,
+      threadId,
+      COMMAND,
+    );
+    if (conversationPayload) payloads.push(conversationPayload);
 
     const consume = async (apiUrl) => {
       if (!apiUrl || fetchedUrls.has(apiUrl)) return { added: 0, fetched: false };
       fetchedUrls.add(apiUrl);
-      const payload = await fetchThreadPayload(page, apiUrl, csrf, threadId);
+      const payload = await fetchThreadPayload(page, apiUrl, csrf, threadId, COMMAND);
       payloads.push(payload);
       return { added: countThreadMessagesInPayload(payload, threadId), fetched: true };
     };

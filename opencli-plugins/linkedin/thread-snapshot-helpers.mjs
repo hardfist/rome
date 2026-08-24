@@ -3,6 +3,7 @@ export const DEFAULT_THREAD_MESSAGE_LIMIT = 20;
 export const MAX_THREAD_MESSAGE_LIMIT = 100;
 
 const THREAD_PATH_RE = /^\/messaging\/thread\/([^/]+)\/?$/i;
+const PARTICIPANT_URN_PREFIX = "urn:li:msg_messagingParticipant:";
 const MESSAGE_QUERY_RE = /[?&]queryId=messengerMessages\.[a-f0-9]+/i;
 const CONVERSATION_QUERY_RE = /[?&]queryId=messengerConversations\.[a-f0-9]+/i;
 
@@ -57,6 +58,24 @@ export function linkedInThreadId(value) {
   const canonical = canonicalizeLinkedInThreadUrl(value);
   if (!canonical) return "";
   return new URL(canonical).pathname.match(THREAD_PATH_RE)?.[1] || "";
+}
+
+// A messaging participant urn nests the profile urn:
+// `urn:li:msg_messagingParticipant:urn:li:fsd_profile:ACoAA…`. The trailing
+// segment is LinkedIn's obfuscated member id — the same `ACoAA…` that appears
+// inside `profile_url` — and it is emitted bare so a caller can use it as a
+// channel_user_id. Organization and agent participants nest their own urn the
+// same way, so the trailing segment is their id too.
+export function threadParticipantId(value) {
+  let raw = normalizeThreadText(value);
+  if (!raw) return "";
+  if (raw.startsWith(PARTICIPANT_URN_PREFIX)) {
+    raw = raw.slice(PARTICIPANT_URN_PREFIX.length).trim();
+  }
+  const decoded = decodeApiUrl(raw) || raw;
+  const segments = decoded.split(":").filter(Boolean);
+  const last = segments.length > 0 ? segments[segments.length - 1] : "";
+  return last.replace(/^\(+/, "").replace(/\)+$/, "").trim();
 }
 
 export function normalizeThreadMessageLimit(value) {
@@ -155,7 +174,17 @@ function attributedText(value) {
   return normalizeThreadText(value?.text);
 }
 
+// `participant` is the normalized entity whose `entityUrn` is also the key of
+// the participants map, so the identifier reaches the record without a second
+// lookup.
 function participantMetadata(participant) {
+  return {
+    participant_id: threadParticipantId(participant?.entityUrn),
+    ...participantTypeMetadata(participant),
+  };
+}
+
+function participantTypeMetadata(participant) {
   const type = participant?.participantType || {};
   if (type.member) {
     const member = type.member;
@@ -275,7 +304,10 @@ export function deriveConversationIsGroup(groupChat, completeParticipantRefs, co
   return null;
 }
 
-export function parseThreadMessagePayloads(payloads, { threadId, threadUrl, limit }) {
+// Both thread reads need the same view of a thread: every participant the
+// payloads mention, the conversation's own metadata, and the authoritative
+// participant-ref list when one arrived complete.
+function collectThreadEntities(payloads, threadId) {
   const entities = [];
   const completeParticipantRefCandidates = [];
   for (const payload of Array.isArray(payloads) ? payloads : []) {
@@ -327,6 +359,53 @@ export function parseThreadMessagePayloads(payloads, { threadId, threadUrl, limi
   const conversationParticipants = completeParticipantRefs
     ? completeParticipantRefs.map((ref) => participants.get(ref)).filter(Boolean)
     : [...participants.values()];
+  return {
+    entities,
+    participants,
+    conversationParticipants,
+    completeParticipantRefs,
+    conversationTitle,
+    conversationGroupChat,
+  };
+}
+
+export function parseThreadParticipantPayloads(payloads, { threadId, threadUrl }) {
+  const { conversationParticipants } = collectThreadEntities(payloads, threadId);
+  // A complete participant-ref list carries everyone on the thread, including
+  // members who never sent a message; message payloads alone only prove senders.
+  const rows = [];
+  const seen = new Set();
+  for (const participant of conversationParticipants) {
+    const participantId = participant?.participant_id || "";
+    if (!participantId || seen.has(participantId)) continue;
+    seen.add(participantId);
+    rows.push({
+      thread_url: threadUrl,
+      thread_id: threadId,
+      participant_id: participantId,
+      name: participant.name,
+      headline: participant.headline,
+      type: participant.type,
+      is_self: participant.is_self,
+      profile_url: participant.profile_url,
+    });
+  }
+  return rows.map((row, index) => ({
+    ...row,
+    participant_index: index + 1,
+    participant_count: rows.length,
+  }));
+}
+
+export function parseThreadMessagePayloads(payloads, { threadId, threadUrl, limit }) {
+  const {
+    entities,
+    participants,
+    conversationParticipants,
+    completeParticipantRefs,
+    conversationTitle,
+    conversationGroupChat,
+  } = collectThreadEntities(payloads, threadId);
   const counterpartyNames = [
     ...new Set(
       conversationParticipants
@@ -370,6 +449,7 @@ export function parseThreadMessagePayloads(payloads, { threadId, threadUrl, limi
       message_id: id,
       sent_at:
         Number.isFinite(deliveredAt) && deliveredAt > 0 ? new Date(deliveredAt).toISOString() : "",
+      sender_participant_id: sender.participant_id,
       sender_name: sender.name,
       sender_type: sender.type,
       sender_profile_url: sender.profile_url,
