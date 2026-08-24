@@ -1,9 +1,16 @@
-import { inArray, sql } from "drizzle-orm";
-import { linkedinMessages, linkedinThreads } from "../schema.js";
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import {
+  linkedinMessages,
+  linkedinParticipants,
+  linkedinThreadParticipants,
+  linkedinThreads,
+} from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 import type {
   LinkedInHistoryMessage,
   LinkedInMessageInput,
+  LinkedInParticipantInput,
+  LinkedInParticipantRow,
   LinkedInSyncSink,
   LinkedInThreadCursor,
   LinkedInThreadInput,
@@ -257,6 +264,117 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
         reactionCount: r.reactionCount == null ? null : Number(r.reactionCount),
       }))
       .reverse();
+  }
+
+  /**
+   * Replace a thread's participant set with exactly `participants`: identities
+   * are upserted into `linkedin_participants`, membership rows are added for
+   * everyone in the set, and members no longer in it are dropped. An empty
+   * array therefore empties the thread — callers must not pass one for a
+   * snapshot that merely failed to report a participant list.
+   *
+   * Identity rows outlive membership: a person dropped from one thread keeps
+   * their row for the other threads they are in.
+   */
+  async upsertThreadParticipants(
+    threadId: string,
+    participants: LinkedInParticipantInput[],
+  ): Promise<void> {
+    const now = new Date();
+    // Snapshots have been seen to repeat an id; keep the last entry per id so
+    // the insert never conflicts with itself inside one statement.
+    const unique = new Map(participants.map((p) => [p.participantId, p]));
+    const ids = [...unique.keys()];
+
+    for (const chunk of chunked([...unique.values()], UPSERT_CHUNK)) {
+      await this.db
+        .insert(linkedinParticipants)
+        .values(
+          chunk.map((p) => ({
+            participantId: p.participantId,
+            name: p.name ?? null,
+            headline: p.headline ?? null,
+            type: p.type ?? null,
+            isSelf: p.isSelf ?? false,
+            firstSyncedAt: now,
+            updatedAt: now,
+          })),
+        )
+        // coalesce(excluded, existing) for the same reason as threads: a
+        // snapshot that omits a field never wipes one an earlier snapshot
+        // learned. `is_self` is derived from the viewer, not the snapshot's
+        // completeness, so it always wins.
+        .onConflictDoUpdate({
+          target: linkedinParticipants.participantId,
+          set: {
+            name: sql`coalesce(excluded.name, name)`,
+            headline: sql`coalesce(excluded.headline, headline)`,
+            type: sql`coalesce(excluded.type, type)`,
+            isSelf: sql`excluded.is_self`,
+            updatedAt: sql`excluded.updated_at`,
+          },
+        });
+
+      await this.db
+        .insert(linkedinThreadParticipants)
+        .values(
+          chunk.map((p) => ({
+            threadId,
+            participantId: p.participantId,
+            firstSyncedAt: now,
+          })),
+        )
+        // Membership carries no mutable facts, so a re-snapshot is a no-op
+        // that preserves the original first-seen time.
+        .onConflictDoNothing();
+    }
+
+    // Drop whoever left the thread. Deleting by "not in the new set" rather
+    // than clearing first keeps `first_synced_at` intact for those who stayed.
+    await this.db
+      .delete(linkedinThreadParticipants)
+      .where(
+        ids.length === 0
+          ? eq(linkedinThreadParticipants.threadId, threadId)
+          : and(
+              eq(linkedinThreadParticipants.threadId, threadId),
+              notInArray(linkedinThreadParticipants.participantId, ids),
+            ),
+      );
+  }
+
+  /** One thread's participants with their person-level facts, by member id. */
+  async getThreadParticipants(threadId: string): Promise<LinkedInParticipantRow[]> {
+    const rows = (await this.db.all(sql`
+      SELECT
+        tp.participant_id AS participantId,
+        p.name AS name,
+        p.headline AS headline,
+        p.type AS type,
+        p.is_self AS isSelf
+      FROM linkedin_thread_participants tp
+      LEFT JOIN linkedin_participants p ON p.participant_id = tp.participant_id
+      WHERE tp.thread_id = ${threadId}
+      ORDER BY tp.participant_id ASC
+    `)) as Array<Record<string, unknown>>;
+
+    return rows.map((r) => ({
+      participantId: String(r.participantId),
+      name: (r.name as string | null) ?? null,
+      headline: (r.headline as string | null) ?? null,
+      type: (r.type as string | null) ?? null,
+      isSelf: Boolean(r.isSelf),
+    }));
+  }
+
+  /** The reverse lookup: every thread a participant belongs to. */
+  async getParticipantThreadIds(participantId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ threadId: linkedinThreadParticipants.threadId })
+      .from(linkedinThreadParticipants)
+      .where(eq(linkedinThreadParticipants.participantId, participantId))
+      .orderBy(linkedinThreadParticipants.threadId);
+    return rows.map((r) => r.threadId);
   }
 
   /**

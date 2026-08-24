@@ -37,6 +37,8 @@ export default defineConfig({
     "rome_sessions",
     "linkedin_threads",
     "linkedin_messages",
+    "linkedin_participants",
+    "linkedin_thread_participants",
   ],
   dbCredentials: {
     url:

@@ -39,6 +39,30 @@ export interface LinkedInMessageInput {
   reactionCount?: number | null;
 }
 
+/** One identity in a thread's participant list, per the thread snapshot. */
+export interface LinkedInParticipantInput {
+  /**
+   * LinkedIn member id, bare (`ACoAA…`) — not a urn or a profile URL — so it
+   * lines up with `channel_mappings.channel_user_id` for `channel: "linkedin"`.
+   */
+  participantId: string;
+  name?: string | null;
+  headline?: string | null;
+  /** `member` | `organization` | `agent` | `custom`. */
+  type?: string | null;
+  /** True for the account owner's own entry in the participant list. */
+  isSelf?: boolean;
+}
+
+/** One participant of a thread, person-level facts folded in. */
+export interface LinkedInParticipantRow {
+  participantId: string;
+  name: string | null;
+  headline: string | null;
+  type: string | null;
+  isSelf: boolean;
+}
+
 /** The per-thread sync watermark the poller compares inbox listings against. */
 export interface LinkedInThreadCursor {
   threadId: string;
@@ -81,4 +105,12 @@ export interface LinkedInSyncSink {
   ): Promise<void>;
   /** Mirrored history, newest last; `threadId: null` spans every thread. */
   fetchHistory?(threadId: string | null, since: Date): Promise<LinkedInHistoryMessage[]>;
+  /**
+   * Replace a thread's membership with exactly `participants` (an empty array
+   * empties the thread). Optional: no poller writes participants yet.
+   */
+  upsertThreadParticipants?(
+    threadId: string,
+    participants: LinkedInParticipantInput[],
+  ): Promise<void>;
 }

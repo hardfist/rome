@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { LinkedInStoreRepository } from "./linkedin-store.js";
 
@@ -222,5 +223,144 @@ describe("LinkedInStoreRepository", () => {
     const recentT1 = await repo.fetchHistory("t1", new Date("2026-08-15T00:00:00Z"));
     expect(recentT1.map((m) => m.messageId)).toEqual(["m-new"]);
     expect(recentT1[0].threadName).toBe("Ada Lovelace");
+  });
+
+  describe("thread participants", () => {
+    const ada = {
+      participantId: "ACoAAAda0001",
+      name: "Ada Lovelace",
+      headline: "Engineer",
+      type: "member",
+      isSelf: false,
+    };
+    const grace = {
+      participantId: "ACoAAGrace002",
+      name: "Grace Hopper",
+      headline: "Rear Admiral",
+      type: "member",
+      isSelf: false,
+    };
+    const self = {
+      participantId: "ACoAASelf0003",
+      name: "Me Myself",
+      headline: null,
+      type: "member",
+      isSelf: true,
+    };
+
+    // createTestDb applies the real migration folder, so reaching these tables
+    // at all proves the generated migration created them.
+    it("the migrations create both tables and the participant_id index", () => {
+      const objects = testDb.db.all(sql`
+        SELECT name, type FROM sqlite_master
+        WHERE name IN (
+          'linkedin_participants',
+          'linkedin_thread_participants',
+          'idx_linkedin_thread_participants_participant'
+        )
+      `) as Array<{ name: string; type: string }>;
+      const byName = new Map(objects.map((o) => [o.name, o.type]));
+
+      expect(byName.get("linkedin_participants")).toBe("table");
+      expect(byName.get("linkedin_thread_participants")).toBe("table");
+      expect(byName.get("idx_linkedin_thread_participants_participant")).toBe("index");
+    });
+
+    it("upserting the same participant set twice leaves one row per participant", async () => {
+      await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+      await repo.upsertThreadParticipants("t1", [ada, grace, self]);
+      await repo.upsertThreadParticipants("t1", [ada, grace, self]);
+
+      const participants = await repo.getThreadParticipants("t1");
+      expect(participants.map((p) => p.participantId)).toEqual([
+        ada.participantId,
+        grace.participantId,
+        self.participantId,
+      ]);
+
+      // Person-level facts are stored once, not once per thread.
+      const personRows = testDb.db.all(sql`
+        SELECT COUNT(*) AS c FROM linkedin_participants
+      `) as Array<{ c: number }>;
+      expect(Number(personRows[0].c)).toBe(3);
+    });
+
+    it("upserting a smaller set for a thread drops the members that are gone", async () => {
+      await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+      await repo.upsertThreadParticipants("t1", [ada, grace, self]);
+      await repo.upsertThreadParticipants("t1", [ada, self]);
+
+      const participants = await repo.getThreadParticipants("t1");
+      expect(participants.map((p) => p.participantId)).toEqual([
+        ada.participantId,
+        self.participantId,
+      ]);
+      // Membership went away; the person identity is kept for other threads.
+      const personRows = testDb.db.all(sql`
+        SELECT COUNT(*) AS c FROM linkedin_participants WHERE participant_id = ${grace.participantId}
+      `) as Array<{ c: number }>;
+      expect(Number(personRows[0].c)).toBe(1);
+    });
+
+    it("returns each participant's person-level facts, refreshed by a later snapshot", async () => {
+      await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+      await repo.upsertThreadParticipants("t1", [ada, self]);
+      // A later snapshot: Ada changed her headline, and reports no type.
+      await repo.upsertThreadParticipants("t1", [
+        { ...ada, headline: "Countess of Lovelace", type: null },
+        self,
+      ]);
+
+      const participants = await repo.getThreadParticipants("t1");
+      const row = participants.find((p) => p.participantId === ada.participantId);
+      expect(row?.name).toBe("Ada Lovelace");
+      expect(row?.headline).toBe("Countess of Lovelace");
+      // Null means "the snapshot did not say", never "unset what we learned".
+      expect(row?.type).toBe("member");
+      expect(row?.isSelf).toBe(false);
+      expect(participants.find((p) => p.participantId === self.participantId)?.isSelf).toBe(true);
+    });
+
+    it("the reverse lookup returns every thread a participant belongs to", async () => {
+      await repo.upsertThreads([
+        thread("t1", new Date("2026-08-19T20:00:00Z")),
+        thread("t2", new Date("2026-08-18T20:00:00Z")),
+        thread("t3", new Date("2026-08-17T20:00:00Z")),
+      ]);
+      await repo.upsertThreadParticipants("t1", [ada, self]);
+      await repo.upsertThreadParticipants("t2", [ada, grace, self]);
+      await repo.upsertThreadParticipants("t3", [grace, self]);
+
+      expect(await repo.getParticipantThreadIds(ada.participantId)).toEqual(["t1", "t2"]);
+      expect(await repo.getParticipantThreadIds(grace.participantId)).toEqual(["t2", "t3"]);
+      expect(await repo.getParticipantThreadIds(self.participantId)).toEqual(["t1", "t2", "t3"]);
+      expect(await repo.getParticipantThreadIds("ACoAANobody")).toEqual([]);
+    });
+
+    it("an empty set clears a thread's membership and reads back empty", async () => {
+      await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+      await repo.upsertThreadParticipants("t1", [ada, self]);
+      await repo.upsertThreadParticipants("t1", []);
+
+      expect(await repo.getThreadParticipants("t1")).toEqual([]);
+      expect(await repo.getParticipantThreadIds(ada.participantId)).toEqual([]);
+    });
+
+    it("membership is per thread — one thread's set never disturbs another's", async () => {
+      await repo.upsertThreads([
+        thread("t1", new Date("2026-08-19T20:00:00Z")),
+        thread("t2", new Date("2026-08-18T20:00:00Z")),
+      ]);
+      await repo.upsertThreadParticipants("t1", [ada, grace]);
+      await repo.upsertThreadParticipants("t2", [ada]);
+      // Rewriting t2 down to nothing leaves t1 untouched.
+      await repo.upsertThreadParticipants("t2", []);
+
+      expect((await repo.getThreadParticipants("t1")).map((p) => p.participantId)).toEqual([
+        ada.participantId,
+        grace.participantId,
+      ]);
+      expect(await repo.getParticipantThreadIds(ada.participantId)).toEqual(["t1"]);
+    });
   });
 });
