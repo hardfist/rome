@@ -134,7 +134,7 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
             variant="ghost"
             size="md"
             className={cn(
-              "group relative max-w-[200px] touch-target",
+              "max-w-[200px] touch-target",
               isDefault
                 ? "bg-surface-muted/60 text-muted-foreground hover:bg-surface-muted"
                 : "bg-surface-muted text-foreground hover:bg-surface-hover",

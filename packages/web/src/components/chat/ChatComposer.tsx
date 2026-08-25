@@ -51,6 +51,7 @@ import { PendingUploadsList } from "./composer/PendingUploadsList";
 import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
+import { CONTROL_TONE_REST } from "./composer/control-tone";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
 
 export interface ChatComposerSnapshot {
@@ -1008,7 +1009,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             disabled={isComposerBusy}
             label={t("composer.uploadFiles")}
             icon={<Paperclip aria-hidden />}
-            className="touch-target text-muted-foreground hover:text-foreground"
+            className={cn("touch-target", CONTROL_TONE_REST)}
           />
           {showModelSelector && modelSelectorEnabled && (
             <ModelSelectorMenu
@@ -1032,13 +1033,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               <Button
                 type="button"
                 variant="outline"
-                size="icon-md"
+                size="md"
                 onClick={onStop}
-                // Square on mobile, icon + label above `sm`. The width override
-                // is important because `icon-lg` sets width via `size-*`: they
-                // are different utilities at equal specificity, so without it
-                // the winner is whichever Tailwind happens to emit last.
-                className="touch-target gap-2 sm:w-auto! sm:px-3"
+                // Square below `sm`, icon + label above it. `md` sets height,
+                // gap and padding but no width, so the narrow case only has to
+                // add one and zero the other — no collision with `size-*`, and
+                // nothing to force.
+                className="touch-target max-sm:w-[var(--control-h-md)] max-sm:px-0"
                 title={t("composer.stopGenerating")}
                 aria-label={t("composer.stopGenerating")}
               >

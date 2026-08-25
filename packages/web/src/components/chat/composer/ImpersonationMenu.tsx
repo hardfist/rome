@@ -10,6 +10,7 @@ import {
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 import type { Person } from "@/lib/chat-types";
+import { CONTROL_TONE_ACTIVE, CONTROL_TONE_REST } from "./control-tone";
 
 export interface ImpersonationMenuProps {
   open: boolean;
@@ -48,10 +49,9 @@ export function ImpersonationMenu({
             </>
           }
           className={cn(
+            // `relative` anchors the dot the icon renders when a person is picked.
             "relative touch-target",
-            selectedPerson
-              ? "bg-info-bg text-info-fg hover:bg-info-bg"
-              : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
+            selectedPerson ? CONTROL_TONE_ACTIVE : CONTROL_TONE_REST,
           )}
         />
       </DropdownMenuTrigger>

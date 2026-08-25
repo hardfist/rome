@@ -9,6 +9,7 @@ import {
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 import { DEFAULT_LARGE_MODEL_SELECTION, LARGE_MODEL_OPTIONS } from "@/lib/chat-constants";
+import { CONTROL_TONE_ACTIVE, CONTROL_TONE_REST } from "./control-tone";
 
 export interface ModelSelectorMenuProps {
   open: boolean;
@@ -36,12 +37,7 @@ export function ModelSelectorMenu({
           disabled={disabled}
           label={t("modelSelector.label")}
           icon={<Zap aria-hidden />}
-          className={cn(
-            "touch-target",
-            customSelected
-              ? "bg-info-bg text-info-fg hover:bg-info-bg"
-              : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
-          )}
+          className={cn("touch-target", customSelected ? CONTROL_TONE_ACTIVE : CONTROL_TONE_REST)}
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56 rounded-12 p-2">
