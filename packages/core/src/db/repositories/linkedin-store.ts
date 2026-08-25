@@ -528,6 +528,30 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
     }));
   }
 
+  /**
+   * One stored identity by member id, independent of thread membership.
+   *
+   * Deliberately not scoped to a thread: promotion names a person, not a
+   * conversation, and an identity outlives the membership rows that introduced
+   * it — someone who has since left every mirrored thread is still the same
+   * member, and a promotion started from an older view must still resolve.
+   */
+  async getParticipant(participantId: string): Promise<LinkedInParticipantRow | null> {
+    const rows = await this.db
+      .select()
+      .from(linkedinParticipants)
+      .where(eq(linkedinParticipants.participantId, participantId));
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      participantId: row.participantId,
+      name: row.name,
+      headline: row.headline,
+      type: row.type,
+      isSelf: row.isSelf,
+    };
+  }
+
   /** The reverse lookup: every thread a participant belongs to. */
   async getParticipantThreadIds(participantId: string): Promise<string[]> {
     const rows = await this.db

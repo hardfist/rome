@@ -134,3 +134,123 @@ describe("POST /linkedin/threads/:threadId/send", () => {
     });
   });
 });
+
+// Promotion is a guardian action, so it has an explicit endpoint — the poller
+// has no route into this. The UI that calls it is out of scope here.
+describe("LinkedIn participant routes", () => {
+  const ADA = "ACoAAAda0001";
+
+  function promoteDeps(over: Partial<Record<string, unknown>> = {}) {
+    return {
+      linkedInStoreRepo: {
+        listThreads: async () => [THREAD],
+        getMessages: async () => [],
+        getThreadParticipants: async () => [
+          {
+            participantId: ADA,
+            name: "Ada Lovelace",
+            headline: "Building the analytical engine",
+            type: "member",
+            isSelf: false,
+          },
+        ],
+        ...over,
+      },
+    } as unknown as ApiDeps;
+  }
+
+  function mountPromote(promote: ReturnType<typeof vi.fn>, deps = promoteDeps()): Hono {
+    return new Hono().route("/", linkedinThreadsRoutes(deps, { promoteParticipant: promote }));
+  }
+
+  it("lists a thread's stored participants", async () => {
+    const app = new Hono().route("/", linkedinThreadsRoutes(promoteDeps(), {}));
+    const res = await app.request(
+      `/linkedin/threads/${encodeURIComponent(THREAD.threadId)}/participants`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([
+      {
+        participantId: ADA,
+        name: "Ada Lovelace",
+        headline: "Building the analytical engine",
+        type: "member",
+        isSelf: false,
+      },
+    ]);
+  });
+
+  it("promotes a participant and reports the person it created", async () => {
+    const promote = vi.fn(async () => ({ personId: "ada-lovelace", created: true }));
+    const res = await mountPromote(promote).request(
+      `/linkedin/participants/${encodeURIComponent(ADA)}/promote`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bondLevel: "inner-circle" }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ personId: "ada-lovelace", created: true });
+    expect(promote).toHaveBeenCalledWith(
+      ADA,
+      expect.objectContaining({ bondLevel: "inner-circle" }),
+    );
+  });
+
+  it("reports an already-promoted participant as created: false, not as an error", async () => {
+    const promote = vi.fn(async () => ({ personId: "ada-lovelace", created: false }));
+    const res = await mountPromote(promote).request(
+      `/linkedin/participants/${encodeURIComponent(ADA)}/promote`,
+      { method: "POST" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ personId: "ada-lovelace", created: false });
+  });
+
+  it("rejects a bond level the person graph does not define", async () => {
+    const promote = vi.fn();
+    const res = await mountPromote(promote).request(
+      `/linkedin/participants/${encodeURIComponent(ADA)}/promote`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bondLevel: "best-friend" }),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    expect(promote).not.toHaveBeenCalled();
+  });
+
+  it("never lets the endpoint confer guardian", async () => {
+    const promote = vi.fn();
+    const res = await mountPromote(promote).request(
+      `/linkedin/participants/${encodeURIComponent(ADA)}/promote`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bondLevel: "guardian" }),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    expect(promote).not.toHaveBeenCalled();
+  });
+
+  it("turns an unpromotable participant into a 404 rather than a 500", async () => {
+    const { LinkedInPromotionError } = await import("../../channels/linkedin-promote.js");
+    const promote = vi.fn(async () => {
+      throw new LinkedInPromotionError("unknown LinkedIn participant");
+    });
+    const res = await mountPromote(promote).request("/linkedin/participants/ACoAAGhost/promote", {
+      method: "POST",
+    });
+
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toContain("unknown LinkedIn participant");
+  });
+});

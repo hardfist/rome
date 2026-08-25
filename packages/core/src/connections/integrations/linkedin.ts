@@ -38,6 +38,7 @@ import {
 } from "../../channels/linkedin-cli.js";
 import { LinkedInInboxPoller } from "../../channels/linkedin.js";
 import type { LinkedInHistoryMessage, LinkedInSyncSink } from "../../channels/linkedin-sync.js";
+import { linkedInMemberIdFromProfileUrl } from "../../db/repositories/linkedin-store.js";
 import { CredentialRejected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
@@ -260,12 +261,31 @@ interface LinkedInTalker extends Talker {
   getRuntimeDegradation(): CapabilityDegradation | null;
 }
 
-function toHistoryNormalizedMessage(row: LinkedInHistoryMessage): NormalizedMessage {
+/**
+ * A mirrored message as the rest of Rome sees it.
+ *
+ * The sender is identified by the bare member id (`ACoAA…`) pulled out of the
+ * mirrored profile URL, because that is the value `linkedin_participants` and
+ * `channel_mappings.channel_user_id` agree on. Passing the whole URL through
+ * instead would put a promoted person permanently out of reach: their mapping
+ * says `ACoAA…` and every message would arrive claiming to be
+ * `https://www.linkedin.com/in/ACoAA…/`.
+ *
+ * A URL with no member id in it — a vanity handle like `/in/ada-lovelace` — is
+ * kept verbatim rather than guessed at. A handle is a public alias that can be
+ * reassigned, so treating one as an identity would eventually map a stranger
+ * onto someone else's person.
+ *
+ * Exported for the test that pins this correspondence; nothing else calls it.
+ */
+export function toHistoryNormalizedMessage(row: LinkedInHistoryMessage): NormalizedMessage {
   return {
     id: row.messageId,
     channel: "linkedin",
     channelUserId:
-      row.senderProfileUrl ?? (row.senderIsSelf ? "linkedin:self" : "linkedin:unknown"),
+      linkedInMemberIdFromProfileUrl(row.senderProfileUrl) ??
+      row.senderProfileUrl ??
+      (row.senderIsSelf ? "linkedin:self" : "linkedin:unknown"),
     displayName: row.senderName ?? "",
     threadId: row.threadId,
     ...(row.threadName ? { threadName: row.threadName } : {}),

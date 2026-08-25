@@ -6,6 +6,9 @@ import {
   type LinkedInPollerOptions,
 } from "./linkedin.js";
 import { OpencliAuthError, type OpencliResult } from "./linkedin-cli.js";
+import { createTestDb } from "../test/helpers.js";
+import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
+import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type {
   LinkedInMessageInput,
   LinkedInParticipantInput,
@@ -110,7 +113,7 @@ class ParticipantSink extends FakeSink {
 }
 
 function makePoller(
-  sink: FakeSink,
+  sink: LinkedInSyncSink,
   run: LinkedInPollerOptions["run"],
   overrides: Partial<LinkedInPollerOptions> = {},
 ) {
@@ -427,5 +430,81 @@ describe("LinkedInInboxPoller fault handling", () => {
     failing = false;
     await vi.waitFor(() => expect(poller.getRuntimeDegradation()).toBeNull());
     poller.stop();
+  });
+});
+
+// Acceptance: the poller never triggers promotion. A LinkedIn inbox holds many
+// identities that must not enter the curated person graph on their own — only a
+// guardian action may. This runs a real tick against the real store rather than
+// a fake, so the assertion is about what the tick actually wrote.
+describe("LinkedInInboxPoller and the person graph", () => {
+  function participantPollRun() {
+    return vi.fn(async (args: string[]) => {
+      if (args[1] === "inbox") return ok([inboxRow("t1", "2026-08-19T20:00:00.000Z")]);
+      if (args[1] === "thread-participants")
+        return ok([
+          participantRow("t1", "ACoAAAda0001"),
+          participantRow("t1", "ACoAALurk0002", { participant_index: 2, name: "Quiet One" }),
+        ]);
+      return ok([snapshotRow("t1", "m1")]);
+    });
+  }
+
+  it("mirrors participants without creating any person or channel mapping", async () => {
+    const testDb = createTestDb();
+    try {
+      const store = new LinkedInStoreRepository(testDb.db);
+      const persons = new PersonMappingRepository(testDb.db);
+
+      await makePoller(store, participantPollRun()).pollOnce();
+
+      // The tick did its own job.
+      const participants = await store.getThreadParticipants("t1");
+      expect(participants.map((p) => p.participantId)).toEqual(["ACoAAAda0001", "ACoAALurk0002"]);
+
+      // ...and nothing else. Neither mirrored identity became a person.
+      for (const id of ["ACoAAAda0001", "ACoAALurk0002"]) {
+        expect(await persons.findByChannelUser("linkedin", id)).toBeNull();
+      }
+      const personRows = (await testDb.db.all(
+        // biome-ignore lint/suspicious/noExplicitAny: raw row read for assertion
+        "SELECT id FROM persons" as any,
+      )) as unknown[];
+      expect(personRows).toHaveLength(0);
+      const mappingRows = (await testDb.db.all(
+        // biome-ignore lint/suspicious/noExplicitAny: raw row read for assertion
+        "SELECT id FROM channel_mappings" as any,
+      )) as unknown[];
+      expect(mappingRows).toHaveLength(0);
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("re-polling an already-promoted participant leaves the person untouched", async () => {
+    const testDb = createTestDb();
+    try {
+      const store = new LinkedInStoreRepository(testDb.db);
+      const persons = new PersonMappingRepository(testDb.db);
+      await persons.create({
+        displayName: "Ada Lovelace",
+        bondLevel: "inner-circle",
+        channelMappings: [{ channel: "linkedin", channelUserId: "ACoAAAda0001" }],
+      });
+
+      await makePoller(store, participantPollRun()).pollOnce();
+
+      const resolved = await persons.findByChannelUser("linkedin", "ACoAAAda0001");
+      // Still exactly one person, still the bond level the guardian chose: the
+      // poller neither re-promotes nor re-grades.
+      expect(resolved?.bondLevel).toBe("inner-circle");
+      const personRows = (await testDb.db.all(
+        // biome-ignore lint/suspicious/noExplicitAny: raw row read for assertion
+        "SELECT id FROM persons" as any,
+      )) as unknown[];
+      expect(personRows).toHaveLength(1);
+    } finally {
+      testDb.close();
+    }
   });
 });

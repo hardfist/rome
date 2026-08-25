@@ -729,3 +729,53 @@ describe("linkedInMemberIdFromProfileUrl", () => {
     expect(linkedInMemberIdFromProfileUrl("")).toBeNull();
   });
 });
+
+describe("LinkedInStoreRepository.getParticipant", () => {
+  let testDb: TestDb;
+  let repo: LinkedInStoreRepository;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    repo = new LinkedInStoreRepository(testDb.db);
+  });
+
+  afterEach(() => {
+    testDb.close();
+  });
+
+  it("reads one stored identity by member id", async () => {
+    await repo.upsertThreadParticipants("t1", [
+      {
+        participantId: "ACoAAAda0001",
+        name: "Ada Lovelace",
+        headline: "Building the analytical engine",
+        type: "member",
+        isSelf: false,
+      },
+    ]);
+
+    expect(await repo.getParticipant("ACoAAAda0001")).toEqual({
+      participantId: "ACoAAAda0001",
+      name: "Ada Lovelace",
+      headline: "Building the analytical engine",
+      type: "member",
+      isSelf: false,
+    });
+  });
+
+  it("returns null for a member id it has never seen", async () => {
+    expect(await repo.getParticipant("ACoAAGhost")).toBeNull();
+  });
+
+  it("finds an identity independently of any thread it belongs to", async () => {
+    await repo.upsertThreadParticipants("t1", [
+      { participantId: "ACoAAAda0001", name: "Ada", headline: null, type: "member", isSelf: false },
+    ]);
+    // Ada leaves t1; the identity itself survives, so a promotion started from
+    // an older view still resolves.
+    await repo.upsertThreadParticipants("t1", []);
+
+    expect(await repo.getThreadParticipants("t1")).toEqual([]);
+    expect((await repo.getParticipant("ACoAAAda0001"))?.name).toBe("Ada");
+  });
+});

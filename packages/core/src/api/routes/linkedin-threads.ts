@@ -5,6 +5,13 @@ import {
   type LinkedInSafeSendInput,
   type LinkedInSafeSendResult,
 } from "../../channels/linkedin-cli.js";
+import {
+  LinkedInPromotionError,
+  promoteLinkedInParticipant,
+  type LinkedInPromotionOptions,
+  type LinkedInPromotionResult,
+  type PromotableBondLevel,
+} from "../../channels/linkedin-promote.js";
 import type { ApiDeps } from "../deps.js";
 
 /**
@@ -13,14 +20,39 @@ import type { ApiDeps } from "../deps.js";
  * LinkedIn connection's poller (channels/linkedin.ts). Replies go through
  * opencli `linkedin safe-send`. It verifies the visible thread and recipient
  * before sending.
+ *
+ * Promotion of a mirrored participant into `persons` also lives here, as an
+ * explicit endpoint. The poller has no route into it: promotion is a guardian
+ * action, and an inbox full of strangers must not walk itself into the person
+ * graph. The UI that calls this is out of scope.
  */
 export interface LinkedInThreadsSeams {
   sendReply?: (input: LinkedInSafeSendInput) => Promise<LinkedInSafeSendResult>;
+  promoteParticipant?: (
+    participantId: string,
+    options: LinkedInPromotionOptions,
+  ) => Promise<LinkedInPromotionResult>;
 }
+
+/** The bond levels this endpoint accepts. `guardian` is deliberately absent —
+ *  it is conferred at the terminal, not by pointing at an inbox row. */
+const PROMOTABLE_BOND_LEVELS: readonly PromotableBondLevel[] = [
+  "inner-circle",
+  "acquaintance",
+  "other",
+];
 
 export function linkedinThreadsRoutes(deps: ApiDeps, seams: LinkedInThreadsSeams = {}): Hono {
   const app = new Hono();
   const sendReply = seams.sendReply ?? safeSendLinkedInReply;
+  const promoteParticipant: NonNullable<LinkedInThreadsSeams["promoteParticipant"]> =
+    seams.promoteParticipant ??
+    ((participantId, options) =>
+      promoteLinkedInParticipant(
+        participantId,
+        { participants: deps.linkedInStoreRepo, persons: deps.personMappingRepo },
+        options,
+      ));
 
   app.get("/linkedin/threads", async (c) => {
     const rows = await deps.linkedInStoreRepo.listThreads();
@@ -33,6 +65,51 @@ export function linkedinThreadsRoutes(deps: ApiDeps, seams: LinkedInThreadsSeams
     const before = parsePositiveInt(c.req.query("before"));
     const messages = await deps.linkedInStoreRepo.getMessages(threadId, { limit, before });
     return c.json(messages);
+  });
+
+  app.get("/linkedin/threads/:threadId/participants", async (c) => {
+    const participants = await deps.linkedInStoreRepo.getThreadParticipants(
+      c.req.param("threadId"),
+    );
+    return c.json(participants);
+  });
+
+  // Promote one mirrored identity into the person graph. Idempotent: an
+  // identity already mapped comes back as `created: false` rather than as an
+  // error, because "this participant is already a person" is the outcome the
+  // caller wanted, not a failure to achieve it.
+  app.post("/linkedin/participants/:participantId/promote", async (c) => {
+    const participantId = c.req.param("participantId");
+    const body = await c.req
+      .json<{ displayName?: unknown; bondLevel?: unknown }>()
+      .catch(() => ({}) as { displayName?: unknown; bondLevel?: unknown });
+
+    const options: LinkedInPromotionOptions = {};
+    if (typeof body.displayName === "string" && body.displayName.trim()) {
+      options.displayName = body.displayName.trim();
+    }
+    if (body.bondLevel !== undefined) {
+      if (!PROMOTABLE_BOND_LEVELS.includes(body.bondLevel as PromotableBondLevel)) {
+        return c.json(
+          { error: `bondLevel must be one of: ${PROMOTABLE_BOND_LEVELS.join(", ")}` },
+          400,
+        );
+      }
+      options.bondLevel = body.bondLevel as PromotableBondLevel;
+    }
+
+    try {
+      const result = await promoteParticipant(participantId, options);
+      return c.json(result);
+    } catch (err) {
+      // A participant that cannot be promoted is a statement about the request,
+      // not a server fault — the caller pointed at something that is not a
+      // promotable identity.
+      if (err instanceof LinkedInPromotionError) {
+        return c.json({ error: err.message }, 404);
+      }
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   });
 
   app.post("/linkedin/threads/:threadId/send", async (c) => {
