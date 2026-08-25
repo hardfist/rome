@@ -39,6 +39,12 @@ Two cases need a prefix instead. The first is a natural name that would itself b
 
 Aliases are layer-1 pointers at other layer-1 tokens, such as `--card: var(--surface)`. `var()` resolves lazily at the element, so an alias declared once tracks every theme × mode swap without re-declaration.
 
+**Only theme values cross the Shadow DOM boundary into an app.** Custom properties inherit, and inheritance cannot be narrowed. Every name the dashboard declares on `:root` reaches every app, whether or not the app was meant to see it. The promise is only the theme layer: the palette and the resolved semantic values `buildThemeCss` emits.
+
+Everything else an app paints with holds the same value under every theme and mode, so the app carries it in its own bundle. Importing `@rome-os/app-web-sdk/styles`, or the kit sheet directly, is what puts it there. An app with no kit sheet declares the few constants it needs itself.
+
+An app that reads a fixed value it never compiled renders correctly against the one host that declares it and breaks anywhere else. `packages/web/src/styles/app-token-contract.test.ts` fails on any `var()` an app cannot resolve from its own CSS, from a sheet it imports, or from the theme contract. A `var(--x, fallback)` is exempt, having stated its own default.
+
 **Never ship a host-owned value in layer 2.** A literal theme color or shadow there forks the host's single source of truth. It also freezes that value into every consumer's compiled CSS. Fixed values belong in the kit's layer-1 block. The fixed typography-role scale belongs in a non-inline `@theme` block where Tailwind emits overridable variables.
 
 **Control-geometry tokens (`--control-*`, `--field-*`, `--badge-*`) are layer 1 with no layer-2 entry, deliberately.** They get no `@theme` registration and no generated utility. Components read them in bracket form, such as `h-[var(--control-h-md)]`. That keeps the shared token greppable at every call site and classifies correctly under `tailwind-merge`. Values live in the kit's `:root, :host` block.

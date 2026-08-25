@@ -25,6 +25,15 @@
   --acc: var(--brand);
   --acc-ink: var(--brand-fg);
 
+  /* Corner radii, held here rather than read from the host. This app ships no
+     kit stylesheet, so an undeclared `var(--rome-radius-12)` resolves only by
+     inheriting the dashboard's `:root`, which renders correctly against that one
+     host and nowhere else. Geometry does not vary with theme or mode, so a local
+     copy costs nothing. Contract: docs/design-system.md. */
+  --rome-radius-12: 12px;
+  --rome-radius-16: 16px;
+  --rome-radius-full: 9999px;
+
   box-sizing: border-box;
   min-height: 100%;
   padding: clamp(1rem, 2vw, 1.75rem);
