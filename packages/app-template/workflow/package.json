@@ -12,8 +12,8 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
-    "@rome-os/app-runtime": "^0.5.10",
-    "@rome-os/app-web-sdk": "^0.2.14",
+    "@rome-os/app-runtime": "__ROME_APP_RUNTIME_VERSION__",
+    "@rome-os/app-web-sdk": "__ROME_APP_WEB_SDK_VERSION__",
     "drizzle-orm": "^0.45.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

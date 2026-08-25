@@ -3,6 +3,7 @@ import { createLogger } from "../logger.js";
 import { getAppTemplateDir, type AppTemplateKind } from "../paths.js";
 import { assertValidAppId } from "./packaging/index.js";
 import { appIdToDisplayName, isDirectoryNonEmpty, materializeTemplate } from "./create.js";
+import { resolveTemplateVersions, type TemplateVersions } from "./template-versions.js";
 
 const log = createLogger("app-scaffold");
 
@@ -29,14 +30,25 @@ export interface ScaffoldDevAppOptions {
    * `getAppTemplateDir(template)` resolves to. Tests inject a synthetic tree.
    */
   templateDir?: string;
+  /**
+   * Version ranges to write for the templated Rome packages. Defaults to
+   * whatever the registry currently publishes. Pass explicitly to scaffold
+   * against a known set — tests do, to stay off the network.
+   */
+  versions?: TemplateVersions;
 }
 
 /**
  * Scaffold a new dev app from the bundled template into the caller-supplied
- * `rootPath`. Filesystem-only — does NOT touch the lockfile, registry, or
- * DB. The caller (typically the agent action `app_management { op: "create" }`)
- * is responsible for choosing `rootPath` and for following up with
- * `op: "install"` to install via `AppManager.install`.
+ * `rootPath`. Does not touch the lockfile or DB, and installs nothing; the
+ * caller (typically the agent action `app_management { op: "create" }`) is
+ * responsible for choosing `rootPath` and for following up with `op: "install"`
+ * to install via `AppManager.install`.
+ *
+ * Reads the npm registry — the template declares each published Rome package
+ * as a version placeholder, resolved here so a new app starts on the current
+ * release. An unreachable registry falls back rather than failing the create,
+ * so scaffolding still works offline.
  *
  * `rootPath` must be absolute. Refuses to overwrite an existing non-empty
  * directory: callers must choose a fresh path or clean up first.
@@ -62,9 +74,11 @@ export async function scaffoldDevApp(
   }
 
   const templateDir = options.templateDir ?? getAppTemplateDir(options.template ?? "default");
+  const versions = options.versions ?? (await resolveTemplateVersions());
   await materializeTemplate(templateDir, rootPath, {
     appId,
     appName: appIdToDisplayName(appId),
+    versions,
   });
 
   log.info("scaffolded dev app", {
