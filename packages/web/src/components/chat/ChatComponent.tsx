@@ -369,7 +369,7 @@ export function ChatComponent({
           <ChatComposer
             ref={draftComposerRef}
             // Box look lives on the composer so the chip row sits outside it.
-            boxClassName="rounded-16 border border-border bg-surface/95 p-3 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+            boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
             onSend={handleDraftSend}
             showProjectSelector
             showModelSelector

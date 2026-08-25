@@ -1636,7 +1636,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                     ref={composerRef}
                     // The box look lives on the composer now so the chip row can sit
                     // outside it; this mount adds the floating blur/translucency.
-                    boxClassName="rounded-16 border border-border bg-surface/95 p-3 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                    boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                     onSend={handleComposerSend}
                     isStreaming={displayedStreaming}
                     onStop={() => void stopMessage()}

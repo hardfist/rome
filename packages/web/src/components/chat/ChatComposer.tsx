@@ -153,7 +153,7 @@ export interface ChatComposerProps {
 // The empty input is one line box tall, expressed as `1lh` so it resolves
 // against whatever `text-body` currently is rather than restating the role's
 // px here. The textarea carries no vertical padding, so that leaves the box's
-// own `p-3` as the only inset above the text and the empty composer reads
+// own `p-4` as the only inset above the text and the empty composer reads
 // symmetric top to bottom. `min-height` outranks the height the resize below
 // writes, which is why the floor lives in CSS and the resize only caps.
 //
@@ -845,7 +845,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           clears the box's rounded-16 corner zone, so no tray corner shows in the
           gap; only the top chip row (rounded-t-16) peeks. Scrolls horizontally
           on overflow. */}
-      <div className="relative z-0 -mb-8 flex items-center gap-2 overflow-x-auto rounded-t-16 border border-border bg-surface-muted/65 px-3 pb-10 pt-2 backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden supports-[backdrop-filter]:bg-surface-muted/45 empty:hidden">
+      <div className="relative z-0 -mb-8 flex items-center gap-2 overflow-x-auto rounded-t-16 border border-border bg-surface-muted/65 px-4 pb-10 pt-2 backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden supports-[backdrop-filter]:bg-surface-muted/45 empty:hidden">
         {effectiveMention && (
           // Its × cancels the live handoff while collaborating, otherwise clears
           // a removable draft mention.
@@ -926,7 +926,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                         : t("composer.placeholderDefault")
                     }
                     rows={1}
-                    className="block w-full resize-none border-0 bg-transparent px-2 text-body text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
+                    className="block w-full resize-none border-0 bg-transparent text-body text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
                     style={{
                       minHeight: TEXTAREA_MIN_HEIGHT,
                       maxHeight: `${TEXTAREA_MAX_HEIGHT}px`,
@@ -1008,7 +1008,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             disabled={isComposerBusy}
             label={t("composer.uploadFiles")}
             icon={<Paperclip aria-hidden />}
-            className="text-muted-foreground hover:text-foreground"
+            className="touch-target text-muted-foreground hover:text-foreground"
           />
           {showModelSelector && modelSelectorEnabled && (
             <ModelSelectorMenu
@@ -1032,13 +1032,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               <Button
                 type="button"
                 variant="outline"
-                size="icon-lg"
+                size="icon-md"
                 onClick={onStop}
                 // Square on mobile, icon + label above `sm`. The width override
                 // is important because `icon-lg` sets width via `size-*`: they
                 // are different utilities at equal specificity, so without it
                 // the winner is whichever Tailwind happens to emit last.
-                className="gap-2 rounded-full sm:w-auto! sm:px-3"
+                className="touch-target gap-2 sm:w-auto! sm:px-3"
                 title={t("composer.stopGenerating")}
                 aria-label={t("composer.stopGenerating")}
               >
@@ -1052,14 +1052,14 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                   ? "secondary"
                   : "default"
               }
-              size="icon-lg"
+              size="icon-md"
               onClick={() => void runSend()}
               disabled={
                 isComposerBusy || (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
               }
               title={isStreaming ? t("composer.queueTurnTitle") : t("composer.sendTitle")}
               aria-label={isStreaming ? t("composer.queueTurnTitle") : t("composer.sendTitle")}
-              className="rounded-full"
+              className="touch-target"
             >
               <ArrowUp aria-hidden />
             </Button>

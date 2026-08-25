@@ -13,6 +13,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@rome-os/ui/spinner";
@@ -128,17 +129,16 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
         }}
       >
         <PopoverTrigger asChild>
-          <button
+          <Button
             type="button"
-            className={`group relative inline-flex h-10 max-w-[200px] items-center gap-2 rounded-full px-3 text-ui transition focus:outline-none focus:ring-2 focus:ring-ring ${
+            variant="ghost"
+            size="md"
+            className={cn(
+              "group relative max-w-[200px] touch-target",
               isDefault
-                ? `bg-surface-muted/60 text-muted-foreground hover:bg-surface-muted ${
-                    menuOpen ? "bg-surface-muted" : ""
-                  }`
-                : `bg-surface-muted text-foreground hover:bg-surface-hover ${
-                    menuOpen ? "bg-surface-hover" : ""
-                  }`
-            }`}
+                ? "bg-surface-muted/60 text-muted-foreground hover:bg-surface-muted"
+                : "bg-surface-muted text-foreground hover:bg-surface-hover",
+            )}
             title={isDefault ? t("project.buttonLabel") : draftProjectLabel}
             aria-label={t("project.buttonLabel")}
           >
@@ -149,7 +149,7 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
             />
             <span className="truncate">{isDefault ? defaultProjectName : draftProjectLabel}</span>
             <ChevronDown className="size-3 shrink-0 opacity-50" aria-hidden />
-          </button>
+          </Button>
         </PopoverTrigger>
 
         <PopoverContent

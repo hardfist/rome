@@ -36,11 +36,12 @@ export function ModelSelectorMenu({
           disabled={disabled}
           label={t("modelSelector.label")}
           icon={<Zap aria-hidden />}
-          className={
+          className={cn(
+            "touch-target",
             customSelected
               ? "bg-info-bg text-info-fg hover:bg-info-bg"
-              : "bg-surface text-muted-foreground hover:bg-surface-muted hover:text-foreground"
-          }
+              : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
+          )}
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56 rounded-12 p-2">

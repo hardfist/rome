@@ -48,7 +48,12 @@ export const ComposerChip = forwardRef<HTMLSpanElement, ComposerChipProps>(funct
           type="button"
           onClick={onRemove}
           aria-label={removeLabel}
-          className="-mr-1 ml-1 shrink-0 rounded-full p-1 opacity-60 transition hover:bg-foreground/10 hover:opacity-100"
+          // The visible box stays 20px so the chip's own height does not move.
+          // The pointer target reaches past it through `after:-inset-*`, which
+          // is how a Selection control clears the floor without growing its
+          // row (docs/ui/component-roles.md, and `Switch` in the kit). Raising
+          // the chip to a control step instead is the negative example there.
+          className="relative -mr-1 ml-1 shrink-0 rounded-full p-1 opacity-60 transition after:absolute after:-inset-1.5 hover:bg-foreground/10 hover:opacity-100"
         >
           <X className="size-3" strokeWidth={2.5} />
         </button>
