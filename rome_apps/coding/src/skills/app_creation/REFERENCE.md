@@ -917,6 +917,16 @@ See the community sample repo for full web app examples.
   `:host` when it injects the bundle into the shadow root
   (`packages/web/src/components/rome-app-host.tsx`), which is what makes an
   app-declared value beat the inherited host token.
+- **Read only the tokens your own bundle supplies.** The host promises one
+  thing across the shadow boundary: the theme layer, meaning color and shadow
+  values, which arrive as inherited custom properties and track the live theme
+  and mode. Everything else — geometry, typography, the control scale — holds
+  the same value under every theme, and the two imports above are what put it
+  in your bundle. Custom properties inherit and inheritance cannot be narrowed,
+  so your app also reaches every other property the host page happens to
+  declare. Reading one renders correctly in the Rome dashboard and breaks
+  against any other host, and no build or test in your app catches it. An app
+  that ships no kit stylesheet declares the few constants it uses itself.
 - Components come from the kit — `import { Button } from "@rome-os/ui/button"`,
   one subpath per component. Do not copy a component the kit publishes into
   `components/ui/`; the copy is frozen and drifts. See
