@@ -12,18 +12,6 @@ import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getAppTemplateDir, type AppTemplateKind } from "../paths.js";
 import { scaffoldDevApp } from "./scaffold.js";
-import { VERSION_PLACEHOLDERS, type TemplateVersions } from "./template-versions.js";
-
-/**
- * Scaffolding resolves dependency versions from the npm registry. Every call
- * below passes these instead, so the suite neither reaches the network nor
- * changes its expectations the next time an SDK is published.
- */
-const TEST_VERSIONS: TemplateVersions = {
-  "@rome-os/app-runtime": "^9.1.0",
-  "@rome-os/app-web-sdk": "^9.2.0",
-  "@rome-os/ui": "^9.3.0",
-};
 
 function snapshotTree(root: string): Record<string, string> {
   if (!existsSync(root)) return {};
@@ -66,22 +54,6 @@ describe("scaffoldDevApp", () => {
       "title: __APP_NAME__\ndescription: __APP_NAME__ store listing\n",
       "utf-8",
     );
-    writeFileSync(
-      join(templateDir, "package.json"),
-      JSON.stringify(
-        {
-          name: "@rome/app-__APP_ID__",
-          dependencies: {
-            "@rome-os/app-runtime": VERSION_PLACEHOLDERS["@rome-os/app-runtime"],
-            "@rome-os/app-web-sdk": VERSION_PLACEHOLDERS["@rome-os/app-web-sdk"],
-            "@rome-os/ui": VERSION_PLACEHOLDERS["@rome-os/ui"],
-          },
-        },
-        null,
-        2,
-      ),
-      "utf-8",
-    );
     mkdirSync(join(templateDir, "actions", "ping"), { recursive: true });
     writeFileSync(
       join(templateDir, "actions", "ping", "action.yaml"),
@@ -96,10 +68,7 @@ describe("scaffoldDevApp", () => {
 
   it("materialises the template at the caller-supplied rootPath with placeholders applied", async () => {
     const rootPath = join(devAppsDir, "notes");
-    const result = await scaffoldDevApp("notes", rootPath, {
-      templateDir,
-      versions: TEST_VERSIONS,
-    });
+    const result = await scaffoldDevApp("notes", rootPath, { templateDir });
 
     expect(result).toEqual({ appId: "notes", created: true, rootPath });
     expect(statSync(rootPath).isDirectory()).toBe(true);
@@ -121,10 +90,7 @@ describe("scaffoldDevApp", () => {
     const worktreeRoot = mkdtempSync(join(tmpdir(), "rome-scaffold-worktree-"));
     const rootPath = join(worktreeRoot, "notes-session-abc");
 
-    const result = await scaffoldDevApp("notes", rootPath, {
-      templateDir,
-      versions: TEST_VERSIONS,
-    });
+    const result = await scaffoldDevApp("notes", rootPath, { templateDir });
 
     expect(result.rootPath).toBe(rootPath);
     expect(readFileSync(join(rootPath, "app.yaml"), "utf-8")).toBe("id: notes\nname: Notes\n");
@@ -142,10 +108,7 @@ describe("scaffoldDevApp", () => {
 
     const beforeAppsTree = snapshotTree(appsDir);
 
-    await scaffoldDevApp("notes", join(devAppsDir, "notes"), {
-      templateDir,
-      versions: TEST_VERSIONS,
-    });
+    await scaffoldDevApp("notes", join(devAppsDir, "notes"), { templateDir });
 
     const afterAppsTree = snapshotTree(appsDir);
     expect(afterAppsTree).toEqual(beforeAppsTree);
@@ -160,65 +123,31 @@ describe("scaffoldDevApp", () => {
     mkdirSync(existingRoot, { recursive: true });
     writeFileSync(join(existingRoot, "marker"), "x");
 
-    await expect(
-      scaffoldDevApp("notes", existingRoot, { templateDir, versions: TEST_VERSIONS }),
-    ).rejects.toThrow(/already exists and is non-empty/);
+    await expect(scaffoldDevApp("notes", existingRoot, { templateDir })).rejects.toThrow(
+      /already exists and is non-empty/,
+    );
   });
 
   it("rejects invalid app ids before touching the filesystem", async () => {
     const rootPath = join(devAppsDir, "Bad-Id");
-    await expect(
-      scaffoldDevApp("Bad-Id", rootPath, { templateDir, versions: TEST_VERSIONS }),
-    ).rejects.toThrow(/Invalid app id/);
+    await expect(scaffoldDevApp("Bad-Id", rootPath, { templateDir })).rejects.toThrow(
+      /Invalid app id/,
+    );
     expect(existsSync(rootPath)).toBe(false);
   });
 
   it("keeps app scaffolds on unscoped local ids", async () => {
     const rootPath = join(devAppsDir, "%40foo%2Fbar");
-    await expect(
-      scaffoldDevApp("@foo/bar", rootPath, { templateDir, versions: TEST_VERSIONS }),
-    ).rejects.toThrow(/create with an unscoped local app id/);
+    await expect(scaffoldDevApp("@foo/bar", rootPath, { templateDir })).rejects.toThrow(
+      /create with an unscoped local app id/,
+    );
     expect(existsSync(rootPath)).toBe(false);
   });
 
   it("rejects a non-absolute rootPath", async () => {
-    await expect(
-      scaffoldDevApp("notes", "relative/path/notes", { templateDir, versions: TEST_VERSIONS }),
-    ).rejects.toThrow(/absolute path/);
-  });
-
-  it("writes the resolved dependency versions into the scaffolded package.json", async () => {
-    const rootPath = join(devAppsDir, "notes");
-    await scaffoldDevApp("notes", rootPath, { templateDir, versions: TEST_VERSIONS });
-
-    const pkg = JSON.parse(readFileSync(join(rootPath, "package.json"), "utf-8")) as {
-      dependencies: Record<string, string>;
-    };
-    expect(pkg.dependencies).toEqual({
-      "@rome-os/app-runtime": "^9.1.0",
-      "@rome-os/app-web-sdk": "^9.2.0",
-      "@rome-os/ui": "^9.3.0",
-    });
-    // A placeholder that survived into the emitted file would install as a
-    // garbage specifier, so assert none are left anywhere in the tree.
-    for (const contents of Object.values(snapshotTree(rootPath))) {
-      expect(Buffer.from(contents, "base64").toString("utf-8")).not.toContain("__ROME_");
-    }
-  });
-
-  it("declares templated Rome packages as placeholders, never as hand-written ranges", () => {
-    // A literal range here is what went stale before: the template drifted
-    // several releases behind npm because bumping it was a manual chore.
-    const templateKinds: AppTemplateKind[] = ["default", "workflow"];
-    for (const kind of templateKinds) {
-      const pkg = JSON.parse(
-        readFileSync(join(getAppTemplateDir(kind), "package.json"), "utf-8"),
-      ) as { dependencies?: Record<string, string> };
-      for (const [name, range] of Object.entries(pkg.dependencies ?? {})) {
-        if (!name.startsWith("@rome-os/")) continue;
-        expect(range).toBe(VERSION_PLACEHOLDERS[name as keyof TemplateVersions]);
-      }
-    }
+    await expect(scaffoldDevApp("notes", "relative/path/notes", { templateDir })).rejects.toThrow(
+      /absolute path/,
+    );
   });
 
   it("pins bundled app templates to pnpm 11", () => {
@@ -312,20 +241,16 @@ describe("scaffoldDevApp", () => {
     expect(appStyles).toContain('@import "@rome-os/ui/styles.css"');
   });
 
-  it("scaffolds every published Rome package as a concrete semver range", async () => {
+  it("depends on every published Rome package through a concrete semver range", () => {
     // A scaffolded app installs from npm on a user's machine, so `workspace:*`
     // does not resolve and `latest` silently ships whatever the registry holds
-    // at install time. The template carries placeholders, so the invariant is
-    // about what lands on disk — assert it against a real materialised tree.
+    // at install time. REFERENCE.md tells app authors the same rule; the
+    // templates are where they read it from.
     const templateKinds: AppTemplateKind[] = ["default", "workflow"];
     for (const kind of templateKinds) {
-      const rootPath = join(mkdtempSync(join(tmpdir(), `rome-scaffold-${kind}-`)), "notes");
-      await scaffoldDevApp("notes", rootPath, { template: kind, versions: TEST_VERSIONS });
-
-      const pkg = JSON.parse(readFileSync(join(rootPath, "package.json"), "utf-8")) as {
-        dependencies?: Record<string, string>;
-        devDependencies?: Record<string, string>;
-      };
+      const pkg = JSON.parse(
+        readFileSync(join(getAppTemplateDir(kind), "package.json"), "utf-8"),
+      ) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
       const romeRanges = Object.entries({ ...pkg.dependencies, ...pkg.devDependencies }).filter(
         ([name]) => name.startsWith("@rome-os/"),
       );

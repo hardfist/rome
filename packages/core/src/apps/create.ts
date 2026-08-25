@@ -1,21 +1,10 @@
 import { isUtf8 } from "node:buffer";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  TEMPLATED_PACKAGES,
-  VERSION_PLACEHOLDERS,
-  type TemplateVersions,
-} from "./template-versions.js";
 
 export interface TemplateVars {
   appId: string;
   appName: string;
-  /**
-   * Version range to substitute for each templated Rome package. Omitted by
-   * callers that materialize a tree carrying no version placeholders (tests,
-   * and any future template without dependencies).
-   */
-  versions?: TemplateVersions;
 }
 
 export function appIdToDisplayName(appId: string): string {
@@ -50,17 +39,10 @@ function appIdToTablePrefix(appId: string): string {
 
 function applyPlaceholders(input: string, vars: TemplateVars): string {
   const tablePrefix = appIdToTablePrefix(vars.appId);
-  let out = input
+  return input
     .replace(/__APP_TABLE_PREFIX__/g, tablePrefix)
     .replace(/__APP_ID__/g, vars.appId)
     .replace(/__APP_NAME__/g, vars.appName);
-  const versions = vars.versions;
-  if (versions != null) {
-    for (const pkg of TEMPLATED_PACKAGES) {
-      out = out.split(VERSION_PLACEHOLDERS[pkg]).join(versions[pkg]);
-    }
-  }
-  return out;
 }
 
 export async function materializeTemplate(
