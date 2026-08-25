@@ -336,6 +336,20 @@ The host owns the theme-specific color and shadow values. A host can therefore
 restyle every kit component by changing its theme custom properties, with no
 fork of the kit.
 
+The two halves reach a shadow-mounted app by different routes. The kit declares
+its constants on `:root, :host`, so an app that imports `styles.css` carries
+them in its own bundle and resolves them inside the shadow root. The host's
+theme values are inherited custom properties, and inheritance crosses the shadow
+boundary on its own.
+
+Only that second half is a promise. Inheritance cannot be narrowed, so an app
+also reaches every other name its host declares, including names the host never
+meant to expose. An app that reads one renders correctly against that host and
+breaks against any other. Import `styles.css` and the constants come with it. An
+app that ships no kit stylesheet declares the few constants it uses itself. The
+layer rules behind this, and the test that enforces it in this repo, are in
+[`docs/design-system.md`](../../docs/design-system.md#rules-that-keep-the-two-layers-sound).
+
 ## Consumers
 
 - `packages/web` — the Rome dashboard.
