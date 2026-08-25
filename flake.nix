@@ -51,6 +51,10 @@
             # its own pinned binaries — see .github/workflows/ci.yml.
             pkgs.shellcheck
             pkgs.shfmt
+            # Vultr's API CLI, for ad-hoc host-side infrastructure work. It
+            # reads VULTR_API_KEY from the environment — keep the key out of
+            # the repo and out of the shell definition.
+            pkgs.vultr-cli
             # NOTE: `pnpm dev:all` needs no host-side mutagen — the rome-sync
             # sidecar (infra/rome-sync) bakes mutagen into its image and runs the
             # source-sync session inside the container.
