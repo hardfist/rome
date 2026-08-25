@@ -15,7 +15,7 @@
     "@radix-ui/react-slot": "^1.1.2",
     "@rome-os/app-runtime": "latest",
     "@rome-os/app-web-sdk": "latest",
-    "@rome-os/ui": "^0.2.2",
+    "@rome-os/ui": "^0.1.7",
     "class-variance-authority": "^0.7.1",
     "drizzle-orm": "^0.45.1",
     "lucide-react": "^0.468.0",

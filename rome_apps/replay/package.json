@@ -17,7 +17,7 @@
     "@radix-ui/react-slider": "^1.4.7",
     "@rome-os/app-runtime": "latest",
     "@rome-os/app-web-sdk": "^0.2.0",
-    "@rome-os/ui": "^0.2.2",
+    "@rome-os/ui": "^0.1.4",
     "drizzle-orm": "^0.45.1",
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",
