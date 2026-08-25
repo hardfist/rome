@@ -4,7 +4,7 @@ The web runtime SDK apps import, plus the `rome` CLI (`bin/rome.js` → `src/cli
 
 ## Styling contract
 
-Color and shadow values vary with theme and mode. The host owns them, and an app inherits them across the shadow boundary. [`packages/web/src/lib/themes.ts`](../web/src/lib/themes.ts) holds the full list.
+Color and shadow values vary with theme and mode. The host owns them, and an app inherits them across the shadow boundary. [`@rome-os/ui/styles.css`](../ui/src/styles.css) holds the full list: the names its `@theme inline` block reads but never declares.
 
 Everything else is local. The app's own bundle supplies it, through the imports in [`src/runtime/styles.css`](src/runtime/styles.css).
 
