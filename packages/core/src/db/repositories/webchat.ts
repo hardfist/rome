@@ -676,13 +676,24 @@ export class WebChatRepository {
   }
 
   async deleteSessionsByProjectPathPrefix(projectPath: string): Promise<number> {
-    const sessions = await this.listSessionRefsByProjectPathPrefix(projectPath);
-    const sessionIds = sessions.map((session) => session.id);
-    if (sessionIds.length === 0) return 0;
+    // The id read belongs in the same transaction as the deletes it drives.
+    // Reading first and awaiting leaves a window where a session created for
+    // the project lands after the list is taken: it isn't in the id list, so
+    // it survives the delete and is left pointing at a project that no longer
+    // exists. `.all()` is the synchronous terminal the better-sqlite3
+    // transaction scope requires (the same shape the deletes' `.run()` uses).
+    return this.db.transaction((tx) => {
+      const sessionIds = tx
+        .select({ id: romeSessions.id })
+        .from(romeSessions)
+        .where(projectPathPrefixCondition(projectPath))
+        .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
+        .all()
+        .map((row) => row.id);
+      if (sessionIds.length === 0) return 0;
 
-    // Same persistence contract as deleteSession(), but batched for project
-    // deletion and all session kinds (top-level chats plus handoff children).
-    await this.db.transaction((tx) => {
+      // Same persistence contract as deleteSession(), but batched for project
+      // deletion and all session kinds (top-level chats plus handoff children).
       for (const chunk of chunkArray(sessionIds, SESSION_DELETE_CHUNK_SIZE)) {
         tx.delete(romeAgentTraceBlocks).where(inArray(romeAgentTraceBlocks.sessionId, chunk)).run();
         tx.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, chunk)).run();
@@ -693,9 +704,9 @@ export class WebChatRepository {
         tx.delete(sharedChats).where(inArray(sharedChats.sessionId, chunk)).run();
         tx.delete(romeSessions).where(inArray(romeSessions.id, chunk)).run();
       }
-    });
 
-    return sessionIds.length;
+      return sessionIds.length;
+    });
   }
 
   async listProjects(): Promise<StoredWebchatProject[]> {

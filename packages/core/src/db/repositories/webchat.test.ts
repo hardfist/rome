@@ -861,6 +861,64 @@ describe("WebChatRepository", () => {
     });
   });
 
+  describe("deleteSessionsByProjectPathPrefix id read", () => {
+    it("reads the session ids inside the same transaction as the deletes", async () => {
+      await repo.createSession("sess-tx", "Tx", undefined, "alpha", null, "alpha");
+      const { db, statements } = trackStatements(testDb.db);
+      const trackedRepo = new WebChatRepository(db);
+
+      await expect(trackedRepo.deleteSessionsByProjectPathPrefix("alpha")).resolves.toBe(1);
+
+      // A `select` on the connection itself means the id list was read in its
+      // own autocommit statement before the transaction opened.
+      expect(statements).toEqual(["transaction"]);
+    });
+
+    it("deletes a session created for the project after the id read", async () => {
+      await repo.createSession("sess-alpha", "Alpha", undefined, "alpha", null, "alpha");
+      await repo.createSession("sess-other", "Other", undefined, "other", null, "other");
+
+      // Stand in for the concurrent create that lands in the window between the
+      // id read and the deletes. Reading the ids first leaves this session
+      // pointing at a project that no longer exists.
+      const original = testDb.db.transaction.bind(testDb.db);
+      const spy = vi
+        .spyOn(testDb.db, "transaction")
+        .mockImplementation((cb: Parameters<typeof original>[0]) => {
+          const now = new Date();
+          testDb.db
+            .insert(romeSessions)
+            .values({
+              id: "sess-alpha-raced",
+              name: "Alpha Raced",
+              projectName: "alpha",
+              projectPath: "alpha",
+              type: "webchat",
+              createdAt: now,
+              activityAt: now,
+            })
+            .run();
+          return original(cb);
+        });
+
+      await expect(repo.deleteSessionsByProjectPathPrefix("alpha")).resolves.toBe(2);
+      spy.mockRestore();
+
+      await expect(repo.listSessionRefsByProjectPathPrefix("alpha")).resolves.toEqual([]);
+      await expect(repo.getSession("sess-alpha")).resolves.toBeNull();
+      await expect(repo.getSession("sess-alpha-raced")).resolves.toBeNull();
+      await expect(repo.getSession("sess-other")).resolves.toMatchObject({ id: "sess-other" });
+    });
+
+    it("returns 0 and deletes nothing when no session matches the prefix", async () => {
+      await repo.createSession("sess-other", "Other", undefined, "other", null, "other");
+
+      await expect(repo.deleteSessionsByProjectPathPrefix("alpha")).resolves.toBe(0);
+
+      await expect(repo.getSession("sess-other")).resolves.toMatchObject({ id: "sess-other" });
+    });
+  });
+
   it("pages project sessions by latest chat activity", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
