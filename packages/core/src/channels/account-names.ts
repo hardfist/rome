@@ -1,9 +1,9 @@
 // What every platform calls its accounts, behind one call. `TalkAccounts`
-// (accounts.ts) is one channel's account plane; this is the display-name half
-// of all of them folded together, so a caller holding a (channel,
-// channelUserId) pair — the identity of an account, per
-// docs/concepts/identity.md — never learns which mirror answers for which
-// channel, nor that some channels have no mirror at all.
+// (accounts.ts) is one channel's address book; this is the display-name half of
+// all of them folded together, so a caller holding a (channel, channelUserId)
+// pair — the identity of an account, per docs/concepts/identity.md — never
+// learns which address book answers for which channel, nor that some channels
+// have none at all.
 
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import type { TalkAccounts } from "./accounts.js";
@@ -11,9 +11,9 @@ import type { TalkAccounts } from "./accounts.js";
 /**
  * What to call an account, on any channel.
  *
- * A channel joins by implementing the account plane, which is what a channel
- * that mirrors an address book owes anyway. A channel Rome only ever sees
- * senders on implements nothing and falls through to their push names.
+ * A channel joins by implementing `TalkAccounts`, which is what a channel that
+ * mirrors an address book owes anyway. A channel Rome only ever sees senders on
+ * implements nothing and falls through to their push names.
  */
 export class AccountNames {
   constructor(
