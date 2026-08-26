@@ -289,6 +289,26 @@ describe("Identities API", () => {
     expect(person.latest?.preview).toBe("from the lid address");
   });
 
+  it("is one row for an account the address book still holds as two cards", async () => {
+    // The store groups on the number a row carries, so a row that has not
+    // learned its number yet is a second card. The channel's account plane is
+    // what says they are one account, and the union takes that answer whole
+    // rather than re-deriving it from jids it should not be reading.
+    await deps.whatsAppStoreRepo.upsertContacts([
+      { jid: "15550009999@s.whatsapp.net", name: "Split Contact" },
+      { jid: "99900099999@lid", phoneNumber: "15550009999" },
+    ]);
+
+    const rows = await fetchRows();
+    const split = rows.filter((r) => r.displayName === "Split Contact");
+    expect(split).toHaveLength(1);
+    expect(split[0].id).toBe("channel:whatsapp:15550009999@s.whatsapp.net");
+    expect(split[0].channels.map((ch) => ch.channelUserId)).toEqual([
+      "15550009999@s.whatsapp.net",
+      "99900099999@lid",
+    ]);
+  });
+
   it("answers a search over names and channel identifiers, silent contacts included", async () => {
     const byName = await fetchPage("?q=silent");
     expect(byName.identities.map((r) => r.id)).toEqual([`channel:whatsapp:${SILENT_JID}`]);

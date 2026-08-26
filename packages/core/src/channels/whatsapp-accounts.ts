@@ -1,4 +1,6 @@
+import { formatWhatsAppPhone } from "@rome/api-types/identities";
 import type { Account, AccountId, TalkAccounts } from "./accounts.js";
+import type { AccountActivity, TalkAccountActivity } from "./account-activity.js";
 import { pageAccounts } from "./account-paging.js";
 import type {
   WhatsAppContactRow,
@@ -64,8 +66,11 @@ function firstNonEmpty(...values: Array<string | null>): string | null {
  *   then a phone-number row for the same person is a second `Account` (I1).
  *   Nothing links the two but the name, and names are not identity.
  */
-export class WhatsAppAccounts implements TalkAccounts {
+export class WhatsAppAccounts implements TalkAccounts, TalkAccountActivity {
   constructor(private readonly store: WhatsAppStoreRepository) {}
+
+  /** The read a concurrent set of calls shares. See {@link load}. */
+  private reading: Promise<Snapshot> | null = null;
 
   async listAccounts(input: {
     query?: string;
@@ -86,20 +91,73 @@ export class WhatsAppAccounts implements TalkAccounts {
     return null;
   }
 
+  async listAddresses(): Promise<Map<string, AccountId>> {
+    const { grouped } = await this.load();
+    const addresses = new Map<string, AccountId>();
+    for (const [id, group] of grouped) {
+      // The id first: it is derived from the account's digits, so it is an
+      // address the account answers to whether or not a row spells it out.
+      addresses.set(id, id);
+      for (const row of group) {
+        for (const alias of row.aliases) addresses.set(alias, id);
+      }
+    }
+    return addresses;
+  }
+
+  async listActivity(): Promise<Map<AccountId, AccountActivity>> {
+    const { grouped } = await this.load();
+    const activity = new Map<AccountId, AccountActivity>();
+    for (const [id, group] of grouped) {
+      // A conversation usually sits on one addressing, but history split across
+      // both is two rows here, so the newest wins and the counts add.
+      const newest = group.reduce(
+        (best, row) => ((row.lastMessageAt ?? -1) > (best.lastMessageAt ?? -1) ? row : best),
+        group[0],
+      );
+      const messageCount = group.reduce((n, row) => n + row.messageCount, 0);
+      if (newest.lastMessageAt == null) continue;
+      activity.set(id, {
+        lastMessageAt: newest.lastMessageAt,
+        lastMessagePreview: newest.lastMessagePreview,
+        messageCount,
+      });
+    }
+    return activity;
+  }
+
   /**
-   * Every account, plus the index every identifier resolves through. The store
-   * already folds a person's two addressings onto one card, but it folds on the
-   * phone number a row carries, so a row that has not learned its number yet
-   * stays separate. Re-keying on the canonical id here collapses those too —
-   * one `Account` per account, whatever the mirror's row shape (I1).
+   * The whole mirror, folded. Every call reads the address book and rebuilds
+   * the index, so walking pages costs one full read per page and `resolve`
+   * costs one per identifier. That is bounded by address-book size and holds no
+   * stale rows. A caller that resolves per message wants a real cache, and the
+   * cache belongs here, where a sync can invalidate it rather than the caller
+   * guessing at when it went stale.
    *
-   * Every call reads the whole address book and rebuilds the index, so walking
-   * pages costs one full read per page and `resolve` costs one per identifier.
-   * That is bounded by address-book size and holds no stale rows. A caller that
-   * resolves per message wants a cache, and the cache belongs behind this port,
-   * where it can be invalidated on a sync rather than guessed at by the caller.
+   * Reads already in flight are shared. That is not that cache: the window
+   * closes the moment the read settles, so nothing outlives a sync. It is what
+   * makes the several reads a single caller needs at once — a listing, its
+   * addresses, its activity — one read of one mirror, so the three answers
+   * cannot describe address books a sync moved between.
    */
-  private async load(): Promise<{ accounts: Account[]; byKey: Map<string, Account> }> {
+  private load(): Promise<Snapshot> {
+    if (this.reading) return this.reading;
+    const reading = this.read();
+    this.reading = reading;
+    const done = () => {
+      if (this.reading === reading) this.reading = null;
+    };
+    reading.then(done, done);
+    return reading;
+  }
+
+  /**
+   * The store already folds a person's two addressings onto one card, but it
+   * folds on the phone number a row carries, so a row that has not learned its
+   * number yet stays separate. Re-keying on the canonical id here collapses
+   * those too — one `Account` per account, whatever the mirror's row shape (I1).
+   */
+  private async read(): Promise<Snapshot> {
     const rows = (await this.store.listContacts({ limit: null })).filter(
       (row) => !row.isGroup && !isGroupJid(row.jid),
     );
@@ -119,8 +177,16 @@ export class WhatsAppAccounts implements TalkAccounts {
       accounts.push(account);
       for (const key of accountKeys(id, group)) byKey.set(key, account);
     }
-    return { accounts, byKey };
+    return { accounts, byKey, grouped };
   }
+}
+
+/** One fold of the mirror: the accounts, the index they resolve through, and
+ *  the rows behind each, which the activity read sums over. */
+interface Snapshot {
+  accounts: Account[];
+  byKey: Map<string, Account>;
+  grouped: Map<AccountId, WhatsAppContactRow[]>;
 }
 
 /**
@@ -155,7 +221,9 @@ function toAccount(id: AccountId, group: WhatsAppContactRow[]): Account {
     pick((row) => row.notify) ??
     pick((row) => row.verifiedName) ??
     pick((row) => row.chatName) ??
-    pick((row) => row.phoneNumber) ??
+    // No name on record anywhere: the number, written the way a person writes
+    // one. The raw JID is a last resort, not a label.
+    formatWhatsAppPhone(pick((row) => row.phoneNumber) ?? id) ??
     id;
 
   return { id, label, identifiers };

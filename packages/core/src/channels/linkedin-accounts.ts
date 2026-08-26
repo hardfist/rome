@@ -37,6 +37,15 @@ export class LinkedInAccounts implements TalkAccounts {
     return accounts.find((account) => account.id === memberId) ?? null;
   }
 
+  async listAddresses(): Promise<Map<string, AccountId>> {
+    // A member is stored under its member id and nothing else; the profile URL
+    // that also names it is derived on sight, not held, so `resolve` is what
+    // takes one.
+    const addresses = new Map<string, AccountId>();
+    for (const account of await this.load()) addresses.set(account.id, account.id);
+    return addresses;
+  }
+
   private async load(): Promise<Account[]> {
     const rows = await this.store.listParticipants({ limit: null });
     return rows.filter((row) => !row.isSelf).map(toAccount);

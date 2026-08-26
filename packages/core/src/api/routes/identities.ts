@@ -10,12 +10,13 @@ import {
   parseIdentityFilterLevel,
   personIdentityId,
   sliceIdentityPage,
-  whatsAppDisplayName,
   type IdentityChannel,
   type IdentityDynamic,
   type IdentityRow,
 } from "@rome/api-types/identities";
 import { STRANGER_PERSON_ID } from "../../constants.js";
+import type { TalkAccountActivity } from "../../channels/account-activity.js";
+import type { TalkAccounts } from "../../channels/accounts.js";
 import type { ApiDeps } from "../deps.js";
 
 // The People page's one read: a union of curated persons, unmapped senders from
@@ -34,23 +35,23 @@ interface SentinelActivity {
 }
 
 /**
- * One identity a channel mirror already holds, in the one shape the union
- * reads mirrors through.
+ * One identity a channel's account plane already holds, in the shape the union
+ * reads every mirror through.
  *
- * WhatsApp's address book answers in its own columns. Projecting it onto this
- * makes every rule below channel-agnostic: adding a second mirror is a branch
- * in {@link readMirror}, not another special case in the union.
+ * The projection is `Account` plus its activity, and nothing channel-specific
+ * survives it: which addressings a channel hands out, which of them is
+ * canonical, and what counts as an account at all are the channel's answers,
+ * given once behind {@link TalkAccounts}. So every rule below is
+ * channel-agnostic, and adding a mirror is an entry in {@link mirrorPlanes}
+ * rather than another special case in the union.
  */
 interface MirrorIdentity {
   channel: string;
-  /** The identifier a mapping or a placement should name — the form the
-   *  channel's own `channel_mappings` rows are keyed by. */
+  /** The account's own address — what a mapping or a placement should name. */
   channelUserId: string;
-  /** Every identifier this identity answers to, `channelUserId` included. */
+  /** Every address the account answers to, `channelUserId` included. */
   aliases: string[];
   displayName: string;
-  /** The person this identity was already promoted into, or null. */
-  linkedPersonId: string | null;
   latest: IdentityDynamic | null;
   messageCount: number;
 }
@@ -117,43 +118,71 @@ export function identitiesRoutes(deps: ApiDeps): Hono {
   return app;
 }
 
+/** A channel whose account plane the union reads. One entry per mirror. */
+interface MirrorPlane {
+  channel: string;
+  accounts: TalkAccounts & TalkAccountActivity;
+}
+
+function mirrorPlanes(deps: ApiDeps): MirrorPlane[] {
+  return [{ channel: "whatsapp", accounts: deps.whatsAppAccounts }];
+}
+
+/**
+ * One page big enough to hold any listing — what `TalkAccounts.listAccounts`
+ * says to ask for when a caller needs every account exactly once. Its order is
+ * stable but the listing under it is not, so walking cursors across a live
+ * mirror would skip or repeat an account as an inbound message reordered it.
+ */
+const WHOLE_LISTING = Number.MAX_SAFE_INTEGER;
+
 /**
  * Every identity the channel mirrors already hold, projected onto one shape.
  *
- * Read whole, not through the address-book endpoint's bound: this answer is
- * paged, and an identity past a cutoff is one the guardian cannot find, that no
- * count includes, and whose alias group the cutoff may have split.
+ * Read whole rather than paged: this answer is paged here, and an identity past
+ * a channel's own cutoff is one the guardian cannot find and no count includes.
  */
-async function readMirror(deps: ApiDeps): Promise<MirrorIdentity[]> {
-  const contacts = await deps.whatsAppStoreRepo.listContacts({ limit: null });
-
+async function readMirrors(deps: ApiDeps): Promise<MirrorIdentity[]> {
   const identities: MirrorIdentity[] = [];
-  for (const contact of contacts) {
-    // Group chats are conversations, not identities — they cannot hold a bond.
-    if (contact.isGroup) continue;
-    identities.push({
-      channel: "whatsapp",
-      channelUserId: contact.jid,
-      aliases: contact.aliases.length > 0 ? contact.aliases : [contact.jid],
-      displayName: whatsAppDisplayName(contact) ?? contact.jid,
-      linkedPersonId: contact.linkedPersonId,
-      latest:
-        contact.lastMessageAt == null
-          ? null
-          : {
-              source: "whatsapp",
-              timestamp: contact.lastMessageAt,
-              preview: contact.lastMessagePreview,
-            },
-      messageCount: contact.messageCount,
-    });
+  for (const { channel, accounts } of mirrorPlanes(deps)) {
+    const [listing, activity, addresses] = await Promise.all([
+      accounts.listAccounts({ limit: WHOLE_LISTING }),
+      accounts.listActivity(),
+      accounts.listAddresses(),
+    ]);
+
+    // The addressing set of each account, which is the address map read the
+    // other way round. A row carries all of them because a search reads them:
+    // an omitted address is a contact the guardian cannot reach by the phone
+    // number they know.
+    const aliasesOf = new Map<string, string[]>();
+    for (const [address, accountId] of addresses) {
+      const group = aliasesOf.get(accountId);
+      if (group) group.push(address);
+      else aliasesOf.set(accountId, [address]);
+    }
+
+    for (const account of listing.accounts) {
+      const seen = activity.get(account.id);
+      identities.push({
+        channel,
+        channelUserId: account.id,
+        aliases: (aliasesOf.get(account.id) ?? [account.id]).sort(compareCodePoints),
+        displayName: account.label,
+        latest:
+          seen == null
+            ? null
+            : { source: channel, timestamp: seen.lastMessageAt, preview: seen.lastMessagePreview },
+        messageCount: seen?.messageCount ?? 0,
+      });
+    }
   }
   return identities;
 }
 
 /** The full union, unordered and unfiltered. */
 async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
-  const mirror = await readMirror(deps);
+  const mirror = await readMirrors(deps);
   const mirrorByAlias = new Map<string, MirrorIdentity>();
   for (const identity of mirror) {
     for (const alias of identity.aliases) {
@@ -161,14 +190,14 @@ async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
     }
   }
 
-  // One mirrored identity is one identity however many identifiers address it,
-  // so every one of them answers to the representative form. Without this the
-  // same person is both a curated person (mapped to one form) and an unknown
-  // sender (a sentinel row under another) — two rows the page cannot merge and
-  // the guardian cannot tell apart.
+  // One mirrored identity is one identity however many addresses reach it, so
+  // every one of them answers to the account's own. Without this the same
+  // person is both a curated person (mapped to one form) and an unknown sender
+  // (a sentinel row under another) — two rows the page cannot merge and the
+  // guardian cannot tell apart.
   //
-  // WhatsApp consolidates a phone jid and a `@lid` jid in the store, so the
-  // fold is a lookup against what it consolidated.
+  // Which addresses fold onto which account is the channel's answer, not a
+  // rule the union derives: it is the address map read as given.
   const canonicalId = (channel: string, channelUserId: string): string =>
     mirrorByAlias.get(activityKey(channel, channelUserId))?.channelUserId ?? channelUserId;
   const identityKey = (channel: string, channelUserId: string) =>
@@ -372,7 +401,9 @@ async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
   // silent ones so the page can keep a 9,000-contact address book out of the
   // stream while search still reaches it.
   for (const identity of mirror) {
-    if (identity.linkedPersonId != null) continue;
+    // A promoted contact is already a person row above, and it was reached
+    // through the same fold, so `mapped` is what holds it back — no second
+    // read of who owns what.
     const key = identityKey(identity.channel, identity.channelUserId);
     if (mapped.has(key)) continue;
     mapped.add(key);

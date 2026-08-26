@@ -60,4 +60,19 @@ export interface TalkAccounts {
   /** The account an identifier belongs to, or null. Accepts any identifier the
    *  channel can receive on — and an {@link AccountId}, which round-trips. */
   resolve(identifier: string): Promise<Account | null>;
+
+  /**
+   * Every address the channel stores, mapped to the account that owns it — I4
+   * read whole instead of one identifier at a time.
+   *
+   * For a caller folding a stored table of identifiers onto accounts: a channel
+   * that mirrors its address book locally answers `resolve` from a full read,
+   * so resolving a table row by row costs one full read per row. The same map
+   * inverted is the addressing set of an account, which a caller needs whenever
+   * it must show or match every form an account can be reached at.
+   *
+   * The addresses are the ones the channel holds. A lone identifier that misses
+   * here may still be a form the channel accepts — `resolve` is what takes it.
+   */
+  listAddresses(): Promise<Map<string, AccountId>>;
 }

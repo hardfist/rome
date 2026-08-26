@@ -71,6 +71,13 @@ describe("LinkedInAccounts", () => {
     expect(await accounts.resolve("ACoAASelf0003")).toBeNull();
   });
 
+  it("lists the member ids it holds, the guardian's own excluded", async () => {
+    expect([...(await accounts.listAddresses()).entries()]).toEqual([
+      ["ACoAAAda0001", "ACoAAAda0001"],
+      ["ACoAAGrace002", "ACoAAGrace002"],
+    ]);
+  });
+
   it("returns null for an unknown identifier", async () => {
     expect(await accounts.resolve("ACoAANobody999")).toBeNull();
     expect(await accounts.resolve("https://www.linkedin.com/in/ada-lovelace/")).toBeNull();

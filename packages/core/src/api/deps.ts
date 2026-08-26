@@ -4,6 +4,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import type { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
+import type { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -71,6 +72,9 @@ export interface ApiDeps {
   personMappingRepo: PersonMappingRepository;
   /** Durable mirror of the WhatsApp address book + message history (People tab). */
   whatsAppStoreRepo: WhatsAppStoreRepository;
+  /** WhatsApp's account plane over that mirror — who it can reach, folded onto
+   *  one account per person, and what was last said to each. */
+  whatsAppAccounts: WhatsAppAccounts;
   /** Durable mirror of the LinkedIn inbox + message history (People tab). */
   linkedInStoreRepo: LinkedInStoreRepository;
   webchatRepo: WebChatRepository;

@@ -51,6 +51,7 @@ import { SessionsRepository } from "./db/repositories/sessions.js";
 import { PersonMappingRepository } from "./db/repositories/person-mapping.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
+import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
@@ -224,6 +225,7 @@ async function main() {
   const sessionsRepo = new SessionsRepository(db);
   const personMappingRepo = new PersonMappingRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
+  const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const sentinelLogRepo = new SentinelLogRepository(db);
   const approvalsRepo = new ApprovalsRepository(db);
@@ -1144,6 +1146,7 @@ async function main() {
       actionLoader,
       personMappingRepo,
       whatsAppStoreRepo,
+      whatsAppAccounts,
       linkedInStoreRepo,
       webchatRepo,
       webhookInvocationsRepo,
