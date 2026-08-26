@@ -1,6 +1,7 @@
 // The People page's unified identity contract: one row shape for every
 // identity Rome has met — curated persons, unmapped senders still sitting in
-// the sentinel log, and WhatsApp address-book contacts nobody has placed yet.
+// the sentinel log, and the mirrored address books nobody has placed yet
+// (WhatsApp contacts, LinkedIn participants).
 //
 // The pieces live here rather than in core because three implementations have
 // to agree on them at once: the `/api/identities` route that computes the
@@ -155,7 +156,8 @@ export interface IdentityRow {
    * Every channel identity this row stands for, aliases included.
    *
    * One person can reach a channel under more than one identifier — a WhatsApp
-   * contact is one row under both its phone jid and its `@lid` jid — and the
+   * contact is one row under both its phone jid and its `@lid` jid, a LinkedIn
+   * member under both a bare member id and a profile URL naming it — and the
    * union consolidates them. All of them belong here, not just whichever the
    * store picked as representative: {@link identityMatchesQuery} searches this
    * list, so an omitted alias is a contact the guardian cannot find by the
@@ -179,13 +181,17 @@ export interface IdentityRow {
    * timeline does not carry it, and an exchange Rome replied to counts the
    * reply. So this is not the length of {@link TimelinePage}, and a client that
    * treats it as one will disagree with the timeline it paged.
+   *
+   * A group conversation contributes to neither: a timeline entry names no
+   * sender, so nothing said in a room of ten people is attributable to one of
+   * them, and the union leaves group threads out of every identity's history.
    */
   messageCount: number;
   /**
-   * A WhatsApp address-book contact that has never said (or been sent)
-   * anything. Only ever true on level "unknown"; the page hides these behind
-   * a toggle so a 9,000-contact address book doesn't bury the four senders
-   * actually waiting.
+   * A mirrored address-book identity — a WhatsApp contact, a LinkedIn
+   * participant — that has never said (or been sent) anything. Only ever true
+   * on level "unknown"; the page hides these behind a toggle so a
+   * 9,000-contact address book doesn't bury the four senders actually waiting.
    */
   neverMessaged: boolean;
 }

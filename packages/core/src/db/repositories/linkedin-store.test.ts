@@ -814,6 +814,130 @@ describe("LinkedInStoreRepository", () => {
       });
     });
   });
+
+  // The identity union reads a participant as a person-shaped row: who they
+  // are, what was last said, and how much of it there is. "What was said" is
+  // the direct threads only — a timeline entry names no sender, so a group
+  // thread's messages cannot be attributed to one of its members.
+  describe("participant activity", () => {
+    const ada = {
+      participantId: "ACoAAAda0001",
+      name: "Ada Lovelace",
+      headline: "Engineer",
+      type: "member",
+      isSelf: false,
+    };
+    const grace = {
+      participantId: "ACoAAGrace002",
+      name: "Grace Hopper",
+      headline: null,
+      type: "member",
+      isSelf: false,
+    };
+    const self = {
+      participantId: "ACoAASelf0003",
+      name: "Me Myself",
+      headline: null,
+      type: "member",
+      isSelf: true,
+    };
+
+    const message = (
+      threadId: string,
+      messageId: string,
+      at: string,
+      text: string | null,
+      overrides: { senderIsSelf?: boolean; subject?: string | null } = {},
+    ) => ({
+      messageId,
+      threadId,
+      sentAt: new Date(at),
+      senderName: "Ada Lovelace",
+      senderProfileUrl: `https://www.linkedin.com/in/${ada.participantId}/`,
+      senderHeadline: null,
+      senderType: "member",
+      senderIsSelf: overrides.senderIsSelf ?? false,
+      text,
+      subject: overrides.subject ?? null,
+      reactionCount: null,
+    });
+
+    const seconds = (at: string) => Math.floor(Date.parse(at) / 1000);
+
+    const participantRow = async (participantId: string) => {
+      const rows = await repo.listParticipants();
+      const row = rows.find((r) => r.participantId === participantId);
+      if (!row) throw new Error(`no participant row for ${participantId}`);
+      return row;
+    };
+
+    beforeEach(async () => {
+      await repo.upsertThreads([
+        thread("t-direct", new Date("2026-08-19T20:00:00Z")),
+        thread("t-group", new Date("2026-08-20T20:00:00Z")),
+      ]);
+      await repo.upsertThreadParticipants("t-direct", [ada, self]);
+      await repo.upsertThreadParticipants("t-group", [ada, grace, self]);
+      await repo.upsertMessages([
+        message("t-direct", "m-1", "2026-08-19T10:00:00Z", "hello from the 1:1"),
+        message("t-direct", "m-2", "2026-08-19T11:00:00Z", "on my way", { senderIsSelf: true }),
+        message("t-group", "m-3", "2026-08-20T10:00:00Z", "hello everyone"),
+      ]);
+    });
+
+    it("reports a direct thread's newest message, both directions counted", async () => {
+      const row = await participantRow(ada.participantId);
+      expect(row.lastMessageAt).toBe(seconds("2026-08-19T11:00:00Z"));
+      expect(row.lastMessagePreview).toBe("on my way");
+      expect(row.messageCount).toBe(2);
+    });
+
+    it("leaves a group thread out of a member's activity", async () => {
+      // Grace is only ever on the group thread, so nothing is attributable to
+      // her — the newer group message is not her news, and never Ada's either.
+      expect(await participantRow(grace.participantId)).toMatchObject({
+        lastMessageAt: null,
+        lastMessagePreview: null,
+        messageCount: 0,
+      });
+      const row = await participantRow(ada.participantId);
+      expect(row.lastMessageAt).toBeLessThan(seconds("2026-08-20T10:00:00Z"));
+    });
+
+    it("counts a thread LinkedIn calls a group as one, whatever its membership says", async () => {
+      // The flag gets a veto over the membership: a two-row participant set on
+      // a thread the snapshot flagged as a group is a set that was read before
+      // the rest of the members were.
+      await repo.upsertThreads([thread("t-flagged", new Date("2026-08-21T20:00:00Z"))]);
+      await repo.markThreadSynced("t-flagged", { isGroup: true });
+      await repo.upsertThreadParticipants("t-flagged", [grace, self]);
+      await repo.upsertMessages([
+        message("t-flagged", "m-4", "2026-08-21T10:00:00Z", "in a group"),
+      ]);
+
+      expect((await participantRow(grace.participantId)).messageCount).toBe(0);
+    });
+
+    it("treats a thread with no snapshot as direct when only one member is on it", async () => {
+      // `is_group` stays null until a thread snapshot reports one, and a thread
+      // seeded from stored messages has membership but no snapshot. Reading the
+      // flag alone would make every such thread nobody's history.
+      const flag = testDb.db.all(
+        sql`SELECT is_group AS isGroup FROM linkedin_threads WHERE thread_id = 't-direct'`,
+      ) as Array<Record<string, unknown>>;
+      expect(flag[0].isGroup).toBeNull();
+      expect((await participantRow(ada.participantId)).messageCount).toBe(2);
+    });
+
+    it("falls back to the InMail subject when a message carries no text", async () => {
+      await repo.upsertMessages([
+        message("t-direct", "m-5", "2026-08-19T12:00:00Z", null, { subject: "Role at Analytical" }),
+      ]);
+      expect((await participantRow(ada.participantId)).lastMessagePreview).toBe(
+        "Role at Analytical",
+      );
+    });
+  });
 });
 
 describe("linkedInMemberIdFromProfileUrl", () => {
