@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Check, Zap } from "lucide-react";
+import { Check, ChevronDown, Zap } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +27,11 @@ export function ModelSelectorMenu({
 }: ModelSelectorMenuProps) {
   const { t } = useTranslation("chat");
 
-  const customSelected = value !== DEFAULT_LARGE_MODEL_SELECTION;
+  // `auto` is a value like any other, so the trigger always has something to
+  // name. The label IS the state — nothing has to encode "non-default" on top.
+  const selected =
+    LARGE_MODEL_OPTIONS.find((option) => option.id === value) ??
+    LARGE_MODEL_OPTIONS.find((option) => option.id === DEFAULT_LARGE_MODEL_SELECTION)!;
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -35,20 +39,15 @@ export function ModelSelectorMenu({
         <Button
           type="button"
           variant="ghost"
-          size="icon-md"
+          size="md"
           disabled={disabled}
           aria-label={t("modelSelector.label")}
           title={t("modelSelector.label")}
-          // `relative` anchors the dot. Ghost has one appearance, so "this menu
-          // holds a non-default value" cannot ride the variant — it is the same
-          // dot the impersonation menu uses, so both answer that question the
-          // same way.
-          className="relative touch-target"
+          className="touch-target"
         >
           <Zap aria-hidden />
-          {customSelected && (
-            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-info" />
-          )}
+          <span className="truncate">{t(selected.labelKey)}</span>
+          <ChevronDown data-icon="inline-end" aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56 rounded-12 p-2">
