@@ -32,6 +32,19 @@ describe("WhatsAppStoreRepository", () => {
     expect(alice?.messageCount).toBe(0);
   });
 
+  it("bounds the address-book read by default, and reads it whole on request", async () => {
+    // The paged identity union cannot inherit a cutoff: a contact past it is
+    // one the guardian cannot find and no count includes.
+    await repo.upsertContacts([
+      { jid: "a1@s.whatsapp.net", phoneNumber: "1", name: "One" },
+      { jid: "a2@s.whatsapp.net", phoneNumber: "2", name: "Two" },
+      { jid: "a3@s.whatsapp.net", phoneNumber: "3", name: "Three" },
+    ]);
+
+    expect(await repo.listContacts({ limit: 2 })).toHaveLength(2);
+    expect(await repo.listContacts({ limit: null })).toHaveLength(3);
+  });
+
   it("hides nameless LID-only contacts but keeps LIDs with a phone identity", async () => {
     await repo.upsertContacts([
       { jid: "raw-lid@lid" },
