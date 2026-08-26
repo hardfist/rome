@@ -92,7 +92,12 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     return respondWithPerson(deps, c, person.id);
   });
 
-  app.delete("/people/:id/accounts/:channel/:channelUserId", async (c) => {
+  // The identifier takes the rest of the path, separators included. A channel
+  // mints its own addresses and channels are open — a Rome App brings one — so
+  // there is no format to promise they avoid "/", and a plain segment would
+  // answer 404 for an account that exists rather than unlinking it. The channel
+  // name above stays one segment, which `accountRef` already requires of it.
+  app.delete("/people/:id/accounts/:channel/:channelUserId{.+}", async (c) => {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
 

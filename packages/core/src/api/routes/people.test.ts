@@ -1136,6 +1136,18 @@ describe("People account links", () => {
     expect(await holderOf(ALICES)).toBeNull();
   });
 
+  it("unlinks an account whose identifier carries the path separator", async () => {
+    // A channel mints its own addresses, so nothing promises they avoid "/".
+    const SLASHED = { channel: "slack", channelUserId: "T0ABCDEF/U0123456" };
+    expect((await link(alice, SLASHED)).status).toBe(200);
+
+    const res = await unlink(alice, SLASHED);
+
+    expect(res.status).toBe(200);
+    expect(refs((await res.json()) as PersonResource)).toEqual(["telegram:tg-alice"]);
+    expect(await holderOf(SLASHED)).toBeNull();
+  });
+
   it("answers 404 when the person does not hold the account", async () => {
     // Held by someone else, so unlinking it here would be a way to reach into
     // their accounts.
