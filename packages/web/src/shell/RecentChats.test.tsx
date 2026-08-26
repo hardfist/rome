@@ -692,3 +692,132 @@ describe("RecentChats", () => {
     );
   });
 });
+
+describe("RecentChats row menu shortcuts", () => {
+  const activeSession = () => ({
+    id: "active-1",
+    name: "Active chat",
+    createdAt: "2026-07-09T10:00:00.000Z",
+    activityAt: "2026-07-09T10:00:00.000Z",
+    lastSeenActivityAt: null,
+    unread: false,
+    projectName: "alpha",
+    projectPath: "alpha",
+  });
+
+  const archivedSession = () => ({
+    ...activeSession(),
+    id: "archived-1",
+    name: "Archived chat",
+    archivedAt: "2026-07-08T12:00:00.000Z",
+  });
+
+  async function openRowMenu() {
+    const user = userEvent.setup();
+    renderRecentChats();
+    await screen.findByRole("link");
+    await user.click(screen.getByRole("button", { name: "Chat actions" }));
+    return user;
+  }
+
+  it("archives the row on A", async () => {
+    const spy = mockSessions([activeSession()]);
+    const user = await openRowMenu();
+
+    await user.keyboard("a");
+
+    await waitFor(() =>
+      expect(
+        spy.mock.calls.some(
+          ([url, init]) =>
+            /\/api\/chat\/sessions\/active-1\/archive$/.test(String(url)) &&
+            init?.method === "PATCH" &&
+            String(init?.body).includes('"archived":true'),
+        ),
+      ).toBe(true),
+    );
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  });
+
+  it("unarchives an archived row on A", async () => {
+    localStorage.setItem("rome-recent-chats-status-filter", "all");
+    const spy = mockSessions([archivedSession()]);
+    const user = await openRowMenu();
+
+    await user.keyboard("a");
+
+    await waitFor(() =>
+      expect(
+        spy.mock.calls.some(
+          ([url, init]) =>
+            /\/api\/chat\/sessions\/archived-1\/archive$/.test(String(url)) &&
+            init?.method === "PATCH" &&
+            String(init?.body).includes('"archived":false'),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("pins the row on P", async () => {
+    const spy = mockSessions([activeSession()]);
+    const user = await openRowMenu();
+
+    await user.keyboard("p");
+
+    await waitFor(() =>
+      expect(
+        spy.mock.calls.some(
+          ([url, init]) =>
+            /\/api\/chat\/sessions\/active-1\/pin$/.test(String(url)) &&
+            init?.method === "PATCH" &&
+            String(init?.body).includes('"pinned":true'),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("opens the rename input on R", async () => {
+    mockSessions([activeSession()]);
+    const user = await openRowMenu();
+
+    await user.keyboard("r");
+
+    const input = await screen.findByRole("textbox", { name: "Chat name" });
+    expect((input as HTMLInputElement).value).toBe("Active chat");
+  });
+
+  it("leaves the letter to the browser when a modifier is held", async () => {
+    const spy = mockSessions([activeSession()]);
+    const user = await openRowMenu();
+
+    await user.keyboard("{Control>}a{/Control}");
+
+    expect(
+      spy.mock.calls.some(([url]) => /\/api\/chat\/sessions\/active-1\/archive$/.test(String(url))),
+    ).toBe(false);
+    expect(screen.getByRole("menu")).toBeTruthy();
+  });
+
+  it("keeps the hint out of the item's accessible name", async () => {
+    mockSessions([activeSession()]);
+    await openRowMenu();
+
+    const archive = screen.getByRole("menuitem", { name: "Archive" });
+    expect(archive.getAttribute("aria-keyshortcuts")).toBe("A");
+    expect(archive.textContent).toContain("A");
+  });
+
+  it("binds no letter to Delete", async () => {
+    const spy = mockSessions([activeSession()]);
+    const user = await openRowMenu();
+
+    expect(screen.getByRole("menuitem", { name: "Delete" }).hasAttribute("aria-keyshortcuts")).toBe(
+      false,
+    );
+
+    await user.keyboard("d");
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(spy.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+  });
+});

@@ -20,6 +20,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
@@ -168,6 +169,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const activeSessionId = activeSessionFromPath(location.pathname);
   const searchShortcut = chatSearchShortcutForPlatform();
@@ -440,6 +442,16 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     const isActive = activeSessionId === session.id;
     const unread = session.unread && !isActive;
     const isEditing = editingId === session.id;
+    const togglePin = () => void setPinned(session.id, !session.pinnedAt);
+    const beginRename = () => startRename(session);
+    const toggleArchive = session.archived
+      ? () => void handleUnarchive(session.id)
+      : () => void setArchived(session.id, true);
+    const shortcuts: Record<string, () => void> = {
+      p: togglePin,
+      r: beginRename,
+      a: toggleArchive,
+    };
     return (
       <div
         key={session.id}
@@ -496,7 +508,10 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
               aria-label={t("recentChats.unread")}
             />
           ) : null}
-          <DropdownMenu>
+          <DropdownMenu
+            open={openMenuId === session.id}
+            onOpenChange={(open) => setOpenMenuId(open ? session.id : null)}
+          >
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
@@ -507,37 +522,54 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 <Ellipsis className="h-3 w-3" aria-hidden />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="bottom" align="end">
-              <DropdownMenuItem
-                className="text-ui"
-                onSelect={() => void setPinned(session.id, !session.pinnedAt)}
-              >
+            <DropdownMenuContent
+              side="bottom"
+              align="end"
+              onKeyDown={(event) => {
+                // Radix composes this ahead of its own typeahead and drops that
+                // handler once the event is defaulted. Without the preventDefault
+                // a bare letter only moves focus to the item it spells.
+                if (event.ctrlKey || event.altKey || event.metaKey) return;
+                const run = shortcuts[event.key.toLowerCase()];
+                if (!run) return;
+                event.preventDefault();
+                run();
+                setOpenMenuId(null);
+              }}
+            >
+              <DropdownMenuItem className="text-ui" aria-keyshortcuts="P" onSelect={togglePin}>
                 {session.pinnedAt ? (
                   <PinOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 ) : (
                   <Pin className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 )}
                 {session.pinnedAt ? t("recentChats.unpinChat") : t("recentChats.pinChat")}
+                <DropdownMenuShortcut aria-hidden>P</DropdownMenuShortcut>
               </DropdownMenuItem>
-              <DropdownMenuItem className="text-ui" onSelect={() => startRename(session)}>
+              <DropdownMenuItem className="text-ui" aria-keyshortcuts="R" onSelect={beginRename}>
                 <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 {t("recentChats.rename")}
+                <DropdownMenuShortcut aria-hidden>R</DropdownMenuShortcut>
               </DropdownMenuItem>
               {session.archived ? (
                 <DropdownMenuItem
                   className="text-ui"
-                  onSelect={() => void handleUnarchive(session.id)}
+                  aria-keyshortcuts="A"
+                  onSelect={toggleArchive}
                 >
                   <ArchiveRestore className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   {t("recentChats.unarchive")}
+                  <DropdownMenuShortcut aria-hidden>A</DropdownMenuShortcut>
                 </DropdownMenuItem>
               ) : (
                 <DropdownMenuItem
                   className="text-ui"
-                  onSelect={() => void setArchived(session.id, true)}
+                  aria-keyshortcuts="A"
+                  onSelect={toggleArchive}
                 >
                   <Archive className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   {t("recentChats.archive")}
+                  <DropdownMenuShortcut aria-hidden>A</DropdownMenuShortcut>
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem
