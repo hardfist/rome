@@ -78,9 +78,9 @@ export interface ApiDeps {
   whatsAppAccounts: WhatsAppAccounts;
   /** Durable mirror of the LinkedIn inbox + message history (People tab). */
   linkedInStoreRepo: LinkedInStoreRepository;
-  /** What each platform calls an account, over every mirror and the sentinel
-   *  log's push names — the display name a person or account serializer puts
-   *  on the wire. */
+  /** What each platform calls an account, over every address book Rome mirrors
+   *  and the names senders put on their own messages — the display name a
+   *  person or account serializer puts on the wire. */
   accountNames: AccountNames;
   webchatRepo: WebChatRepository;
   webhookInvocationsRepo: WebhookInvocationsRepository;

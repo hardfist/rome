@@ -13,12 +13,12 @@ import type { TalkAccounts } from "./accounts.js";
  *
  * A channel joins by implementing `TalkAccounts`, which is what a channel that
  * mirrors an address book owes anyway. A channel Rome only ever sees senders on
- * implements nothing and falls through to their push names.
+ * implements nothing and falls through to the names those senders sent.
  */
 export class AccountNames {
   constructor(
     private readonly providers: Readonly<Record<string, Pick<TalkAccounts, "resolve">>>,
-    private readonly pushNames: Pick<SentinelLogRepository, "listLatestDisplayNames">,
+    private readonly senderNames: Pick<SentinelLogRepository, "listLatestDisplayNames">,
   ) {}
 
   /**
@@ -27,10 +27,10 @@ export class AccountNames {
    * something to render.
    *
    * A channel that addresses one account several ways answers its platform's
-   * name to every one of them. Neither fallback can: a push name is filed under
-   * the addressing its message arrived on, and the last resort only echoes what
-   * it was asked. A caller that folds addressings itself asks with the
-   * account's own address.
+   * name to every one of them. Neither fallback can: a sender's own name is
+   * filed under the addressing its message arrived on, and the last resort only
+   * echoes what it was asked. A caller that folds addressings itself asks with
+   * the account's own address.
    */
   async displayName(channel: string, channelUserId: string): Promise<string> {
     const [name] = await this.displayNames([{ channel, channelUserId }]);
@@ -55,20 +55,18 @@ export class AccountNames {
     const names = mirrored.map((account) => named(account?.name));
     if (names.every((name) => name != null)) return names as string[];
 
-    const pushNames = await this.readPushNames();
-    return names.map(
-      (name, i) => name ?? pushNames.get(key(accounts[i])) ?? accounts[i].channelUserId,
-    );
+    const sent = await this.readSenderNames();
+    return names.map((name, i) => name ?? sent.get(key(accounts[i])) ?? accounts[i].channelUserId);
   }
 
   /** The name each sender last put on a message, by account. */
-  private async readPushNames(): Promise<Map<string, string>> {
-    const pushNames = new Map<string, string>();
-    for (const row of await this.pushNames.listLatestDisplayNames()) {
+  private async readSenderNames(): Promise<Map<string, string>> {
+    const senderNames = new Map<string, string>();
+    for (const row of await this.senderNames.listLatestDisplayNames()) {
       const name = named(row.displayName);
-      if (name) pushNames.set(key(row), name);
+      if (name) senderNames.set(key(row), name);
     }
-    return pushNames;
+    return senderNames;
   }
 }
 

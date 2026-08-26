@@ -89,7 +89,7 @@ describe("AccountNames", () => {
     expect(await names.displayName("telegram", "5599999")).toBe("5599999");
   });
 
-  it("takes the push name when the mirror holds no name, and never over one", async () => {
+  it("takes the name a sender sent when the mirror holds none, and never over one", async () => {
     await sentinelLogRepo.create(sentinelMessage("whatsapp", NAMELESS, "Bobby"));
     await sentinelLogRepo.create(sentinelMessage("whatsapp", PHONE, "Ada on her phone"));
 
