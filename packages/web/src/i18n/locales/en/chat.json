@@ -206,7 +206,6 @@
     "send": "Send",
     "sendTitle": "Send",
     "queueTurnTitle": "Queue a new turn",
-    "stop": "Stop",
     "stopGenerating": "Stop generating"
   },
   "questionCard": {

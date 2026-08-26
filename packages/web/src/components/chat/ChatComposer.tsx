@@ -1034,16 +1034,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 variant="outline"
                 size="icon-md"
                 onClick={onStop}
-                // Square on mobile, icon + label above `sm`. The width override
-                // is important because `icon-lg` sets width via `size-*`: they
-                // are different utilities at equal specificity, so without it
-                // the winner is whichever Tailwind happens to emit last.
-                className="touch-target gap-2 sm:w-auto! sm:px-3"
+                className="touch-target"
                 title={t("composer.stopGenerating")}
                 aria-label={t("composer.stopGenerating")}
               >
-                <span aria-hidden="true" className="inline-block h-2.5 w-2.5 bg-foreground" />
-                <span className="hidden sm:inline">{t("composer.stop")}</span>
+                <span aria-hidden="true" className="inline-block size-2.5 bg-foreground" />
               </Button>
             )}
             <Button
