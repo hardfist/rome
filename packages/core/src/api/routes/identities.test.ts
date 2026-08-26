@@ -9,9 +9,10 @@ import { persons, sentinelLog } from "../../db/schema.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 
 // GET /identities is the People page's one read: a union of curated persons,
-// unmapped sentinel-log senders, and unlinked WhatsApp contacts, all in the
-// shared IdentityRow shape. These tests pin the union's behavior — what shows
-// up, under which typed id and level, and that reading never writes.
+// unmapped sentinel-log senders, and the mirrored address books nobody has
+// placed yet — WhatsApp contacts and LinkedIn participants — all in the shared
+// IdentityRow shape. These tests pin the union's behavior: what shows up, under
+// which typed id and level, and that reading never writes.
 
 const SILENT_JID = "15550001111@s.whatsapp.net";
 const TALKING_JID = "15550002222@s.whatsapp.net";
@@ -395,5 +396,162 @@ describe("Identities API", () => {
         expect(at(row.id)).toBeLessThan(silentIndex);
       }
     }
+  });
+  // LinkedIn is the union's second mirror, and it folds identities on its own
+  // terms: a member id is the identity, a profile URL naming one is the same
+  // identity, and only a direct thread's messages are attributable to one
+  // person. These pin that it lands in the same row shape as WhatsApp.
+  describe("LinkedIn identities", () => {
+    const ADA = "ACoAAAda0001";
+    const GRACE = "ACoAAGrace002";
+    const SELF = "ACoAASelf0003";
+    const LINUS = "ACoAALinus004";
+    const ADA_URL = `https://www.linkedin.com/in/${ADA}/`;
+
+    const participant = (participantId: string, name: string, isSelf = false) => ({
+      participantId,
+      name,
+      headline: null,
+      type: "member",
+      isSelf,
+    });
+
+    const liMessage = (
+      threadId: string,
+      messageId: string,
+      at: string,
+      text: string | null,
+      overrides: { senderIsSelf?: boolean; subject?: string | null } = {},
+    ) => ({
+      messageId,
+      threadId,
+      sentAt: new Date(at),
+      senderIsSelf: overrides.senderIsSelf ?? false,
+      text,
+      subject: overrides.subject ?? null,
+    });
+
+    const ada = participant(ADA, "Ada Lovelace");
+    const grace = participant(GRACE, "Grace Hopper");
+    const linus = participant(LINUS, "Linus Linked");
+    const me = participant(SELF, "Me Myself", true);
+
+    beforeEach(async () => {
+      const thread = (threadId: string) => ({
+        threadId,
+        threadUrl: `https://www.linkedin.com/messaging/thread/${threadId}/`,
+        unread: false,
+      });
+      await deps.linkedInStoreRepo.upsertThreads([
+        thread("li-ada"),
+        thread("li-group"),
+        thread("li-linus"),
+      ]);
+      await deps.linkedInStoreRepo.upsertThreadParticipants("li-ada", [ada, me]);
+      await deps.linkedInStoreRepo.upsertThreadParticipants("li-group", [ada, grace, me]);
+      await deps.linkedInStoreRepo.upsertThreadParticipants("li-linus", [linus, me]);
+      await deps.linkedInStoreRepo.upsertMessages([
+        liMessage("li-ada", "m-1", "2026-08-17T09:00:00Z", "hello from ada"),
+        liMessage("li-ada", "m-2", "2026-08-17T09:30:00Z", "thanks", { senderIsSelf: true }),
+        liMessage("li-group", "m-1", "2026-08-18T09:00:00Z", "a blast to everyone"),
+        liMessage("li-linus", "m-1", "2026-08-17T12:30:00Z", "hi from linus"),
+      ]);
+    });
+
+    it("returns an unplaced participant as an unknown row under their member id", async () => {
+      const row = (await fetchRows()).find((r) => r.id === `channel:linkedin:${ADA}`);
+      expect(row).toBeDefined();
+      expect(row!.level).toBe("unknown");
+      expect(row!.displayName).toBe("Ada Lovelace");
+      expect(row!.neverMessaged).toBe(false);
+      // Both directions of the direct thread, newest word first.
+      expect(row!.latest).toEqual({
+        source: "linkedin",
+        timestamp: Math.floor(new Date("2026-08-17T09:30:00Z").getTime() / 1000),
+        preview: "thanks",
+      });
+      expect(row!.messageCount).toBe(2);
+    });
+
+    it("counts a group thread as nobody's news — a group cannot hold a bond", async () => {
+      const rows = await fetchRows();
+      const grace_ = rows.find((r) => r.id === `channel:linkedin:${GRACE}`)!;
+      // Grace posts only in the group, so she is a mirrored identity with
+      // nothing attributable to her: silent, and held behind the toggle.
+      expect(grace_.latest).toBeNull();
+      expect(grace_.neverMessaged).toBe(true);
+      const hidden = await fetchPage();
+      expect(hidden.identities.some((r) => r.id === `channel:linkedin:${GRACE}`)).toBe(false);
+      // And the group's newer message is not Ada's either.
+      const ada_ = rows.find((r) => r.id === `channel:linkedin:${ADA}`)!;
+      expect(ada_.latest!.timestamp).toBeLessThan(
+        Math.floor(new Date("2026-08-18T09:00:00Z").getTime() / 1000),
+      );
+    });
+
+    it("never offers the account owner as an identity to place", async () => {
+      const rows = await fetchRows();
+      expect(rows.some((r) => r.channels.some((ch) => ch.channelUserId === SELF))).toBe(false);
+    });
+
+    it("projects LinkedIn history onto the person a participant was promoted into", async () => {
+      const personId = await deps.personMappingRepo.create({
+        displayName: "Linus Linked",
+        bondLevel: "acquaintance",
+        approved: true,
+        channelMappings: [{ channel: "linkedin", channelUserId: LINUS }],
+      });
+
+      const rows = await fetchRows();
+      const person = rows.find((r) => r.id === `person:${personId}`)!;
+      expect(person.latest?.preview).toBe("hi from linus");
+      expect(person.latest?.source).toBe("linkedin");
+      expect(person.messageCount).toBe(1);
+      // The promoted participant never shows up a second time as an unknown row.
+      expect(rows.find((r) => r.id === `channel:linkedin:${LINUS}`)).toBeUndefined();
+    });
+
+    it("is one row for a participant whose mapping names their profile URL", async () => {
+      // Promotion writes the bare member id, but the guardian's own mapping is
+      // conferred at connect time as a URL, and an inbound message resolves its
+      // sender's URL to a member id. All name one identity, and comparing them
+      // as strings would show one person as two rows.
+      const personId = await deps.personMappingRepo.create({
+        displayName: "Ada Lovelace",
+        bondLevel: "acquaintance",
+        approved: true,
+        channelMappings: [{ channel: "linkedin", channelUserId: ADA_URL }],
+      });
+
+      const rows = await fetchRows();
+      expect(rows.filter((r) => r.channels.some((ch) => ch.channelUserId === ADA))).toHaveLength(1);
+      expect(rows.find((r) => r.id === `channel:linkedin:${ADA}`)).toBeUndefined();
+      const person = rows.find((r) => r.id === `person:${personId}`)!;
+      expect(person.latest?.preview).toBe("thanks");
+      // The mapping's own form leads, so a client mutating the row addresses
+      // the mapping that exists rather than the one it wishes existed.
+      expect(person.channels.map((ch) => ch.channelUserId)).toEqual([ADA_URL, ADA]);
+    });
+
+    it("folds a sentinel sender onto the participant whose URL it named", async () => {
+      await deps.sentinelLogRepo.create({
+        messageId: "msg-li-1",
+        channel: "linkedin",
+        channelUserId: ADA_URL,
+        displayName: "Ada Lovelace",
+        text: "from the url form",
+        action: "ignored",
+      });
+
+      const rows = await fetchRows();
+      const matching = rows.filter((r) =>
+        r.channels.some((ch) => ch.channel === "linkedin" && ch.channelUserId === ADA),
+      );
+      expect(matching).toHaveLength(1);
+      // The row is offered under the member id, which is the identifier a
+      // placement writes.
+      expect(matching[0].id).toBe(`channel:linkedin:${ADA}`);
+      expect(matching[0].latest?.preview).toBe("from the url form");
+    });
   });
 });

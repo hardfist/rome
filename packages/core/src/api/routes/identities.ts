@@ -15,14 +15,15 @@ import {
   type IdentityDynamic,
   type IdentityRow,
 } from "@rome/api-types/identities";
+import { linkedInMemberId } from "../../channels/linkedin-sync.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import type { ApiDeps } from "../deps.js";
 
 // The People page's one read: a union of curated persons, unmapped senders from
-// the sentinel log, and the WhatsApp contacts nobody has placed yet, every row
-// in the shared `IdentityRow` shape and carrying its newest dynamic. A read —
-// no person row is materialized here, ever; writes stay on the `/persons/*`
-// mutation routes.
+// the sentinel log, and the mirrored address books nobody has placed yet —
+// WhatsApp contacts and LinkedIn participants — every row in the shared
+// `IdentityRow` shape and carrying its newest dynamic. A read — no person row is
+// materialized here, ever; writes stay on the `/persons/*` mutation routes.
 
 interface SentinelActivity {
   channel: string;
@@ -37,9 +38,11 @@ interface SentinelActivity {
  * One identity a channel mirror already holds, in the one shape the union
  * reads mirrors through.
  *
- * WhatsApp's address book answers in its own columns. Projecting it onto this
- * makes every rule below channel-agnostic: adding a second mirror is a branch
- * in {@link readMirror}, not another special case in the union.
+ * WhatsApp's address book and LinkedIn's participant table answer the same
+ * question — who this account can reach, and what was last said — in their own
+ * columns. Projecting both onto this makes every rule below channel-agnostic:
+ * adding a third mirror is a branch in {@link readMirror}, not another special
+ * case in the union.
  */
 interface MirrorIdentity {
   channel: string;
@@ -100,7 +103,7 @@ export function identitiesRoutes(deps: ApiDeps): Hono {
     // instead would answer `neverMessagedTotal: 0` in the very view whose
     // toggle that number is for.
     //
-    // A search does reach them: the toggle holds the address book out of the
+    // A search does reach them: the toggle holds the address books out of the
     // browsing views, not out of a lookup for a name or number the guardian
     // typed.
     return c.json(
@@ -120,12 +123,15 @@ export function identitiesRoutes(deps: ApiDeps): Hono {
 /**
  * Every identity the channel mirrors already hold, projected onto one shape.
  *
- * Read whole, not through the address-book endpoint's bound: this answer is
+ * Read whole, not through the address-book endpoints' bounds: this answer is
  * paged, and an identity past a cutoff is one the guardian cannot find, that no
  * count includes, and whose alias group the cutoff may have split.
  */
 async function readMirror(deps: ApiDeps): Promise<MirrorIdentity[]> {
-  const contacts = await deps.whatsAppStoreRepo.listContacts({ limit: null });
+  const [contacts, participants] = await Promise.all([
+    deps.whatsAppStoreRepo.listContacts({ limit: null }),
+    deps.linkedInStoreRepo.listParticipants({ limit: null }),
+  ]);
 
   const identities: MirrorIdentity[] = [];
   for (const contact of contacts) {
@@ -148,6 +154,31 @@ async function readMirror(deps: ApiDeps): Promise<MirrorIdentity[]> {
       messageCount: contact.messageCount,
     });
   }
+  for (const participant of participants) {
+    // The account owner is not an identity to place. Their own row sits in
+    // every thread they are in, and offering it would put the guardian on the
+    // page as a stranger to themselves.
+    if (participant.isSelf) continue;
+    identities.push({
+      channel: "linkedin",
+      channelUserId: participant.participantId,
+      // One member id, one form. A profile URL naming the same member folds
+      // onto it by derivation rather than by a stored alias — see
+      // `canonicalId` in the union.
+      aliases: [participant.participantId],
+      displayName: participant.name ?? participant.participantId,
+      linkedPersonId: participant.linkedPersonId,
+      latest:
+        participant.lastMessageAt == null
+          ? null
+          : {
+              source: "linkedin",
+              timestamp: participant.lastMessageAt,
+              preview: participant.lastMessagePreview,
+            },
+      messageCount: participant.messageCount,
+    });
+  }
   return identities;
 }
 
@@ -167,10 +198,15 @@ async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
   // sender (a sentinel row under another) — two rows the page cannot merge and
   // the guardian cannot tell apart.
   //
-  // WhatsApp consolidates a phone jid and a `@lid` jid in the store, so the
-  // fold is a lookup against what it consolidated.
-  const canonicalId = (channel: string, channelUserId: string): string =>
-    mirrorByAlias.get(activityKey(channel, channelUserId))?.channelUserId ?? channelUserId;
+  // Two channels reach that form two ways. WhatsApp consolidates a phone jid
+  // and a `@lid` jid in the store, so the fold is a lookup. LinkedIn's forms —
+  // a bare member id and a profile URL carrying one — fold by derivation, so
+  // an identifier the mirror has never seen still lands on the right key.
+  const canonicalId = (channel: string, channelUserId: string): string => {
+    const derived =
+      channel === "linkedin" ? (linkedInMemberId(channelUserId) ?? channelUserId) : channelUserId;
+    return mirrorByAlias.get(activityKey(channel, derived))?.channelUserId ?? derived;
+  };
   const identityKey = (channel: string, channelUserId: string) =>
     activityKey(channel, canonicalId(channel, channelUserId));
   const mirrorFor = (channel: string, channelUserId: string) =>
