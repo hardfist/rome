@@ -6,6 +6,7 @@
 // have none at all.
 
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
+import { mirrorRegistry } from "./account-fold.js";
 import type { TalkAccounts } from "./accounts.js";
 
 /**
@@ -70,17 +71,14 @@ export class AccountNames {
   }
 }
 
-/** The channels Rome mirrors an address book for. A provider joins the
- *  directory here, and every caller keeps asking the same one question. */
+/** A provider joins the directory by taking an entry in {@link mirrorRegistry},
+ *  and every caller keeps asking the same one question. */
 export function createAccountNames(deps: {
   whatsAppAccounts: TalkAccounts;
   linkedInAccounts: TalkAccounts;
   sentinelLogRepo: SentinelLogRepository;
 }): AccountNames {
-  return new AccountNames(
-    { whatsapp: deps.whatsAppAccounts, linkedin: deps.linkedInAccounts },
-    deps.sentinelLogRepo,
-  );
+  return new AccountNames(mirrorRegistry<TalkAccounts>(deps), deps.sentinelLogRepo);
 }
 
 const key = (account: { channel: string; channelUserId: string }) =>

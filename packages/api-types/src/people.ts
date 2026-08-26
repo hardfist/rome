@@ -10,11 +10,13 @@
 // disagree about.
 
 import {
-  compareCodePoints,
-  compareDisplayNames,
+  compareIdentityCursors,
+  encodeIdentityCursor,
   isChannelIdentifier,
+  parseIdentityCursor,
   TIMELINE_PAGE_DEFAULT_LIMIT,
   TIMELINE_PAGE_MAX_LIMIT,
+  type IdentityCursor,
   type IdentityDynamic,
 } from "./identities.js";
 import { STRANGER_PERSON_ID } from "./persons.js";
@@ -32,19 +34,30 @@ export {
 } from "./identities.js";
 
 /**
- * The page size a `?limit=` value asks for: clamped to
- * {@link TIMELINE_PAGE_MAX_LIMIT}, and the default for anything that does not
- * name a positive count — absent, empty, zero, negative, or not a number.
+ * The page size a `?limit=` value asks for: clamped to `max`, and `fallback`
+ * for anything that does not name a positive count — absent, empty, zero,
+ * negative, or not a number.
  *
  * Never zero. A limit of zero answers an empty page with no cursor, which a
- * caller cannot tell from an exhausted timeline, so it would silently truncate
- * the history rather than reporting a bad request.
+ * caller cannot tell from an exhausted listing, so it would silently truncate
+ * the read rather than reporting a bad request.
  */
-export function timelinePageLimit(raw: string | number | null | undefined): number {
+function pageLimit(
+  raw: string | number | null | undefined,
+  bounds: { fallback: number; max: number },
+): number {
   const requested = Number(raw);
   return Number.isFinite(requested) && requested >= 1
-    ? Math.min(Math.floor(requested), TIMELINE_PAGE_MAX_LIMIT)
-    : TIMELINE_PAGE_DEFAULT_LIMIT;
+    ? Math.min(Math.floor(requested), bounds.max)
+    : bounds.fallback;
+}
+
+/** {@link pageLimit} for one page of a timeline. */
+export function timelinePageLimit(raw: string | number | null | undefined): number {
+  return pageLimit(raw, {
+    fallback: TIMELINE_PAGE_DEFAULT_LIMIT,
+    max: TIMELINE_PAGE_MAX_LIMIT,
+  });
 }
 
 /**
@@ -188,7 +201,7 @@ export interface AccountDirectory {
 
 /**
  * Render an account's identity as one token, for a client's row key and for the
- * path segment a write addresses it by.
+ * position a cursor names.
  *
  * Only the first colon is structural, so a channel carrying one would make the
  * token ambiguous. Channel names are short slugs, so refusing the separator
@@ -204,18 +217,6 @@ export function accountRef(account: { channel: string; channelUserId: string }):
   }
   if (!account.channelUserId) throw new Error("channelUserId must be non-empty");
   return `${account.channel}:${account.channelUserId}`;
-}
-
-/** Decode an {@link accountRef}, or null when it is not one. `channelUserId`
- *  may itself contain colons — WhatsApp JIDs carry `:device` suffixes — so only
- *  the first separator is structural. */
-export function parseAccountRef(
-  raw: string | undefined | null,
-): { channel: string; channelUserId: string } | null {
-  if (!raw) return null;
-  const separator = raw.indexOf(":");
-  if (separator <= 0 || separator === raw.length - 1) return null;
-  return { channel: raw.slice(0, separator), channelUserId: raw.slice(separator + 1) };
 }
 
 /** What `?q=` matches: the display name, the linked person's name, and every
@@ -238,20 +239,23 @@ export function accountMatchesQuery(account: DirectoryAccount, query: string): b
  * Where one account sits in the directory's order: the tuple the ordering
  * reads, and nothing else. A cursor carries this rather than a ref, so resuming
  * needs a position rather than an account that still exists.
+ *
+ * The identity stream's position, over an account's ref — one activity order
+ * and one encoding of it, so the reasons it is a tuple rather than a row id and
+ * the reasons every part is escaped hold in one place
+ * ({@link encodeIdentityCursor}) rather than two that can be fixed apart.
  */
-export interface AccountCursor {
-  /** The account's `latest.timestamp`, or null for one that has never done
-   *  anything — those sort last. */
-  timestamp: number | null;
-  displayName: string;
-  ref: string;
-}
+export type AccountCursor = IdentityCursor;
+
+export const compareAccountCursors = compareIdentityCursors;
+export const encodeAccountCursor = encodeIdentityCursor;
+export const parseAccountCursor = parseIdentityCursor;
 
 export function accountCursorOf(account: DirectoryAccount): AccountCursor {
   return {
     timestamp: account.latest?.timestamp ?? null,
     displayName: account.displayName,
-    ref: accountRef(account),
+    id: accountRef(account),
   };
 }
 
@@ -260,54 +264,8 @@ export function accountCursorOf(account: DirectoryAccount): AccountCursor {
  * anything last, ties broken by name and then ref so the sequence is total —
  * which is what lets a cursor resume it.
  */
-export function compareAccountCursors(a: AccountCursor, b: AccountCursor): number {
-  const aAt = a.timestamp;
-  const bAt = b.timestamp;
-  if ((aAt == null) !== (bAt == null)) return aAt == null ? 1 : -1;
-  if (aAt !== bAt) return (bAt ?? 0) - (aAt ?? 0);
-  const byName = compareDisplayNames(a.displayName, b.displayName);
-  return byName !== 0 ? byName : compareCodePoints(a.ref, b.ref);
-}
-
 export function compareAccounts(a: DirectoryAccount, b: DirectoryAccount): number {
   return compareAccountCursors(accountCursorOf(a), accountCursorOf(b));
-}
-
-/**
- * Encode the position a page ended at.
- *
- * The whole ordering tuple, not the last account's ref: between two requests
- * that account is linked, dismissed, or folded onto another addressing — every
- * one of them an ordinary write on this surface — and a cursor that has to find
- * it again answers the next page empty and truncates the directory until the
- * query restarts. A position is still a position after the account at it is
- * gone.
- *
- * Each part is escaped, because a display name is platform-supplied text and a
- * ref carries a JID. Neither can be trusted to leave the separator alone.
- */
-export function encodeAccountCursor(cursor: AccountCursor): string {
-  return [cursor.timestamp ?? "", cursor.displayName, cursor.ref]
-    .map((part) => encodeURIComponent(String(part)))
-    .join("|");
-}
-
-/** Decode an {@link encodeAccountCursor}, or null when it is not one. */
-export function parseAccountCursor(raw: string | undefined | null): AccountCursor | null {
-  if (!raw) return null;
-  const parts = raw.split("|");
-  if (parts.length !== 3) return null;
-  let decoded: string[];
-  try {
-    decoded = parts.map(decodeURIComponent);
-  } catch {
-    return null;
-  }
-  const [rawTimestamp, displayName, ref] = decoded;
-  if (!ref) return null;
-  const timestamp = rawTimestamp === "" ? null : Number(rawTimestamp);
-  if (timestamp !== null && !Number.isFinite(timestamp)) return null;
-  return { timestamp, displayName, ref };
 }
 
 /** Whether an account falls after a cursor in {@link compareAccounts} order —
@@ -322,18 +280,9 @@ export function isAfterAccountCursor(account: DirectoryAccount, cursor: AccountC
 export const ACCOUNT_PAGE_DEFAULT_LIMIT = 200;
 export const ACCOUNT_PAGE_MAX_LIMIT = 500;
 
-/**
- * The page size a `?limit=` value asks for: clamped to
- * {@link ACCOUNT_PAGE_MAX_LIMIT}, and the default for anything that does not
- * name a positive count.
- *
- * Never zero, for the reason {@link timelinePageLimit} gives.
- */
+/** {@link pageLimit} for one page of the account directory. */
 export function accountPageLimit(raw: string | number | null | undefined): number {
-  const requested = Number(raw);
-  return Number.isFinite(requested) && requested >= 1
-    ? Math.min(Math.floor(requested), ACCOUNT_PAGE_MAX_LIMIT)
-    : ACCOUNT_PAGE_DEFAULT_LIMIT;
+  return pageLimit(raw, { fallback: ACCOUNT_PAGE_DEFAULT_LIMIT, max: ACCOUNT_PAGE_MAX_LIMIT });
 }
 
 /**
@@ -372,17 +321,19 @@ export function sliceAccountDirectory(
   const counts: AccountCounts = { unlinked: 0, linked: 0, dismissed: 0 };
   for (const account of admitted) counts[account.state] += 1;
 
-  const ordered = [...admitted].sort(compareAccounts);
+  // The sort key is built once per account rather than once per comparison: it
+  // renders a ref and a directory is thousands of rows, so a comparator that
+  // rebuilds it pays for that on every one of N log N comparisons.
+  const ordered = admitted
+    .map((account) => ({ account, at: accountCursorOf(account) }))
+    .sort((a, b) => compareAccountCursors(a.at, b.at))
+    .map((entry) => entry.account);
   const state = options.state;
   const scoped = state ? ordered.filter((a) => a.state === state) : ordered;
   const cursor = options.cursor;
   const remaining = cursor ? scoped.filter((a) => isAfterAccountCursor(a, cursor)) : scoped;
 
-  const limit = Math.min(
-    Math.max(options.limit ?? ACCOUNT_PAGE_DEFAULT_LIMIT, 1),
-    ACCOUNT_PAGE_MAX_LIMIT,
-  );
-  const accounts = remaining.slice(0, limit);
+  const accounts = remaining.slice(0, accountPageLimit(options.limit));
   const last = accounts.at(-1);
   const nextCursor =
     remaining.length > accounts.length && last ? encodeAccountCursor(accountCursorOf(last)) : null;

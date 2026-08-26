@@ -14,8 +14,14 @@ import {
   type IdentityRow,
 } from "@rome/api-types/identities";
 import { STRANGER_PERSON_ID } from "../../constants.js";
-import { addressKey, readMirrors, type StoredIdentifiers } from "../../channels/mirrors.js";
-import type { SentinelSenderActivity } from "../../db/repositories/sentinel-log.js";
+import {
+  addressKey,
+  foldAccounts,
+  mirrorRegistry,
+  newer,
+  type AccountRecord,
+  type MirrorPlane,
+} from "../../channels/account-fold.js";
 import type { ApiDeps } from "../deps.js";
 
 // The People page's one read: a union of curated persons, unmapped senders from
@@ -23,18 +29,6 @@ import type { ApiDeps } from "../deps.js";
 // contacts, LinkedIn participants — every row in the shared `IdentityRow` shape
 // and carrying its newest dynamic. A read — no person row is materialized here,
 // ever; writes stay on the `/persons/*` mutation routes.
-
-interface ChannelActivity {
-  latest: IdentityDynamic | null;
-  messageCount: number;
-}
-
-/** The newer of two dynamics, or whichever one exists. */
-function newer(a: IdentityDynamic | null, b: IdentityDynamic | null): IdentityDynamic | null {
-  if (!a) return b;
-  if (!b) return a;
-  return b.timestamp > a.timestamp ? b : a;
-}
 
 export function identitiesRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
@@ -86,79 +80,23 @@ export function identitiesRoutes(deps: ApiDeps): Hono {
 
 /** The full union, unordered and unfiltered. */
 async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
-  const senders = await deps.sentinelLogRepo.listSenderActivity();
+  const [senders, unsorted] = await Promise.all([
+    deps.sentinelLogRepo.listSenderActivity(),
+    // One statement, so an identity moving between two people mid-read cannot
+    // land under both of them.
+    deps.personMappingRepo.findAllWithMappings(),
+  ]);
+  const persons = unsorted.sort((a, b) => compareCodePoints(a.id, b.id));
 
-  // One statement, so an identity moving between two people mid-read cannot
-  // land under both of them.
-  const persons = (await deps.personMappingRepo.findAllWithMappings()).sort((a, b) =>
-    compareCodePoints(a.id, b.id),
-  );
-
-  // Every identifier the union is about to fold, gathered before the mirrors
-  // are read so a channel can be asked about the ones its address map misses.
-  const stored: StoredIdentifiers = new Map();
-  const remember = (channel: string, channelUserId: string) => {
-    const group = stored.get(channel);
-    if (group) group.add(channelUserId);
-    else stored.set(channel, new Set([channelUserId]));
-  };
-  for (const sender of senders) remember(sender.channel, sender.channelUserId);
-  for (const person of persons) {
-    for (const mapping of person.channelMappings) remember(mapping.channel, mapping.channelUserId);
-  }
-
-  const { accounts: mirror, byAddress: mirrorByAddress } = await readMirrors(deps, stored);
-
-  // One mirrored identity is one identity however many addresses reach it, so
-  // every one of them answers to the account's own. Without this the same
-  // person is both a curated person (mapped to one form) and an unknown sender
-  // (a sentinel row under another) — two rows the page cannot merge and the
-  // guardian cannot tell apart.
-  //
-  // Which addresses fold onto which account is the channel's answer, not a
-  // rule the union derives: it is the address map read as given.
-  const canonicalId = (channel: string, channelUserId: string): string =>
-    mirrorByAddress.get(addressKey(channel, channelUserId))?.channelUserId ?? channelUserId;
-  const identityKey = (channel: string, channelUserId: string) =>
-    addressKey(channel, canonicalId(channel, channelUserId));
-  const mirrorFor = (channel: string, channelUserId: string) =>
-    mirrorByAddress.get(identityKey(channel, channelUserId));
-
-  const sentinel = new Map<string, SentinelSenderActivity[]>();
-  for (const activity of senders) {
-    const key = identityKey(activity.channel, activity.channelUserId);
-    const group = sentinel.get(key);
-    if (group) group.push(activity);
-    else sentinel.set(key, [activity]);
-  }
-
-  // The newest word wins across both histories: a channel mirror holds the full
-  // thread, the sentinel log holds what every channel saw. Both are read across
-  // every alias of the identity, so which identifier a mapping happens to name
-  // never decides what the row shows.
-  const activityFor = (channel: string, channelUserId: string): ChannelActivity => {
-    const key = identityKey(channel, channelUserId);
-    const mirrored = mirrorByAddress.get(key);
-    const sentinelEntries = sentinel.get(key) ?? [];
-    const sentinelDynamic = sentinelEntries.reduce<IdentityDynamic | null>(
-      (best, entry) =>
-        newer(
-          best,
-          entry.lastMessageAt == null
-            ? null
-            : { source: channel, timestamp: entry.lastMessageAt, preview: entry.lastMessage },
-        ),
-      null,
-    );
-    const sentinelCount = sentinelEntries.reduce((sum, entry) => sum + entry.messageCount, 0);
-    return {
-      latest: newer(sentinelDynamic, mirrored?.latest ?? null),
-      // The mirror's count when there is one: a mirrored message and the
-      // sentinel row that saw it are one message, and adding them would count
-      // every exchange twice.
-      messageCount: mirrored != null ? mirrored.messageCount : sentinelCount,
-    };
-  };
+  const fold = await foldAccounts(mirrorRegistry<MirrorPlane>(deps), {
+    senders,
+    stored: [...senders, ...persons.flatMap((person) => person.channelMappings)],
+  });
+  const canonicalId = (channel: string, channelUserId: string) =>
+    fold.canonical(channel, channelUserId);
+  const identityKey = (channel: string, channelUserId: string) => fold.key(channel, channelUserId);
+  const activityFor = (channel: string, channelUserId: string): AccountRecord =>
+    fold.recordFor(channel, channelUserId);
 
   /**
    * Every identifier a row's channels answer to.
@@ -180,7 +118,7 @@ async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
     };
     for (const channel of channels) {
       add(channel.channel, channel.channelUserId);
-      for (const alias of mirrorFor(channel.channel, channel.channelUserId)?.aliases ?? []) {
+      for (const alias of fold.mirrorFor(channel.channel, channel.channelUserId)?.aliases ?? []) {
         add(channel.channel, alias);
       }
     }
@@ -191,15 +129,16 @@ async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
    *  name for it, then what the sender called themselves, then the raw
    *  identifier. */
   const displayNameFor = (channel: string, channelUserId: string): string => {
-    const key = identityKey(channel, channelUserId);
-    const fromSentinel = (sentinel.get(key) ?? []).reduce<SentinelSenderActivity | null>(
-      (best, entry) =>
-        best == null || (entry.lastMessageAt ?? 0) > (best.lastMessageAt ?? 0) ? entry : best,
-      null,
-    );
+    const named = fold
+      .sendersFor(channel, channelUserId)
+      .reduce<{ displayName: string | null; lastMessageAt: number | null } | null>(
+        (best, entry) =>
+          best == null || (entry.lastMessageAt ?? 0) > (best.lastMessageAt ?? 0) ? entry : best,
+        null,
+      );
     return (
-      mirrorByAddress.get(key)?.name ??
-      fromSentinel?.displayName ??
+      fold.mirrorFor(channel, channelUserId)?.name ??
+      named?.displayName ??
       canonicalId(channel, channelUserId)
     );
   };
@@ -254,7 +193,7 @@ async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
     // already took is that person's history, not a second copy of it here.
     const activity = owned
       .map((mapping) => activityFor(mapping.channel, mapping.channelUserId))
-      .reduce<ChannelActivity>(
+      .reduce<AccountRecord>(
         (best, next) => ({
           latest: newer(best.latest, next.latest),
           messageCount: best.messageCount + next.messageCount,
@@ -290,7 +229,7 @@ async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
   // …then mirrored identities the sentinel never saw. `neverMessaged` marks the
   // silent ones so the page can keep a 9,000-contact address book out of the
   // stream while search still reaches it.
-  for (const identity of mirror) {
+  for (const identity of fold.accounts) {
     // A promoted contact is already a person row above, and it was reached
     // through the same fold, so `mapped` is what holds it back — no second
     // read of who owns what.
