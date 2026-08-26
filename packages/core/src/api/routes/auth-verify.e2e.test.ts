@@ -178,6 +178,22 @@ describe("/api/auth/verify", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns 204 for the connect return leg without a cookie", async () => {
+    const host = buildHost(await stubDeps([]));
+    const res = await verifyRequest(host, "/api/setups/return");
+    expect(res.status).toBe(204);
+  });
+
+  it("keeps the rest of /api/setups/* private", async () => {
+    // The return leg is listed as an exact path, so the sibling routes a
+    // browser must never reach on its own stay behind the cookie.
+    const host = buildHost(await stubDeps([]));
+    for (const uri of ["/api/setups/abc", "/api/setups/abc/input", "/api/setups/abc/cancel"]) {
+      const res = await verifyRequest(host, uri);
+      expect(res.status, uri).toBe(401);
+    }
+  });
+
   it("accepts a raw guardian session explicitly injected by a Native client", async () => {
     const host = buildHost(await stubDeps([]));
     const session = createGuardianSession("native-account");

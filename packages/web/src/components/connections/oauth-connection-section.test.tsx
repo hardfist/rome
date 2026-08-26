@@ -14,7 +14,33 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  // Assigned directly rather than through `stubGlobal` so it cannot leak into a
+  // later test as a phantom desktop shell.
+  Reflect.deleteProperty(window, "rome");
 });
+
+/** Stand in for the desktop preload's bridge, which `isElectronShell` reads. */
+function inDesktopShell(): void {
+  window.rome = {};
+}
+
+/**
+ * A setup parked at the broker hand-off.
+ *
+ * The start response carries `cid` — without it the hook has nothing to poll,
+ * and a card that opened the hand-off would never learn the setup finished in
+ * the other browser. The poll response omits it, matching `GET /api/setups/:cid`.
+ */
+function parkedAtRedirect(url: string) {
+  const state = { status: "awaiting-redirect", url };
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const requested = typeof input === "string" ? input : (input as Request).url;
+    const body = requested.endsWith("/setup")
+      ? { cid: "setup-parked", reattached: false, state }
+      : { state };
+    return new Response(JSON.stringify(body), { status: 200 });
+  });
+}
 
 function githubCard(
   state: GrantState,
@@ -231,5 +257,77 @@ describe("OAuthConnectionSection", () => {
     );
     expect(call).toBeTruthy();
     expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ force: true });
+  });
+
+  it("hands Connect to the system browser in the desktop shell", async () => {
+    const assign = vi.fn();
+    const open = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    vi.stubGlobal("open", open);
+    inDesktopShell();
+    parkedAtRedirect("https://broker/authorize?state=xyz");
+
+    renderSection(githubCard("unauthorized"));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    // The Electron window has no platform authenticator, so a passkey second
+    // factor cannot complete there — this URL must NOT open in it.
+    await waitFor(() => expect(open).toHaveBeenCalledWith("https://broker/authorize?state=xyz"));
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("hands the manual resume to the system browser too, not just the first attempt", async () => {
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    inDesktopShell();
+    parkedAtRedirect("https://broker/authorize?state=parked");
+
+    renderSection(githubCard("unauthorized", { activeSetupCid: "setup-parked" }));
+    // Cancel only exists on the pending controls, so waiting for it is what
+    // distinguishes the parked card from the plain Connect card underneath.
+    await screen.findByRole("button", { name: "Cancel" });
+    // A passive reattach still must not bounce the guardian anywhere.
+    expect(open).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(open).toHaveBeenCalledWith("https://broker/authorize?state=parked");
+  });
+
+  it("keeps the manual resume a same-window navigation in a browser", async () => {
+    const assign = vi.fn();
+    const open = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    vi.stubGlobal("open", open);
+    parkedAtRedirect("https://broker/authorize?state=parked");
+
+    renderSection(githubCard("unauthorized", { activeSetupCid: "setup-parked" }));
+    await screen.findByRole("button", { name: "Cancel" });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    // A browser dashboard already has the user's session and extensions; a new
+    // tab would be a gratuitous change to a flow that works.
+    expect(assign).toHaveBeenCalledWith("https://broker/authorize?state=parked");
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("parks Reconnect on the pending controls instead of leaving a re-clickable button", async () => {
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    inDesktopShell();
+    parkedAtRedirect("https://broker/authorize?state=reauth");
+
+    renderSection(
+      githubCard("authorized", {
+        display: { displayName: "Ada Lovelace", handle: null, email: null, avatarUrl: null },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    await waitFor(() => expect(open).toHaveBeenCalledWith("https://broker/authorize?state=reauth"));
+
+    // The window stays put now, so the card has to narrate the wait — and
+    // Reconnect must not still be sitting there inviting a second hand-off.
+    expect(await screen.findByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
+    expect(open).toHaveBeenCalledTimes(1);
   });
 });

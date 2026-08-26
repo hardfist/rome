@@ -26,8 +26,45 @@ function connectionPath(service: string | undefined): string {
 }
 
 /** The outcome of handling one OAuth return leg. `redirect` is where to send the
- *  guardian; `error` is a terminal failure to show instead. */
-type ReturnOutcome = { redirect: string } | { error: string };
+ *  guardian; `error` is a terminal failure to show instead; `delivered` means the
+ *  leg reached its setup from a browser with no dashboard session of its own —
+ *  the desktop shell's hand-off to the system browser — so there is nowhere to
+ *  send it and the page has to be the ending.
+ *
+ *  Deliberately NOT `connected`. A resumed setup is typically still `presenting`
+ *  while it redeems, and the redeem or the conferral commit can still fail —
+ *  delivery is the most this browser can honestly report. It cannot wait for
+ *  `done` either: `/api/setups/:cid` stays private, so an anonymous browser has
+ *  no way to poll for the real outcome. */
+type ReturnOutcome = { redirect: string } | { error: string } | { delivered: true };
+
+/**
+ * Whether this browser holds a dashboard session.
+ *
+ * Deliberately a bare fetch and NOT the `useAuthState` query. That key is owned
+ * by the auth gate — it is the sole fetcher — and is cached with `staleTime:
+ * Infinity`, invalidated only by the login and onboard mutations. Seeding it
+ * from here would let the SIGN-IN leg, which by definition runs before its own
+ * cookie exists, park `needs-signin` in the cache; the gate would then reuse
+ * that stale answer after the redeem and bounce the user back to /login on a
+ * successful sign-in.
+ *
+ * The question is only ever "is this browser anonymous". A `visitor` is as much
+ * a dashboard session as a `guardian`, so this reads as a negative rather than
+ * an enumeration of the kinds that count.
+ */
+async function hasDashboardSession(): Promise<boolean> {
+  try {
+    const response = await fetch("/api/auth/me", { credentials: "same-origin" });
+    if (!response.ok) return true;
+    const identity = (await response.json()) as { kind?: string };
+    return identity.kind !== "anonymous";
+  } catch {
+    // Can't tell: keep the navigation this flow has always done rather than
+    // stranding a dashboard user on a page that tells them to go back to Rome.
+    return true;
+  }
+}
 
 // Dedup by `(state, handoff, providerError)` so React's double-invoked effects
 // deliver each single-use return leg ONCE. Like `redeemRequests`, an entry is
@@ -77,6 +114,10 @@ function handleOAuthReturnOnce(
       if (returned.state?.status === "failed") {
         return { error: returned.state.reason || fallbackError };
       }
+      // Only a MATCHED setup asks. The sign-in leg below must not probe
+      // identity: it runs before its own session exists, so the answer would be
+      // both wrong and useless there.
+      if (!(await hasDashboardSession())) return { delivered: true };
       // The setup consumed the leg and is finishing the redeem; the connection's
       // detail page re-attaches and settles it.
       return { redirect: connectionPath(returned.service) };
@@ -146,6 +187,10 @@ export default function CallbackPage() {
   const state = searchParams.get("state");
   const providerError = searchParams.get("error");
   const [error, setError] = useState<string | null>(providerError);
+  // The leg reached its setup from a browser with no dashboard session — the
+  // system browser the desktop shell handed off to. There is nowhere to
+  // navigate it, so the page has to be the ending.
+  const [delivered, setDelivered] = useState(false);
 
   useEffect(() => {
     // The `state` is the return-leg correlation for BOTH features (connect-setup
@@ -181,6 +226,10 @@ export default function CallbackPage() {
           setError(outcome.error);
           return;
         }
+        if ("delivered" in outcome) {
+          setDelivered(true);
+          return;
+        }
         navigate(outcome.redirect, { replace: true });
       } catch (returnError) {
         if (cancelled) return;
@@ -203,7 +252,9 @@ export default function CallbackPage() {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-surface-muted px-4 pb-safe pt-safe">
       <div className="w-full max-w-md rounded-12 border border-border bg-surface p-6 shadow-1">
-        <h1 className="text-title text-foreground">{t("callback.title")}</h1>
+        <h1 className="text-title text-foreground">
+          {delivered ? t("callback.deliveredTitle") : t("callback.title")}
+        </h1>
         {displayError ? (
           <>
             <p className="mt-3 text-ui text-destructive-fg">{displayError}</p>
@@ -214,6 +265,8 @@ export default function CallbackPage() {
               {t("callback.returnToLogin")}
             </a>
           </>
+        ) : delivered ? (
+          <p className="mt-3 text-body text-muted-foreground">{t("callback.deliveredBody")}</p>
         ) : (
           <p className="mt-3 text-body text-muted-foreground">{t("callback.description")}</p>
         )}

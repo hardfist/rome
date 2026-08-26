@@ -39,4 +39,39 @@ describe("useSetup stale-state handling", () => {
     await waitFor(() => expect(result.current.cid).toBeNull());
     expect(result.current.state).toBeNull();
   });
+
+  it("keeps polling while parked at the broker hand-off", async () => {
+    // The desktop shell hands the redirect to the SYSTEM browser and this window
+    // stays put, so the return leg resumes the coroutine somewhere else
+    // entirely. Asking again is the only way this card ever learns it connected
+    // — without it the guardian stares at an unchanged card until the
+    // connections page's own refresh interval comes round.
+    let polls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      polls += 1;
+      const state =
+        polls > 1
+          ? { status: "done" }
+          : { status: "awaiting-redirect", url: "https://broker/authorize?state=xyz" };
+      return new Response(JSON.stringify({ state }), { status: 200 });
+    });
+    const onDone = vi.fn();
+    const { result } = renderHook(() =>
+      useSetup({
+        idOrService: "github",
+        grant: "user",
+        activeCid: "cid-parked",
+        pollMs: 10,
+        onDone,
+      }),
+    );
+
+    // Reaching `done` with no further input IS the proof: before this polled
+    // `awaiting-redirect`, the hook settled on the parked state and stopped
+    // asking, so the second answer could never arrive. Asserting the
+    // intermediate state instead would race the next tick.
+    await waitFor(() => expect(result.current.state?.status).toBe("done"));
+    expect(polls).toBeGreaterThan(1);
+    expect(onDone).toHaveBeenCalled();
+  });
 });

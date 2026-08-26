@@ -142,11 +142,14 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
     })();
   }, [cid, settle]);
 
-  // Poll while the coroutine awaits an external event (a `presenting` state):
-  // that is the only state that changes without guardian input.
+  // Poll while the coroutine awaits an external event — the states that change
+  // without guardian input on this page. `awaiting-redirect` is one of them
+  // whenever the hand-off went to the system browser (the desktop shell): the
+  // return leg resumes the coroutine in that other browser, so this window
+  // learns the setup connected only by asking.
   useEffect(() => {
     if (!cid) return;
-    if (state && state.status !== "presenting") return;
+    if (state && state.status !== "presenting" && state.status !== "awaiting-redirect") return;
     let cancelled = false;
     const tick = async (): Promise<void> => {
       const next = await getSetupState(cid);
@@ -169,7 +172,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   }, [cid, state, pollMs, settle, reset]);
 
   // Stop the render loop the moment a terminal state lands (defensive; the poll
-  // effect already bails on non-presenting states).
+  // effect already bails on every state it does not watch).
   const settled = state ? isTerminalSetup(state) : false;
   useEffect(() => {
     if (settled) setBusy(false);

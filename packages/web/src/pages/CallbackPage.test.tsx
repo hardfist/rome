@@ -49,9 +49,13 @@ function renderCallbackAndTrackLanding(search: string) {
   );
 }
 
-/** Route the fetch mock by URL so the two legs (setup return, legacy redeem) can
- *  be stubbed independently. */
-function stubFetch(handlers: { setupReturn?: () => Response; redeem?: () => Response }) {
+/** Route the fetch mock by URL so the three calls (setup return, legacy redeem,
+ *  identity probe) can be stubbed independently. */
+function stubFetch(handlers: {
+  setupReturn?: () => Response;
+  redeem?: () => Response;
+  identity?: () => Response;
+}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = typeof input === "string" ? input : (input as Request).url;
     if (url.includes("/api/setups/return")) {
@@ -62,6 +66,15 @@ function stubFetch(handlers: { setupReturn?: () => Response; redeem?: () => Resp
     }
     if (url.includes("/api/oauth/redeem")) {
       return handlers.redeem?.() ?? new Response("{}", { status: 200 });
+    }
+    if (url.includes("/api/auth/me")) {
+      // Default to a guardian. The probe only decides where a MATCHED setup
+      // lands, and every test written before it existed assumed the dashboard's
+      // own browser — an unspecified shape here would silently take that branch
+      // for the wrong reason.
+      return (
+        handlers.identity?.() ?? new Response(JSON.stringify({ kind: "guardian" }), { status: 200 })
+      );
     }
     return new Response("{}", { status: 200 });
   });
@@ -230,5 +243,75 @@ describe("CallbackPage return-leg routing", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/oauth/redeem"))).toBe(
       false,
     );
+  });
+});
+
+// Where a MATCHED setup's return leg lands depends on whether the browser
+// holding it has a dashboard session. The desktop shell hands provider sign-in
+// to the SYSTEM browser, which has none: navigating there would put an
+// AuthGate-protected route in front of a browser that can only answer it with
+// /login — at the end of every successful connect.
+describe("CallbackPage identity routing", () => {
+  const matchedGithubSetup = () =>
+    new Response(
+      JSON.stringify({
+        matched: true,
+        cid: "setup-gh",
+        service: "github",
+        accepted: true,
+        state: { status: "presenting", view: { progress: true } },
+      }),
+      { status: 200 },
+    );
+
+  const identity = (kind: string) => () => new Response(JSON.stringify({ kind }), { status: 200 });
+
+  it("ends on the page when the browser has no session, claiming only delivery", async () => {
+    stubFetch({ setupReturn: matchedGithubSetup, identity: identity("anonymous") });
+    renderCallbackAndTrackLanding("?handoff=h-ext&state=s-ext");
+
+    // A matched setup is typically still `presenting` while it redeems, and the
+    // redeem or the conferral can still fail — so this page must not claim the
+    // connection exists. It cannot wait for `done` either: `/api/setups/:cid`
+    // stays private, so an anonymous browser has nothing to poll.
+    expect(await screen.findByText("Authorization received")).toBeTruthy();
+    expect(screen.queryByText(/Connected/)).toBeNull();
+    // Nowhere to send it — the page has to be the ending.
+    expect(screen.queryByTestId("landed-on")).toBeNull();
+  });
+
+  it("still returns a guardian to the connection's own page", async () => {
+    stubFetch({ setupReturn: matchedGithubSetup, identity: identity("guardian") });
+    renderCallbackAndTrackLanding("?handoff=h-guard&state=s-guard");
+
+    const landed = await screen.findByTestId("landed-on");
+    expect(landed.textContent).toBe("/settings/connections/github");
+  });
+
+  it("treats a visitor as a dashboard session too", async () => {
+    // The check reads `!== "anonymous"` rather than enumerating the kinds that
+    // count: a visitor is as much a browser session as a guardian, and an
+    // enumeration would strand them on the terminal page.
+    stubFetch({ setupReturn: matchedGithubSetup, identity: identity("visitor") });
+    renderCallbackAndTrackLanding("?handoff=h-vis&state=s-vis");
+
+    const landed = await screen.findByTestId("landed-on");
+    expect(landed.textContent).toBe("/settings/connections/github");
+  });
+
+  it("never probes identity on the sign-in leg", async () => {
+    // Sign-in runs BEFORE its own cookie exists, so the probe would answer
+    // "anonymous" for someone who is about to be signed in. It is also why this
+    // check is a bare fetch rather than the auth gate's query: seeding that
+    // cache here would bounce a successful sign-in straight back to /login.
+    const fetchMock = stubFetch({
+      setupReturn: () => new Response(JSON.stringify({ matched: false }), { status: 404 }),
+      redeem: () => new Response(JSON.stringify({ nextPath: "/dashboard" }), { status: 200 }),
+    });
+    renderCallbackAndTrackLanding("?handoff=h-signin&state=s-signin-identity");
+
+    const landed = await screen.findByTestId("landed-on");
+    expect(landed.textContent).toBe("/dashboard");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/auth/me"))).toBe(false);
   });
 });
