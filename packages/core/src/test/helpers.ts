@@ -51,9 +51,9 @@ import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
+import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
-import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
@@ -541,6 +541,7 @@ export async function buildTestDeps(
     whatsAppStoreRepo,
     whatsAppAccounts,
     linkedInStoreRepo,
+    linkedInAccounts,
     accountNames,
     sentinelLogRepo,
     approvalsRepo,

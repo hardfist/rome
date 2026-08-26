@@ -1,5 +1,7 @@
 import type { Account, AccountId, TalkAccounts } from "./accounts.js";
+import type { AccountActivity, TalkAccountActivity } from "./account-activity.js";
 import { pageAccounts } from "./account-paging.js";
+import { sharedRead } from "./account-snapshot.js";
 import { linkedInMemberIdFromProfileUrl } from "./linkedin-sync.js";
 import type {
   LinkedInParticipantContactRow,
@@ -19,7 +21,7 @@ import type {
  * The guardian's own `isSelf` row is not an account: it names the viewer, not
  * someone the channel reaches.
  */
-export class LinkedInAccounts implements TalkAccounts {
+export class LinkedInAccounts implements TalkAccounts, TalkAccountActivity {
   constructor(private readonly store: LinkedInStoreRepository) {}
 
   async listAccounts(input: {
@@ -27,29 +29,68 @@ export class LinkedInAccounts implements TalkAccounts {
     cursor?: string;
     limit: number;
   }): Promise<{ accounts: Account[]; nextCursor?: string }> {
-    return pageAccounts(await this.load(), input);
+    const { accounts } = await this.load();
+    return pageAccounts(accounts, input);
   }
 
   async resolve(identifier: string): Promise<Account | null> {
     const memberId = memberIdFrom(identifier);
     if (!memberId) return null;
-    const accounts = await this.load();
-    return accounts.find((account) => account.id === memberId) ?? null;
+    const { byId } = await this.load();
+    return byId.get(memberId) ?? null;
   }
 
   async listAddresses(): Promise<Map<string, AccountId>> {
     // A member is stored under its member id and nothing else; the profile URL
     // that also names it is derived on sight, not held, so `resolve` is what
     // takes one.
+    const { accounts } = await this.load();
     const addresses = new Map<string, AccountId>();
-    for (const account of await this.load()) addresses.set(account.id, account.id);
+    for (const account of accounts) addresses.set(account.id, account.id);
     return addresses;
   }
 
-  private async load(): Promise<Account[]> {
-    const rows = await this.store.listParticipants({ limit: null });
-    return rows.filter((row) => !row.isSelf).map(toAccount);
+  /**
+   * What the mirror holds on each member's *direct* threads, and nothing from
+   * the group ones — see `DIRECT_THREADS` in the store for why a room of ten
+   * people is nobody's history. A member Rome only shares group threads with is
+   * absent here rather than zeroed, which is the contract's own "silent".
+   */
+  async listActivity(): Promise<Map<AccountId, AccountActivity>> {
+    const { rows } = await this.load();
+    const activity = new Map<AccountId, AccountActivity>();
+    for (const row of rows) {
+      if (row.lastMessageAt == null) continue;
+      activity.set(row.participantId as AccountId, {
+        lastMessageAt: row.lastMessageAt,
+        lastMessagePreview: row.lastMessagePreview,
+        messageCount: row.messageCount,
+      });
+    }
+    return activity;
   }
+
+  /**
+   * The whole mirror, read unbounded because every answer above is drawn from
+   * it and a truncated read would report a member as absent rather than as
+   * missed. Concurrent calls share one read; see {@link sharedRead} for what
+   * that is and is not.
+   */
+  private readonly load = sharedRead(() => this.read());
+
+  private async read(): Promise<Snapshot> {
+    const rows = (await this.store.listParticipants({ limit: null })).filter((row) => !row.isSelf);
+    const accounts = rows.map(toAccount);
+    return { rows, accounts, byId: new Map(accounts.map((a) => [String(a.id), a])) };
+  }
+}
+
+/** One fold of the mirror: the participant rows, the accounts they project
+ *  onto, and the index `resolve` answers from. */
+interface Snapshot {
+  rows: LinkedInParticipantContactRow[];
+  accounts: Account[];
+  byId: Map<string, Account>;
 }
 
 /**

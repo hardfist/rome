@@ -1,6 +1,7 @@
 import type { Account, AccountId, TalkAccounts } from "./accounts.js";
 import type { AccountActivity, TalkAccountActivity } from "./account-activity.js";
 import { pageAccounts } from "./account-paging.js";
+import { sharedRead } from "./account-snapshot.js";
 import type {
   WhatsAppContactRow,
   WhatsAppStoreRepository,
@@ -68,9 +69,6 @@ function firstNonEmpty(...values: Array<string | null>): string | null {
 export class WhatsAppAccounts implements TalkAccounts, TalkAccountActivity {
   constructor(private readonly store: WhatsAppStoreRepository) {}
 
-  /** The read a concurrent set of calls shares. See {@link load}. */
-  private reading: Promise<Snapshot> | null = null;
-
   async listAccounts(input: {
     query?: string;
     cursor?: string;
@@ -131,24 +129,10 @@ export class WhatsAppAccounts implements TalkAccounts, TalkAccountActivity {
    * costs one per identifier. That is bounded by address-book size and holds no
    * stale rows. A caller that resolves per message wants a real cache, and the
    * cache belongs here, where a sync can invalidate it rather than the caller
-   * guessing at when it went stale.
-   *
-   * Reads already in flight are shared. That is not that cache: the window
-   * closes the moment the read settles, so nothing outlives a sync. It is what
-   * makes the several reads a single caller needs at once — a listing, its
-   * addresses, its activity — one read of one mirror, so the three answers
-   * cannot describe address books a sync moved between.
+   * guessing at when it went stale. Concurrent calls share one read; see
+   * {@link sharedRead} for what that is and is not.
    */
-  private load(): Promise<Snapshot> {
-    if (this.reading) return this.reading;
-    const reading = this.read();
-    this.reading = reading;
-    const done = () => {
-      if (this.reading === reading) this.reading = null;
-    };
-    reading.then(done, done);
-    return reading;
-  }
+  private readonly load = sharedRead(() => this.read());
 
   /**
    * The store already folds a person's two addressings onto one card, but it
