@@ -204,6 +204,29 @@ describe("CallbackPage return-leg routing", () => {
     );
   });
 
+  it("does not redeem a late return owned by a cancelled setup", async () => {
+    const fetchMock = stubFetch({
+      setupReturn: () =>
+        new Response(
+          JSON.stringify({
+            matched: true,
+            cid: "setup-cancelled",
+            service: "github",
+            accepted: false,
+            state: { status: "cancelled" },
+          }),
+          { status: 409 },
+        ),
+    });
+    renderCallback("?handoff=h-cancelled&state=s-cancelled");
+
+    expect(await screen.findByText("Connection cancelled")).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/oauth/redeem"))).toBe(
+      false,
+    );
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/auth/me"))).toBe(false);
+  });
+
   it("does NOT dead-end on redeem when the return leg fails ambiguously (5xx)", async () => {
     const fetchMock = stubFetch({
       setupReturn: () => new Response(JSON.stringify({ error: "boom" }), { status: 500 }),

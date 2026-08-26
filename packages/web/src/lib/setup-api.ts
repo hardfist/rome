@@ -138,10 +138,11 @@ export async function submitSetupInput(
 
 /** The outcome of delivering a redirect return leg (the OAuth callback). */
 export interface SetupReturnResult {
-  /** A live setup was suspended at a redirect awaiting this `state`. When false,
-   *  no setup matched (unknown/expired/cancelled/already-consumed, or a flow that
-   *  never started a setup, e.g. sign-in) — the caller falls through to the
-   *  sign-in redeem (`/oauth/redeem`), which shares the OAuth redeem primitive. */
+  /** A setup owns this redirect `state`. This includes a setup cancelled while
+   *  awaiting the redirect: it returns `matched:true, accepted:false` so the
+   *  callback cannot fall through to sign-in redeem. When false, no setup owns
+   *  the state (unknown/expired/already-consumed, or a flow that never started a
+   *  setup, e.g. sign-in). */
   matched: boolean;
   /** Whether THIS delivery resumed the coroutine (200) vs. lost a race to a
    *  concurrent delivery (409, `accepted:false`). Preserved distinct from

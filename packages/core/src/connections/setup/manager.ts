@@ -86,6 +86,11 @@ interface Managed {
   target: SetupTarget;
   grant: string;
   session: SetupSession;
+  /** A redirect state this setup owned when it was cancelled. The terminal
+   *  session already remains reachable for a final poll; retaining this one
+   *  correlation value also prevents a late callback from being mistaken for
+   *  an unrelated sign-in flow. */
+  cancelledRedirectState?: string;
 }
 
 /** The active-setup key: the addressed connection id, or the service name for a
@@ -142,7 +147,7 @@ export class SetupManager {
     const existing = this.#byKey.get(key);
     if (existing && !existing.session.isTerminal) {
       if (opts.force) {
-        await existing.session.cancel();
+        await this.#cancelManaged(existing);
         // Leave it reachable by cid for a final poll; it is no longer active.
       } else {
         return { cid: existing.cid, state: existing.session.state, reattached: true };
@@ -207,12 +212,13 @@ export class SetupManager {
    * opaque codes, so a match is unambiguous). Because it resolves ONLY a session
    * still parked at `awaiting-redirect`, the idempotency guarantees fall out for
    * free: once a return leg has resumed a coroutine it is no longer awaiting a
-   * redirect, so a double/late delivery — or a delivery after cancel — finds no
-   * match (`null`), and a delivery to a session that already advanced is rejected
-   * by the session's own pending-kind guard. Nothing corrupts the setup state.
+   * redirect, so a double/late delivery finds no live match, and a delivery to a
+   * session that already advanced is rejected by the session's own pending-kind
+   * guard. A state retained at cancellation still matches its terminal setup so
+   * the caller cannot mistake that callback for an unrelated sign-in flow.
    *
-   * Returns `{ cid, service, outcome }` for the matched setup, or `null` when no
-   * live setup is awaiting this `state` (unknown/expired/cancelled/already-
+   * Returns `{ cid, service, outcome }` for the setup that owns the state (live
+   * or cancelled), or `null` when no setup owns it (unknown/expired/already-
    * consumed). `service` names the connection the leg belongs to, so the browser
    * can return to that connection's own page rather than a fixed destination.
    */
@@ -220,6 +226,7 @@ export class SetupManager {
     state: string,
     payload: Record<string, string>,
   ): { cid: string; service: string; outcome: Promise<SetupInputOutcome> } | null {
+    let cancelled: Managed | null = null;
     for (const managed of this.#byCid.values()) {
       const current = managed.session.state;
       if (current.status === "awaiting-redirect" && redirectStateOf(current.url) === state) {
@@ -229,14 +236,38 @@ export class SetupManager {
           outcome: managed.session.provideReturn(payload),
         };
       }
+      if (managed.cancelledRedirectState === state) cancelled = managed;
+    }
+    if (cancelled) {
+      return {
+        cid: cancelled.cid,
+        service: cancelled.target.service,
+        outcome: Promise.resolve({
+          accepted: false,
+          reason: "Setup was cancelled.",
+          state: cancelled.session.state,
+        }),
+      };
     }
     return null;
   }
 
   /** Cancel a setup by id. Returns its terminal state, or null when unknown. */
   cancel(cid: string): Promise<SetupState> | null {
-    const session = this.#byCid.get(cid)?.session;
-    return session ? session.cancel() : null;
+    const managed = this.#byCid.get(cid);
+    return managed ? this.#cancelManaged(managed) : null;
+  }
+
+  /** Preserve ownership of a parked redirect before cancellation erases the URL
+   *  from the session's public state. This is deliberately in-memory, matching
+   *  the lifetime of setup sessions themselves. */
+  #cancelManaged(managed: Managed): Promise<SetupState> {
+    const current = managed.session.state;
+    if (current.status === "awaiting-redirect") {
+      const state = redirectStateOf(current.url);
+      if (state) managed.cancelledRedirectState = state;
+    }
+    return managed.session.cancel();
   }
 
   /** The terminal write: hand the conferral to `registry.confer`, which mints

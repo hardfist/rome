@@ -36,7 +36,11 @@ function connectionPath(service: string | undefined): string {
  *  delivery is the most this browser can honestly report. It cannot wait for
  *  `done` either: `/api/setups/:cid` stays private, so an anonymous browser has
  *  no way to poll for the real outcome. */
-type ReturnOutcome = { redirect: string } | { error: string } | { delivered: true };
+type ReturnOutcome =
+  | { redirect: string }
+  | { error: string }
+  | { delivered: true }
+  | { cancelled: true };
 
 /**
  * Whether this browser holds a dashboard session.
@@ -111,6 +115,10 @@ function handleOAuthReturnOnce(
       ...(providerError ? { error: providerError } : {}),
     });
     if (returned.matched) {
+      // Cancellation still owns its redirect state. Stop here so a late browser
+      // return cannot fall through to the sign-in redeem and import a credential
+      // after the guardian explicitly cancelled the connection in Rome.
+      if (returned.state?.status === "cancelled") return { cancelled: true };
       if (returned.state?.status === "failed") {
         return { error: returned.state.reason || fallbackError };
       }
@@ -187,6 +195,7 @@ export default function CallbackPage() {
   const state = searchParams.get("state");
   const providerError = searchParams.get("error");
   const [error, setError] = useState<string | null>(providerError);
+  const [setupCancelled, setSetupCancelled] = useState(false);
   // The leg reached its setup from a browser with no dashboard session — the
   // system browser the desktop shell handed off to. There is nowhere to
   // navigate it, so the page has to be the ending.
@@ -230,6 +239,10 @@ export default function CallbackPage() {
           setDelivered(true);
           return;
         }
+        if ("cancelled" in outcome) {
+          setSetupCancelled(true);
+          return;
+        }
         navigate(outcome.redirect, { replace: true });
       } catch (returnError) {
         if (cancelled) return;
@@ -253,7 +266,11 @@ export default function CallbackPage() {
     <main className="flex min-h-dvh items-center justify-center bg-surface-muted px-4 pb-safe pt-safe">
       <div className="w-full max-w-md rounded-12 border border-border bg-surface p-6 shadow-1">
         <h1 className="text-title text-foreground">
-          {delivered ? t("callback.deliveredTitle") : t("callback.title")}
+          {setupCancelled
+            ? t("callback.cancelledTitle")
+            : delivered
+              ? t("callback.deliveredTitle")
+              : t("callback.title")}
         </h1>
         {displayError ? (
           <>
@@ -265,6 +282,8 @@ export default function CallbackPage() {
               {t("callback.returnToLogin")}
             </a>
           </>
+        ) : setupCancelled ? (
+          <p className="mt-3 text-body text-muted-foreground">{t("callback.cancelledBody")}</p>
         ) : delivered ? (
           <p className="mt-3 text-body text-muted-foreground">{t("callback.deliveredBody")}</p>
         ) : (

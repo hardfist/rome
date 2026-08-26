@@ -660,8 +660,12 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
     expect(registry.find("github")).toHaveLength(1);
   });
 
-  it("rejects a return leg after cancel and leaves zero durable state", async () => {
-    const { app, registry } = oauthHarness();
+  it("keeps a cancelled redirect state owned and leaves zero durable state", async () => {
+    const redeem = vi.fn(async (handoff: string) => ({
+      credential: { material: { accessToken: `tok-${handoff}` }, expiresAt: "never" as const },
+      profile: { login: "octocat" },
+    }));
+    const { app, registry } = oauthHarness({ redeem });
     const { json } = await startOAuth(app);
     const cancel = await app.request(`/setups/${json.cid}/cancel`, {
       method: "POST",
@@ -671,7 +675,13 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
     expect(cancel.status).toBe(200);
 
     const ret = await deliverReturn(app, { state: "st-oauth-1", handoff: "h1" });
-    expect(ret.status).toBe(404);
+    expect(ret.status).toBe(409);
+    expect(await ret.json()).toMatchObject({
+      matched: true,
+      accepted: false,
+      state: { status: "cancelled" },
+    });
+    expect(redeem).not.toHaveBeenCalled();
     expect(registry.find("github")).toHaveLength(0);
   });
 
