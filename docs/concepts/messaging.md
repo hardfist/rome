@@ -2,7 +2,7 @@
 
 ## Channels
 
-Channels are messaging platform integrations — external platforms like Telegram, WhatsApp, and Discord, plus the webchat built into the dashboard. Each channel has an adapter that normalizes platform-specific messages into a common shape carrying the channel, sender identity, thread addressing, content, and the raw platform event.
+Channels are messaging platform integrations — external platforms like Telegram, WhatsApp, and Discord, plus the webchat built into the dashboard. Each channel has an adapter that normalizes platform-specific messages into a common shape carrying the channel, the sender's [account](identity.md#account), thread addressing, content, and the raw platform event.
 
 **Contracts:**
 

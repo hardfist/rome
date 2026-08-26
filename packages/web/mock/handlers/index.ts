@@ -48,6 +48,7 @@ import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { connections } from "./connections-store";
 import { peopleHandlers } from "./people";
+import { proposedPeopleHandlers } from "./people-proposed";
 import { routineHandlers } from "./routines";
 import { settingsHandlers } from "./settings";
 
@@ -1294,6 +1295,10 @@ export const handlers = [
   ...appHandlers,
   ...activityHandlers,
   ...peopleHandlers,
+  // The proposed /people contract (@rome/api-types/people) over the same store
+  // as peopleHandlers — no core route serves it yet. Disjoint path family
+  // (/api/people, /api/accounts), so ordering against peopleHandlers is free.
+  ...proposedPeopleHandlers,
   ...routineHandlers,
   ...settingsHandlers,
 ];

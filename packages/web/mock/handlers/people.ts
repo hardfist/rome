@@ -939,6 +939,19 @@ const linkedinThreads: LinkedInThread[] = [
   },
 ];
 
+// Shared-store escape hatch for ./people-proposed.ts, so a write made through
+// the proposed /people routes is visible to every legacy endpoint in this file
+// and vice versa. Retires with the legacy endpoints once the People surface
+// reads the /people contract.
+export const proposedApiStore = {
+  persons,
+  sentinelSenders,
+  whatsappContacts,
+  ownerOf,
+  nextPersonId,
+  summarize,
+};
+
 export const peopleHandlers = [
   http.get("/api/identities", ({ request }) => {
     const params = new URL(request.url).searchParams;

@@ -1,4 +1,4 @@
-# Identity: Guardian, Visitor & Persons
+# Identity: Guardian, Visitor, Persons, Accounts & Links
 
 ## Guardian
 
@@ -34,17 +34,52 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 
 ## Persons
 
-Rome tracks people the guardian knows. Each person carries a [bond level](#bond-levels) that determines how the system interacts with them, and can be linked to multiple platform-specific identities (a Telegram user ID, a WhatsApp number), so the system recognizes the same person across [channels](messaging.md#channels).
+Rome tracks people the guardian knows. Each person carries a [bond level](#bond-levels) that determines how the system interacts with them. [Links](#link) to multiple [accounts](#account) let the system recognize the same person across [channels](messaging.md#channels).
 
 **Contracts:**
 
-- A person's identity is channel-independent: multiple platform identities resolve to the same person, and what the system knows about them travels with the person, not the platform account.
+- A person's identity is channel-independent: multiple linked accounts resolve to the same person, and what the system knows about someone travels with the person, not with any account.
 - Every person carries exactly one [bond level](#bond-levels).
 
 **Not to be confused with:**
 
 - **[Guardian](#guardian)** — the guardian is served by the instance. Persons are known to it.
-- **Platform identity** — a per-channel account (Telegram user ID, WhatsApp number). A person aggregates one or more of these.
+- **[Account](#account)** — an account is an identity on one platform. A person aggregates the accounts linked to them.
+
+## Account
+
+An account is an identity on an external messaging platform — a Telegram user ID, a WhatsApp number, a LinkedIn profile. The platform owns the account, and Rome only observes it. Deprecated alias: *platform identity*.
+
+**Contracts:**
+
+- An account is identified by its [channel](messaging.md#channels) plus its platform user ID. The same pair always names the same account.
+- Rome never creates or deletes an account. Platforms own the account lifecycle, and Rome learns of accounts from inbound messages.
+- An account resolves to a person only through its [link](#link). An account with no link resolves to no one.
+- An account is in exactly one of three states: unlinked, linked, or dismissed. Dismissal records that the account belongs to no one the guardian tracks. A dismissed account stays out of discovery until the guardian restores or links it.
+- The state is derived from the account's link. No surface stores or reports a state that can disagree with the link behind it.
+- The guardian's own platform identities are accounts like any other, linked to the guardian.
+
+**Not to be confused with:**
+
+- **[Person](#persons)** — Rome owns persons, and platforms own accounts. A person aggregates the accounts linked to them.
+- **[Channel](messaging.md#channels)** — a channel is the platform integration messages arrive through. An account is one identity on that platform.
+- **Connection** — a connection joins the Rome instance to a service. An account belongs to a party on that service.
+
+## Link
+
+A link is the recorded fact that an [account](#account) belongs to a [person](#persons). It is the only identity fact Rome adds to what the platforms provide. Deprecated alias: *channel mapping*.
+
+**Contracts:**
+
+- A link joins exactly one account to exactly one person. There is no ownerless or dangling link.
+- An account carries at most one link, so two persons can never hold the same account.
+- Sender attribution changes only by creating, destroying, or transferring a link, or by dismissing or restoring the account. A transfer between two persons is always an explicit operation, never a side effect of another one.
+- A link applies retroactively: creating one attributes the account's entire message history to the person, and destroying one detaches that history.
+
+**Not to be confused with:**
+
+- **[Bond level](#bond-levels)** — a bond level grades trust in a person. A link attributes an account to a person.
+- **Connection** — a connection joins the Rome instance to a service. A link joins an account to a person.
 
 ## Bond levels
 
