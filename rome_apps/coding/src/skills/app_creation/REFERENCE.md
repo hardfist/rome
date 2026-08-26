@@ -533,8 +533,18 @@ export function createApiHandler(ctx: RomeAppContext): RomeAppApiHandler {
   identity, the single trustworthy "who is calling" answer:
   `{ kind: "guardian"; userId; via: "cookie" | "loopback" }` |
   `{ kind: "visitor"; accountId; email }` | `{ kind: "anonymous" }`.
-  Gate owner-only routes with
-  `if (request.caller.kind !== "guardian") return Response.json({ error: "forbidden" }, { status: 401 })`.
+  The host enforces the app's access mode **before** dispatch: on a private
+  app only the guardian reaches the handler, on a shared app the guardian and
+  the allow-listed visitors, on a public app anyone. A request that reaches
+  the handler is already authorized to use the app. Do **not** gate the whole
+  handler on `caller.kind` — a blanket
+  `if (request.caller.kind !== "guardian") return 403` rejects every visitor
+  and public caller, so sharing the app stops working. Gate only
+  owner-privileged routes — settings writes, agent dispatch, destructive
+  operations — with
+  `if (request.caller.kind !== "guardian") return Response.json({ error: "forbidden" }, { status: 403 })`,
+  and leave the app's ordinary read and interaction routes open to whoever
+  the host admitted.
   Never derive identity from headers yourself — the host strips identity
   headers (`X-Rome-User-Id`, `x-rome-visitor-*`) before dispatch, and on a
   public app any surviving header is attacker-controlled. In the web UI,
