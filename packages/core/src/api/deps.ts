@@ -5,6 +5,7 @@ import type { PersonMappingRepository } from "../db/repositories/person-mapping.
 import type { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import type { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import type { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
+import type { AccountNames } from "../channels/account-names.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -77,6 +78,10 @@ export interface ApiDeps {
   whatsAppAccounts: WhatsAppAccounts;
   /** Durable mirror of the LinkedIn inbox + message history (People tab). */
   linkedInStoreRepo: LinkedInStoreRepository;
+  /** What each platform calls an account, over every mirror and the sentinel
+   *  log's push names — the display name a person or account serializer puts
+   *  on the wire. */
+  accountNames: AccountNames;
   webchatRepo: WebChatRepository;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;

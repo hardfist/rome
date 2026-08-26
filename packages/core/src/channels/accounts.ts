@@ -27,8 +27,22 @@ export type AccountId = string & { readonly __brand: "AccountId" };
 
 export interface Account {
   id: AccountId;
-  /** Human-readable, for display and search. Never an identity key. */
+  /**
+   * Human-readable, for display and search. Never an identity key. It is
+   * {@link name} where the platform holds one, and one of the account's
+   * identifiers written for a human — a phone number, a member id — where it
+   * holds none, so a label always renders.
+   */
   label: string;
+  /**
+   * The name the platform holds for the account, or null when it holds none.
+   *
+   * A caller that would rather fall back to something of its own than to an
+   * identifier — the name a sender put on a message, say — needs to tell a
+   * name from a rendered number, and {@link label} has already made that
+   * choice.
+   */
+  name: string | null;
   /**
    * Searchable facts. Never used to address the account.
    *

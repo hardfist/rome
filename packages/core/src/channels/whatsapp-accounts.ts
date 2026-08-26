@@ -213,20 +213,19 @@ function toAccount(id: AccountId, group: WhatsAppContactRow[]): Account {
   if (lid) identifiers["whatsapp:lid"] = lid;
 
   // Field-major, not row-major: a saved name on any row of the account beats a
-  // push name on another, and every name beats falling back to the number.
+  // push name on another.
   const pick = (field: (row: WhatsAppContactRow) => string | null) =>
     firstNonEmpty(...group.map(field));
-  const label =
+  const name =
     pick((row) => row.name) ??
     pick((row) => row.notify) ??
     pick((row) => row.verifiedName) ??
-    pick((row) => row.chatName) ??
-    // No name on record anywhere: the number, written the way a person writes
-    // one. The raw JID is a last resort, not a label.
-    formatWhatsAppPhone(pick((row) => row.phoneNumber) ?? id) ??
-    id;
+    pick((row) => row.chatName);
+  // No name on record anywhere: the number, written the way a person writes
+  // one. The raw JID is a last resort, not a label.
+  const label = name ?? formatWhatsAppPhone(pick((row) => row.phoneNumber) ?? id) ?? id;
 
-  return { id, label, identifiers };
+  return { id, label, name, identifiers };
 }
 
 /** Every index key the account answers to, including its own id. */
