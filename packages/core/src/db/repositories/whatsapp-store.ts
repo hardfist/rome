@@ -33,7 +33,7 @@ function chunked<T>(items: T[], size: number): T[][] {
  * (`@g.us`) never share a phone number and key on their own JID, so they never
  * merge.
  */
-function identityKey(r: WhatsAppContactRow): string {
+function identityKey(r: WhatsAppContactAliasRow): string {
   if (!r.isGroup && r.phoneNumber) {
     const digits = r.phoneNumber.replace(/\D/g, "");
     if (digits) return `pn:${digits}`;
@@ -42,10 +42,10 @@ function identityKey(r: WhatsAppContactRow): string {
 }
 
 /** First non-empty value of `key` across the group, or null. */
-function coalesceField<K extends keyof WhatsAppContactRow>(
-  group: WhatsAppContactRow[],
+function coalesceField<K extends keyof WhatsAppContactAliasRow>(
+  group: WhatsAppContactAliasRow[],
   key: K,
-): WhatsAppContactRow[K] | null {
+): WhatsAppContactAliasRow[K] | null {
   for (const r of group) {
     const v = r[key];
     if (v != null && v !== "") return v;
@@ -60,9 +60,11 @@ function coalesceField<K extends keyof WhatsAppContactRow>(
  * card's identity (the conversation-bearing one when a chat exists, so opening
  * the chat still resolves its messages) and fold the missing pieces in from its
  * siblings: the address-book name, a person link, and the richer message history.
+ * Every JID that went into the group is kept in `aliases`, sorted, so a caller
+ * that needs the whole addressing set does not have to re-derive the grouping.
  */
-function consolidateByIdentity(rows: WhatsAppContactRow[]): WhatsAppContactRow[] {
-  const groups = new Map<string, WhatsAppContactRow[]>();
+function consolidateByIdentity(rows: WhatsAppContactAliasRow[]): WhatsAppContactRow[] {
+  const groups = new Map<string, WhatsAppContactAliasRow[]>();
   for (const r of rows) {
     const k = identityKey(r);
     const g = groups.get(k);
@@ -72,8 +74,9 @@ function consolidateByIdentity(rows: WhatsAppContactRow[]): WhatsAppContactRow[]
 
   const merged: WhatsAppContactRow[] = [];
   for (const group of groups.values()) {
+    const aliases = group.map((r) => r.jid).sort();
     if (group.length === 1) {
-      merged.push(group[0]);
+      merged.push({ ...group[0], aliases });
       continue;
     }
     const primary = group[0];
@@ -97,6 +100,7 @@ function consolidateByIdentity(rows: WhatsAppContactRow[]): WhatsAppContactRow[]
       lastMessageAt: latest.lastMessageAt,
       lastMessagePreview: latest.lastMessagePreview,
       messageCount: group.reduce((n, r) => n + r.messageCount, 0),
+      aliases,
     });
   }
   return merged;
@@ -117,7 +121,15 @@ export interface WhatsAppContactRow {
   lastMessageAt: number | null;
   lastMessagePreview: string | null;
   messageCount: number;
+  /**
+   * Every JID folded into this card, sorted — the phone-number form, the LID
+   * form, or both. Always contains `jid`.
+   */
+  aliases: string[];
 }
+
+/** One address-book JID as the query reads it, before grouping folds aliases. */
+type WhatsAppContactAliasRow = Omit<WhatsAppContactRow, "aliases">;
 
 export interface WhatsAppMessageRow {
   id: string;
@@ -251,8 +263,15 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
   /**
    * The synced address book, newest-conversation-first then alphabetical,
    * each row annotated with whether it has been promoted to a `persons` entry.
+   *
+   * `limit` bounds the address-book rows read before grouping folds aliases,
+   * so the returned card count can be smaller. It defaults to a generous cap
+   * that suits a single-payload endpoint. Pass `null` to read the table whole,
+   * which is what a caller that paginates the result itself wants.
    */
-  async listContacts(): Promise<WhatsAppContactRow[]> {
+  async listContacts(opts: { limit?: number | null } = {}): Promise<WhatsAppContactRow[]> {
+    const limitClause =
+      opts.limit === null ? sql`` : sql`LIMIT ${opts.limit ?? CONTACTS_READ_LIMIT}`;
     const rows = (await this.db.all(sql`
       WITH wa_threads AS (
         SELECT jid FROM wa_contacts
@@ -294,7 +313,7 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
       )
       ORDER BY (lastMessageAt IS NULL) ASC, lastMessageAt DESC,
         lower(coalesce(c.name, c.notify, c.verified_name, ch.name, c.phone_number, t.jid)) ASC
-      LIMIT ${CONTACTS_READ_LIMIT}
+      ${limitClause}
     `)) as Array<Record<string, unknown>>;
 
     const mapped = rows.map((r) => ({

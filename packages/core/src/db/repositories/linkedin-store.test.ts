@@ -606,6 +606,13 @@ describe("LinkedInStoreRepository", () => {
         expect(rows[0].threadCount).toBe(1);
       });
 
+      it("bounds the participant read by default and reads it whole on limit: null", async () => {
+        expect(await repo.listParticipants({ limit: 1 })).toHaveLength(1);
+        expect(await repo.listParticipants({ limit: null })).toHaveLength(2);
+        // The no-argument call is what `/api/linkedin/participants` makes.
+        expect(await repo.listParticipants()).toHaveLength(2);
+      });
+
       it("promoting writes a person and a linkedin mapping carrying the member id", async () => {
         await people.createWithChannelMapping(
           "ada-lovelace",

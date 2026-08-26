@@ -528,8 +528,16 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
    * Promotion is a guardian action against these rows, not something this
    * repository performs: a LinkedIn inbox holds many identities that should
    * never enter the curated person graph, so nothing here writes `persons`.
+   *
+   * `limit` defaults to a generous cap that suits a single-payload endpoint.
+   * Pass `null` to read the table whole, which is what a caller that paginates
+   * the result itself wants.
    */
-  async listParticipants(): Promise<LinkedInParticipantContactRow[]> {
+  async listParticipants(
+    opts: { limit?: number | null } = {},
+  ): Promise<LinkedInParticipantContactRow[]> {
+    const limitClause =
+      opts.limit === null ? sql`` : sql`LIMIT ${opts.limit ?? PARTICIPANTS_READ_LIMIT}`;
     const rows = (await this.db.all(sql`
       SELECT
         p.participant_id AS participantId,
@@ -546,7 +554,7 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
         ON cm.channel = 'linkedin' AND cm.channel_user_id = p.participant_id
       LEFT JOIN persons person ON person.id = cm.person_id
       ORDER BY lower(coalesce(p.name, p.participant_id)) ASC, p.participant_id ASC
-      LIMIT ${PARTICIPANTS_READ_LIMIT}
+      ${limitClause}
     `)) as Array<Record<string, unknown>>;
 
     return rows.map((r) => ({
