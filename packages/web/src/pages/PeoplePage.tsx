@@ -29,7 +29,7 @@ import {
 import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { PageShell, PageBody } from "@/shell/PageShell";
-import { useInvalidatePersons } from "@/hooks/use-persons";
+import { useInvalidatePeople } from "@/hooks/use-people";
 import { getApiErrorMessage } from "@/lib/api-error";
 import { fetchJson } from "@/lib/fetch-json";
 import { cn } from "@/lib/utils";
@@ -1902,7 +1902,7 @@ function LoadErrorPanel({ message, onRetry }: { message: string; onRetry: () => 
 export default function PeoplePage() {
   const { t } = useTranslation("people");
   const { t: tCommon } = useTranslation("common");
-  const invalidatePersons = useInvalidatePersons();
+  const invalidatePeople = useInvalidatePeople();
   const [unknowns, setUnknowns] = useState<UnknownSender[]>([]);
   const [persons, setPersons] = useState<Person[]>([]);
   const [whatsappContacts, setWhatsappContacts] = useState<WhatsAppContact[]>([]);
@@ -1948,7 +1948,7 @@ export default function PeoplePage() {
       if ("data" in unknownOut) setUnknowns(unknownOut.data);
       if ("data" in personsOut) {
         setPersons(personsOut.data.filter((p) => p.id !== STRANGER_PERSON_ID));
-        invalidatePersons();
+        invalidatePeople();
       }
       if ("data" in waOut) setWhatsappContacts(waOut.data);
       if ("data" in liOut) setLinkedinThreads(liOut.data);
@@ -1969,7 +1969,7 @@ export default function PeoplePage() {
     } finally {
       if (seq === fetchSeq.current) setLoading(false);
     }
-  }, [invalidatePersons, t]);
+  }, [invalidatePeople, t]);
 
   useEffect(() => {
     fetchData();

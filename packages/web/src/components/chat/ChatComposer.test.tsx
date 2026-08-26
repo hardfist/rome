@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { normalizeBondLevel, type PeopleList, type PersonResource } from "@rome/api-types/people";
 import i18n from "@/i18n";
 import { ChatComposer, type ChatComposerProps } from "./ChatComposer";
 
@@ -29,13 +31,37 @@ function stubCoarsePointer(matches: boolean) {
   );
 }
 
-function renderComposer(props: Partial<ChatComposerProps>) {
+function person(id: string, displayName: string, bondLevel: string): PersonResource {
+  return { id, displayName, bondLevel, accounts: [], messageCount: 0, latest: null };
+}
+
+/** A `GET /api/people` body, with the counts the route derives from the rows. */
+function peopleList(people: PersonResource[]): PeopleList {
+  const counts = { all: 0, guardian: 0, "inner-circle": 0, acquaintance: 0, other: 0 };
+  for (const row of people) {
+    counts[normalizeBondLevel(row.bondLevel)] += 1;
+    counts.all += 1;
+  }
+  return { people, counts };
+}
+
+interface RenderComposerOptions {
+  settings?: Record<string, unknown>;
+  /** What `GET /api/people` answers. Defaults to a listing with nobody in it. */
+  people?: PersonResource[];
+}
+
+function renderComposer(props: Partial<ChatComposerProps>, options: RenderComposerOptions = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    input: RequestInfo | URL,
+  ) => {
     const url = String(input);
-    if (url === "/api/settings") return Response.json({ guardianName: "Ada" });
-    if (url === "/api/persons") return Response.json([]);
+    if (url === "/api/settings") {
+      return Response.json({ guardianName: "Ada", ...options.settings });
+    }
+    if (url === "/api/people") return Response.json(peopleList(options.people ?? []));
     if (url === "/api/skills") {
       return Response.json({
         skills: [
@@ -56,14 +82,71 @@ function renderComposer(props: Partial<ChatComposerProps>) {
     return Response.json({}, { status: 404 });
   }) as typeof fetch);
 
-  return render(
-    <MemoryRouter>
-      <QueryClientProvider client={queryClient}>
-        <ChatComposer onSend={vi.fn()} {...props} />
-      </QueryClientProvider>
-    </MemoryRouter>,
-  );
+  return {
+    fetchSpy,
+    ...render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ChatComposer onSend={vi.fn()} {...props} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    ),
+  };
 }
+
+// The people the composer offers to speak as. The listing is the curated
+// people read (`GET /api/people`); the guardian is dropped because speaking as
+// the guardian is what the composer already does by default.
+describe("composer mention list", () => {
+  const GUARDIAN = person("mock-guardian", "Mock Guardian", "guardian");
+  const RAY = person("ray-oster", "Ray Oster", "inner-circle");
+  const SAM = person("sam-okafor", "Sam Okafor", "colleague");
+
+  it("renders its people from GET /api/people", async () => {
+    const { fetchSpy } = renderComposer(
+      {},
+      { settings: { enableImpersonation: true }, people: [GUARDIAN, RAY, SAM] },
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "Impersonation" }));
+
+    expect(await screen.findByText("Ray Oster")).toBeTruthy();
+    expect(screen.getByText("Sam Okafor")).toBeTruthy();
+    await waitFor(() =>
+      expect(fetchSpy.mock.calls.map(([input]) => String(input))).toContain("/api/people"),
+    );
+  });
+
+  it("excludes the guardian", async () => {
+    renderComposer({}, { settings: { enableImpersonation: true }, people: [GUARDIAN, RAY] });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Impersonation" }));
+
+    await screen.findByText("Ray Oster");
+    expect(screen.queryByText("Mock Guardian")).toBeNull();
+  });
+
+  it("offers nobody when the listing holds only the guardian", async () => {
+    renderComposer({}, { settings: { enableImpersonation: true }, people: [GUARDIAN] });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Impersonation" }));
+
+    expect(await screen.findByText("No other users available.")).toBeTruthy();
+  });
+
+  it("never calls the legacy /api/persons route", async () => {
+    const { fetchSpy } = renderComposer(
+      {},
+      { settings: { enableImpersonation: true }, people: [GUARDIAN, RAY] },
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "Impersonation" }));
+    await screen.findByText("Ray Oster");
+
+    const requested = fetchSpy.mock.calls.map(([input]) => String(input));
+    expect(requested.filter((url) => url.startsWith("/api/persons"))).toEqual([]);
+  });
+});
 
 describe("composer error status", () => {
   it("renders the recovery status outside the chatbox with a primary action", () => {

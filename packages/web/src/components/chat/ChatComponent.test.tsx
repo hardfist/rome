@@ -70,8 +70,11 @@ function renderChatComponent(
     if (url === "/api/settings") {
       return Response.json({ guardianName: "Ada", agentName: "Atlas" });
     }
-    if (url === "/api/persons") {
-      return Response.json([]);
+    if (url === "/api/people") {
+      return Response.json({
+        people: [],
+        counts: { all: 0, guardian: 0, "inner-circle": 0, acquaintance: 0, other: 0 },
+      });
     }
     if (url === "/api/chat/sessions") {
       return Response.json(homeData?.sessions ?? []);

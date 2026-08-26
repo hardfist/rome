@@ -32,7 +32,15 @@ import {
   type TimelineEntry,
   type TimelinePage,
 } from "@rome/api-types/identities";
-import type { Person as MentionPerson } from "@/lib/chat-types";
+import {
+  countPeople,
+  comparePeople,
+  parsePersonFilterLevel,
+  personMatchesLevel,
+  personMatchesQuery,
+  type PeopleList,
+  type PersonResource,
+} from "@rome/api-types/people";
 import type {
   LinkedInMessage,
   LinkedInThread,
@@ -49,11 +57,10 @@ import type {
  * served from. One store, so a move made through the new page is visible to
  * every other surface reading the old endpoints.
  *
- * `/api/persons` is the one endpoint two surfaces decode with two different
- * local types — the People page's `Person`, and chat-types' `Person` behind
- * `usePersons` for the composer's mention list. The fixture is pinned to both
- * at once (see `PersonFixture`), which is the case the index's preamble names
- * as only-pinned-to-one when a module types against a single site.
+ * `/api/people` is served from the same store, projected into the people
+ * contract by `buildPeople`. The composer's mention list reads it; only the
+ * People page's own reads and writes still speak `/api/persons`, which is what
+ * that route is left alive for.
  */
 
 const MINUTE = 60;
@@ -117,10 +124,10 @@ const HIKES_JID = "120363041948572901@g.us";
 const DEVIKA_NAME = "Devika";
 const DEVIKA_LATEST = { text: "Are you going on Saturday?", at: 3 * HOUR };
 
-/** Pinned to both parse sites of `/api/persons` at once. `MentionPerson` alone
- *  would let a fixture drop `channelMappings` — the field the People page reads
- *  and the mention list doesn't. */
-type PersonFixture = MentionPerson & PeoplePerson;
+/** The curated graph's row, typed against the People page's `/api/persons`
+ *  decode. `buildPeople` projects the same row into `PersonResource`, so a
+ *  fixture that drops a field breaks whichever surface reads it. */
+type PersonFixture = PeoplePerson;
 
 /**
  * What a contact row actually stores: address-book facts, and nothing derived.
@@ -196,8 +203,9 @@ const persons: PersonFixture[] = [
   },
   {
     // The sentinel row core seeds at boot, carrying one already-dismissed
-    // sender. `/api/persons` returns it and the page filters it back out, so it
-    // is here to keep that filter honest, not to be looked at.
+    // sender. `/api/persons` returns it and the page filters it back out, while
+    // `/api/people` withholds it — it is here to keep both honest, not to be
+    // looked at.
     id: STRANGER_PERSON_ID,
     displayName: STRANGER_PERSON_DISPLAY_NAME,
     bondLevel: "other",
@@ -599,6 +607,20 @@ const missingFields = (fields: string[]) => {
   return HttpResponse.json({ error: `${list} are required` }, { status: 400 });
 };
 
+/** What the account's own platform calls it, then the name its sender put on a
+ *  message, then the address itself — the order `DirectoryAccount.displayName`
+ *  and `LinkedAccount.displayName` both name. Never the linked person's name. */
+function nameForAccount(channel: string, channelUserId: string): string {
+  const contact =
+    channel === "whatsapp"
+      ? whatsappContacts.find((candidate) => candidate.jid === channelUserId)
+      : undefined;
+  const sender = sentinelSenders.find(
+    (s) => s.channel === channel && s.channelUserId === channelUserId,
+  );
+  return (contact ? whatsAppDisplayName(contact) : null) ?? sender?.displayName ?? channelUserId;
+}
+
 export function buildIdentities(): IdentityRow[] {
   const rows: IdentityRow[] = [];
   const mapped = new Set<string>();
@@ -637,14 +659,6 @@ export function buildIdentities(): IdentityRow[] {
     };
   };
 
-  const nameForChannel = (channel: string, channelUserId: string): string => {
-    const contact = channel === "whatsapp" ? contactByJid.get(channelUserId) : undefined;
-    const sender = sentinelSenders.find(
-      (s) => s.channel === channel && s.channelUserId === channelUserId,
-    );
-    return (contact ? whatsAppDisplayName(contact) : null) ?? sender?.displayName ?? channelUserId;
-  };
-
   for (const person of persons) {
     for (const mapping of person.channelMappings) {
       mapped.add(key(mapping.channel, mapping.channelUserId));
@@ -655,7 +669,7 @@ export function buildIdentities(): IdentityRow[] {
         const group = [head];
         rows.push({
           id: channelIdentityId(head.channel, head.channelUserId),
-          displayName: nameForChannel(head.channel, head.channelUserId),
+          displayName: nameForAccount(head.channel, head.channelUserId),
           level: "stranger",
           channels: group,
           ...activityForChannels(group),
@@ -683,7 +697,7 @@ export function buildIdentities(): IdentityRow[] {
     const senderGroup = [{ channel: sender.channel, channelUserId: sender.channelUserId }];
     rows.push({
       id: channelIdentityId(sender.channel, sender.channelUserId),
-      displayName: nameForChannel(sender.channel, sender.channelUserId),
+      displayName: nameForAccount(sender.channel, sender.channelUserId),
       level: "unknown",
       channels: senderGroup,
       ...activityForChannels(senderGroup),
@@ -710,6 +724,44 @@ export function buildIdentities(): IdentityRow[] {
   }
 
   return rows;
+}
+
+/**
+ * Every curated person, as `GET /api/people` serves them.
+ *
+ * Projected off {@link buildIdentities} rather than off the fixture store a
+ * second time: the two surfaces list the same people with the same accounts
+ * and the same activity, so a second derivation would let the mention list and
+ * the identity union disagree about a person the fixtures describe once.
+ *
+ * The stranger sentinel never appears. It contributes one `channel:` row per
+ * dismissed sender rather than a `person:` row, so it falls out here by
+ * construction — the same reason the route withholds it.
+ */
+export function buildPeople(): PersonResource[] {
+  const byId = new Map(persons.map((person) => [person.id, person]));
+  return buildIdentities().flatMap((row) => {
+    const parsed = parseIdentityId(row.id);
+    if (parsed?.kind !== "person") return [];
+    const person = byId.get(parsed.personId);
+    if (!person) return [];
+    return [
+      {
+        id: person.id,
+        displayName: person.displayName,
+        // The stored value, free text included — the page buckets it, the
+        // contract does not launder it.
+        bondLevel: person.bondLevel,
+        accounts: row.channels.map((mapping) => ({
+          channel: mapping.channel,
+          channelUserId: mapping.channelUserId,
+          displayName: nameForAccount(mapping.channel, mapping.channelUserId),
+        })),
+        messageCount: row.messageCount,
+        latest: row.latest,
+      },
+    ];
+  });
 }
 
 /**
@@ -1216,6 +1268,30 @@ export const peopleHandlers = [
   }),
 
   http.get("/api/persons", () => HttpResponse.json(persons)),
+
+  // The curated people read. Query parsing and the counts' scope are the
+  // route's (`packages/core/src/api/routes/people.ts`); the rules they run on
+  // are the contract's, so both ends call the same ones.
+  http.get("/api/people", ({ request }) => {
+    const params = new URL(request.url).searchParams;
+    const rawLevel = params.get("level");
+    const level = parsePersonFilterLevel(rawLevel);
+    if (rawLevel != null && rawLevel !== "" && level === null) {
+      return HttpResponse.json({ error: `level must name a bond level or "all"` }, { status: 400 });
+    }
+
+    // The whole `?q=` match, before `?level=` narrows it — every chip's number
+    // has to stay true while another chip is the selected one.
+    const matching = buildPeople().filter((person) =>
+      personMatchesQuery(person, params.get("q") ?? ""),
+    );
+    return HttpResponse.json({
+      people: matching
+        .filter((person) => personMatchesLevel(person, level ?? "all"))
+        .sort(comparePeople),
+      counts: countPeople(matching),
+    } satisfies PeopleList);
+  }),
 
   http.get("/api/whatsapp/contacts", () => {
     const rows = whatsappContacts.map((contact) => {

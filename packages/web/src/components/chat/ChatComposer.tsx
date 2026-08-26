@@ -24,7 +24,7 @@ import {
   saveSetting,
 } from "@/lib/chat-api";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
-import { usePersons } from "@/hooks/use-persons";
+import { usePeople } from "@/hooks/use-people";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import {
   DEFAULT_LARGE_MODEL_SELECTION,
@@ -228,9 +228,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const [draftSkill, setDraftSkill] = useState<SkillSelection | null>(null);
 
   const { data: settings } = useSettings();
-  const { data: personsData } = usePersons();
+  const { data: peopleData } = usePeople();
   const invalidateSettings = useInvalidateSettings();
-  const persons = personsData ?? [];
+  const people = peopleData ?? [];
   const modelSelectorEnabled = settings?.enableModelSelector === true;
   const impersonationEnabled = settings?.enableImpersonation === true;
   const guardianName = (settings?.guardianName as string | undefined) ?? "";
@@ -778,8 +778,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   };
 
   const impersonationOptions = useMemo(
-    () => persons.filter((p) => p.bondLevel !== "guardian"),
-    [persons],
+    () => people.filter((p) => p.bondLevel !== "guardian"),
+    [people],
   );
   const selectedPerson = useMemo(
     () => impersonationOptions.find((p) => p.id === selectedPersonId) ?? null,

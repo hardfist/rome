@@ -1,8 +1,8 @@
 // The shapes of the endpoints that predate `/api/identities`: the unmapped
 // queue, the curated persons list, and the WhatsApp address-book mirror. Core
-// still serves all three (the agent's mention list reads `/api/persons`, and
-// the mirror backs the chat drawer), so the dashboard's mock backend still
-// stands in for them and types its fixtures against these.
+// still serves all three (this page reads `/api/persons` and writes through
+// it, and the mirror backs the chat drawer), so the dashboard's mock backend
+// still stands in for them and types its fixtures against these.
 //
 // One definition, read by both the fetch site (`PeoplePage.tsx`) and the mock
 // that answers it — a second copy would let the two drift while both still

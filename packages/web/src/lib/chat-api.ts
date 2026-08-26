@@ -8,7 +8,6 @@ import type {
   ChatSearchMessageMatch,
   ChatSession,
   CreateTurnResponse,
-  Person,
   ProjectCatalog,
   ProjectOption,
   ReasoningEffort,
@@ -510,12 +509,6 @@ export async function listRoutineNames(): Promise<string[]> {
   if (!res.ok) return [];
   const rows = (await res.json().catch(() => [])) as Array<{ name?: string }>;
   return rows.map((r) => r.name ?? "").filter(Boolean);
-}
-
-export async function listPersons(): Promise<Person[]> {
-  const res = await fetch("/api/persons", { credentials: "include" });
-  if (!res.ok) return [];
-  return (await res.json()) as Person[];
 }
 
 export async function loadSettings(): Promise<Record<string, unknown>> {
