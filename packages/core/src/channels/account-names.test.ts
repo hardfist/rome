@@ -3,7 +3,8 @@ import { createTestDb, type TestDb } from "../test/helpers.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
-import { AccountNames, createAccountNames, type ProviderNames } from "./account-names.js";
+import { AccountNames, createAccountNames } from "./account-names.js";
+import type { AccountId } from "./accounts.js";
 import { LinkedInAccounts } from "./linkedin-accounts.js";
 import { WhatsAppAccounts } from "./whatsapp-accounts.js";
 
@@ -112,12 +113,19 @@ describe("AccountNames", () => {
     ).toEqual(["Alan T", "Ada Lovelace", NAMELESS]);
   });
 
-  it("takes a new provider as one adapter, with no change to the call", async () => {
-    const matrix: ProviderNames = {
-      displayName: async (channelUserId) =>
-        channelUserId === "@ada:matrix.org" ? "Ada on Matrix" : null,
+  it("takes a new provider as one account plane, with no change to the call", async () => {
+    const matrix = {
+      resolve: async (identifier: string) =>
+        identifier === "@ada:matrix.org"
+          ? {
+              id: identifier as AccountId,
+              label: "Ada on Matrix",
+              name: "Ada on Matrix",
+              identifiers: {},
+            }
+          : null,
     };
-    const withMatrix = new AccountNames({ matrix }, { displayName: async () => null });
+    const withMatrix = new AccountNames({ matrix }, { listLatestDisplayNames: async () => [] });
 
     expect(await withMatrix.displayName("matrix", "@ada:matrix.org")).toBe("Ada on Matrix");
     expect(await withMatrix.displayName("matrix", "@grace:matrix.org")).toBe("@grace:matrix.org");

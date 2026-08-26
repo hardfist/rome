@@ -9,114 +9,66 @@ import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import type { TalkAccounts } from "./accounts.js";
 
 /**
- * One provider's answer to what it calls an account.
+ * What to call an account, on any channel.
  *
- * Null means the provider holds no name for the account — not that the account
- * is unknown, and never an identifier of its own standing in for a name. The
- * fallback is {@link AccountNames}'s to run, once, for every provider.
- */
-export interface ProviderNames {
-  displayName(channelUserId: string): Promise<string | null>;
-}
-
-/** The names a channel's mirror already holds, as its account plane reports
- *  them. Every addressing the channel resolves is accepted, so which form a
- *  caller happens to hold does not decide whether a name comes back. */
-export function mirrorNames(accounts: TalkAccounts): ProviderNames {
-  return {
-    async displayName(channelUserId: string): Promise<string | null> {
-      return named((await accounts.resolve(channelUserId))?.name);
-    },
-  };
-}
-
-/** What senders have called themselves on their own messages, per channel.
- *  Null when nothing a channel delivered carried a name. */
-export interface PushNames {
-  displayName(channel: string, channelUserId: string): Promise<string | null>;
-}
-
-/**
- * A push name resolves to a display name only after the account's own mirror
- * has been asked, so this is the same lookup for a name Rome has no address
- * book for as for one it does. Providers are keyed by channel; a channel with
- * no entry — one Rome only ever sees senders on — falls straight through.
+ * A channel joins by implementing the account plane, which is what a channel
+ * that mirrors an address book owes anyway. A channel Rome only ever sees
+ * senders on implements nothing and falls through to their push names.
  */
 export class AccountNames {
   constructor(
-    private readonly providers: Readonly<Record<string, ProviderNames>>,
-    private readonly pushNames: PushNames,
+    private readonly providers: Readonly<Record<string, Pick<TalkAccounts, "resolve">>>,
+    private readonly pushNames: Pick<SentinelLogRepository, "listLatestDisplayNames">,
   ) {}
 
   /**
-   * What to call this account: the name its platform holds, then the name its
-   * sender put on a message, then the identifier itself — never an empty
-   * string, so a caller always has something to render.
+   * The name its platform holds, then the name its sender put on a message,
+   * then the identifier itself — never an empty string, so a caller always has
+   * something to render.
    *
    * A channel that addresses one account several ways answers its platform's
-   * name to every one of them. Neither fallback can: a push name is filed
-   * under the addressing its message arrived on, and the last resort only
-   * echoes what it was asked. A caller that folds addressings itself asks with
-   * the account's own address.
+   * name to every one of them. Neither fallback can: a push name is filed under
+   * the addressing its message arrived on, and the last resort only echoes what
+   * it was asked. A caller that folds addressings itself asks with the
+   * account's own address.
    */
   async displayName(channel: string, channelUserId: string): Promise<string> {
-    const fromProvider = await this.providers[channel]?.displayName(channelUserId);
-    if (fromProvider != null) return fromProvider;
-    return (await this.pushNames.displayName(channel, channelUserId)) ?? channelUserId;
+    const [name] = await this.displayNames([{ channel, channelUserId }]);
+    return name;
   }
 
   /**
    * The same answers for a listing, positionally — one name per account, in the
    * order asked.
    *
-   * This is the call a directory read wants. A mirror answers `resolve` from a
-   * read of the whole address book, so naming a listing one await at a time
-   * costs one such read per row; asking together lets the mirrors serve the
-   * page from the reads already in flight.
+   * This is the call a directory read wants. Every mirror is asked at once, so
+   * a channel that answers from a read of its whole address book serves the
+   * page from one such read rather than one per row, and the sentinel log is
+   * read once, and only where a mirror left a name unanswered.
    */
-  displayNames(accounts: Array<{ channel: string; channelUserId: string }>): Promise<string[]> {
-    return Promise.all(
-      accounts.map((account) => this.displayName(account.channel, account.channelUserId)),
+  async displayNames(accounts: Array<{ channel: string; channelUserId: string }>) {
+    const mirrored = await Promise.all(
+      accounts.map(
+        (account) => this.providers[account.channel]?.resolve(account.channelUserId) ?? null,
+      ),
+    );
+    const names = mirrored.map((account) => named(account?.name));
+    if (names.every((name) => name != null)) return names as string[];
+
+    const pushNames = await this.readPushNames();
+    return names.map(
+      (name, i) => name ?? pushNames.get(key(accounts[i])) ?? accounts[i].channelUserId,
     );
   }
-}
 
-/**
- * The names the sentinel log recorded, from the newest message each sender put
- * one on.
- *
- * The log is read whole, and reads in flight are shared, so naming a page of
- * accounts is one read rather than one per account. That is not a cache: the
- * window closes the moment the read settles, so a name a message just carried
- * is never held back behind a stale one.
- */
-export class SentinelPushNames implements PushNames {
-  constructor(private readonly log: SentinelLogRepository) {}
-
-  private reading: Promise<Map<string, string>> | null = null;
-
-  async displayName(channel: string, channelUserId: string): Promise<string | null> {
-    return (await this.load()).get(`${channel}\n${channelUserId}`) ?? null;
-  }
-
-  private load(): Promise<Map<string, string>> {
-    if (this.reading) return this.reading;
-    const reading = this.read();
-    this.reading = reading;
-    const done = () => {
-      if (this.reading === reading) this.reading = null;
-    };
-    reading.then(done, done);
-    return reading;
-  }
-
-  private async read(): Promise<Map<string, string>> {
-    const names = new Map<string, string>();
-    for (const row of await this.log.listLatestDisplayNames()) {
+  /** The name each sender last put on a message, by account. */
+  private async readPushNames(): Promise<Map<string, string>> {
+    const pushNames = new Map<string, string>();
+    for (const row of await this.pushNames.listLatestDisplayNames()) {
       const name = named(row.displayName);
-      if (name) names.set(`${row.channel}\n${row.channelUserId}`, name);
+      if (name) pushNames.set(key(row), name);
     }
-    return names;
+    return pushNames;
   }
 }
 
@@ -128,16 +80,16 @@ export function createAccountNames(deps: {
   sentinelLogRepo: SentinelLogRepository;
 }): AccountNames {
   return new AccountNames(
-    {
-      whatsapp: mirrorNames(deps.whatsAppAccounts),
-      linkedin: mirrorNames(deps.linkedInAccounts),
-    },
-    new SentinelPushNames(deps.sentinelLogRepo),
+    { whatsapp: deps.whatsAppAccounts, linkedin: deps.linkedInAccounts },
+    deps.sentinelLogRepo,
   );
 }
 
+const key = (account: { channel: string; channelUserId: string }) =>
+  `${account.channel}\n${account.channelUserId}`;
+
 /** A name, or null where there is only blank space. A stored empty string is a
- *  provider holding no name, not a name that renders as nothing. */
+ *  platform holding no name, not a name that renders as nothing. */
 function named(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
