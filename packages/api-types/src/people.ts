@@ -1,18 +1,18 @@
 // The People surface's contract, in two nouns — a person, and the accounts
 // they are reachable at:
 //
-//   GET /api/people              -> PeopleList (curated people only)
-//   GET /api/people/:id          -> PersonResource
-//   GET /api/people/:id/messages -> TimelinePage
-//   GET /api/accounts            -> AccountDirectory
-//
-// The write half. `POST /api/people` is served. The rest are request types
-// that lead, with the backend following (issues #63–#65):
-//
-//   POST   /api/people               -> PersonResource (201) | LinkConflict (409)
-//   PATCH  /api/people/:id           -> PersonResource
-//   POST   /api/people/:id/accounts  -> PersonResource | LinkConflict (409)
+//   GET    /api/people              -> PeopleList (curated people only)
+//   GET    /api/people/:id          -> PersonResource
+//   GET    /api/people/:id/messages -> TimelinePage
+//   GET    /api/accounts            -> AccountDirectory
+//   POST   /api/people              -> PersonResource (201) | LinkConflict (409)
+//   POST   /api/people/:id/accounts -> PersonResource | LinkConflict (409)
 //   DELETE /api/people/:id/accounts/:channel/:channelUserId -> PersonResource
+//
+// The rest are request types that lead, with the backend following (issues
+// #64, #65):
+//
+//   PATCH  /api/people/:id           -> PersonResource
 //   POST   /api/people/:id/merge     -> PersonResource
 //   POST   /api/accounts/:channel/:channelUserId/dismiss  -> DirectoryAccount
 //   POST   /api/accounts/:channel/:channelUserId/restore  -> DirectoryAccount
@@ -20,6 +20,8 @@
 // The vocabulary is docs/concepts/identity.md's. Rome never mints an account:
 // an account is platform-owned, named by the pair (channel, channelUserId),
 // and the only identity fact Rome contributes is which person it belongs to.
+// So the writes here move a link between people; none of them creates or
+// destroys the account under it.
 //
 // The timeline's entry shape, its ordering and its cursor are the identity
 // union's, and they are re-exported rather than restated. The surfaces page
@@ -600,29 +602,52 @@ export interface LinkAccountRequest {
   transferFrom?: string;
 }
 
-/** The 409 body for a refused link or dismissal: names the current owner so
- *  the caller can render the conflict and offer an explicit transfer. Never
- *  the stranger sentinel — a dismissal-held account never conflicts. */
+/**
+ * The request a body carries, or null when it is not one — a channel
+ * {@link accountRef} cannot name and an empty identifier name no account, and
+ * an empty `transferFrom` is a caller that meant to name an owner.
+ */
+export function parseLinkAccountRequest(body: unknown): LinkAccountRequest | null {
+  if (typeof body !== "object" || body === null) return null;
+  const { channel, channelUserId, transferFrom } = body as Record<string, unknown>;
+  if (typeof channel !== "string" || !isChannelIdentifier(channel)) return null;
+  if (typeof channelUserId !== "string" || channelUserId === "") return null;
+  if (transferFrom === undefined) return { channel, channelUserId };
+  if (typeof transferFrom !== "string" || transferFrom === "") return null;
+  return { channel, channelUserId, transferFrom };
+}
+
+/**
+ * The 409 body for a refused link or dismissal: names the current owner so the
+ * caller can render the conflict and offer an explicit transfer. Never the
+ * stranger sentinel — a dismissal-held account never conflicts.
+ *
+ * The owner is null in one case: a `transferFrom` naming someone who does not
+ * hold the account, where the account is now held by nobody. The caller's view
+ * of the owner is stale either way, and this is the answer that says so.
+ */
 export interface LinkConflict {
   error: string;
   channel: string;
   channelUserId: string;
-  linkedPersonId: string;
-  linkedPersonName: string;
+  linkedPersonId: string | null;
+  linkedPersonName: string | null;
 }
 
 /** Phrase a {@link LinkConflict}, wording included, so every route and the
  *  mock refuse in the same words. */
 export function linkConflict(
   account: { channel: string; channelUserId: string },
-  holder: { id: string; displayName: string },
+  holder: { id: string; displayName: string } | null,
 ): LinkConflict {
   return {
-    error: `${account.channel}:${account.channelUserId} is already linked to ${holder.displayName}`,
+    error: holder
+      ? `${account.channel}:${account.channelUserId} is already linked to ${holder.displayName}`
+      : `${account.channel}:${account.channelUserId} is linked to nobody`,
     channel: account.channel,
     channelUserId: account.channelUserId,
-    linkedPersonId: holder.id,
-    linkedPersonName: holder.displayName,
+    linkedPersonId: holder?.id ?? null,
+    linkedPersonName: holder?.displayName ?? null,
   };
 }
 
