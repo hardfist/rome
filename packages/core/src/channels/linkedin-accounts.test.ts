@@ -57,10 +57,10 @@ describe("LinkedInAccounts", () => {
     expect((await accounts.resolve(fromUrl!.id))!.id).toBe(fromUrl!.id);
   });
 
-  it("describes an account by label and namespaced identifier", async () => {
+  it("describes an account by name and namespaced identifier", async () => {
     const account = (await accounts.resolve("ACoAAAda0001"))!;
 
-    expect(account.label).toBe("Ada Lovelace");
+    expect(account.name).toBe("Ada Lovelace");
     expect(account.identifiers).toEqual({ "linkedin:member_id": "ACoAAAda0001" });
   });
 
@@ -86,14 +86,14 @@ describe("LinkedInAccounts", () => {
 
   it("pages and filters by query", async () => {
     const first = await accounts.listAccounts({ limit: 1 });
-    expect(first.accounts.map((a) => a.label)).toEqual(["Ada Lovelace"]);
+    expect(first.accounts.map((a) => a.name)).toEqual(["Ada Lovelace"]);
     expect(first.nextCursor).toBeDefined();
 
     const second = await accounts.listAccounts({ limit: 1, cursor: first.nextCursor });
-    expect(second.accounts.map((a) => a.label)).toEqual(["Grace Hopper"]);
+    expect(second.accounts.map((a) => a.name)).toEqual(["Grace Hopper"]);
     expect(second.nextCursor).toBeUndefined();
 
-    const byLabel = await accounts.listAccounts({ limit: 50, query: "hopper" });
-    expect(byLabel.accounts.map((a) => a.id)).toEqual(["ACoAAGrace002"]);
+    const byName = await accounts.listAccounts({ limit: 50, query: "hopper" });
+    expect(byName.accounts.map((a) => a.id)).toEqual(["ACoAAGrace002"]);
   });
 });

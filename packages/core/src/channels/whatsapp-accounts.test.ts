@@ -57,7 +57,7 @@ describe("WhatsAppAccounts", () => {
 
     const page = await accounts.listAccounts({ limit: 50 });
     expect(page.accounts).toHaveLength(1);
-    expect(page.accounts[0].label).toBe("One Contact");
+    expect(page.accounts[0].name).toBe("One Contact");
     expect(page.accounts[0].identifiers).toEqual({
       phone: "15550007777",
       "whatsapp:lid": LID,
@@ -75,7 +75,7 @@ describe("WhatsAppAccounts", () => {
     const page = await accounts.listAccounts({ limit: 50 });
     expect(page.accounts).toHaveLength(1);
     expect(page.accounts[0].id).toBe("15550009999@s.whatsapp.net");
-    expect(page.accounts[0].label).toBe("Split Contact");
+    expect(page.accounts[0].name).toBe("Split Contact");
     expect((await accounts.resolve("99900099999@lid"))!.id).toBe("15550009999@s.whatsapp.net");
   });
 
@@ -123,11 +123,12 @@ describe("WhatsAppAccounts", () => {
     expect([...activity.keys()]).toEqual([PHONE]);
   });
 
-  it("labels an unnamed account with its number as a person writes one", async () => {
+  it("holds no name for an unnamed account, and still carries its number", async () => {
     await repo.upsertContacts([{ jid: PHONE, phoneNumber: "15550007777" }]);
 
     const page = await accounts.listAccounts({ limit: 50 });
-    expect(page.accounts[0].label).toBe("+1 (555) 000-7777");
+    expect(page.accounts[0].name).toBeNull();
+    expect(page.accounts[0].identifiers.phone).toBe("15550007777");
   });
 
   it("answers a listing, its addresses and its activity from one read", async () => {
@@ -185,7 +186,7 @@ describe("WhatsAppAccounts", () => {
     ]);
 
     const page = await accounts.listAccounts({ limit: Number.NaN });
-    expect(page.accounts.map((a) => a.label)).toEqual(["Ada", "Bea"]);
+    expect(page.accounts.map((a) => a.name)).toEqual(["Ada", "Bea"]);
     expect(page.nextCursor).toBeUndefined();
   });
 
@@ -207,17 +208,17 @@ describe("WhatsAppAccounts", () => {
     ]);
 
     const first = await accounts.listAccounts({ limit: 2 });
-    expect(first.accounts.map((a) => a.label)).toEqual(["Ada", "Bea"]);
+    expect(first.accounts.map((a) => a.name)).toEqual(["Ada", "Bea"]);
     expect(first.nextCursor).toBeDefined();
 
     const second = await accounts.listAccounts({ limit: 2, cursor: first.nextCursor });
-    expect(second.accounts.map((a) => a.label)).toEqual(["Cy"]);
+    expect(second.accounts.map((a) => a.name)).toEqual(["Cy"]);
     expect(second.nextCursor).toBeUndefined();
 
-    const byLabel = await accounts.listAccounts({ limit: 50, query: "be" });
-    expect(byLabel.accounts.map((a) => a.label)).toEqual(["Bea"]);
+    const byName = await accounts.listAccounts({ limit: 50, query: "be" });
+    expect(byName.accounts.map((a) => a.name)).toEqual(["Bea"]);
 
     const byIdentifier = await accounts.listAccounts({ limit: 50, query: "15550000003" });
-    expect(byIdentifier.accounts.map((a) => a.label)).toEqual(["Cy"]);
+    expect(byIdentifier.accounts.map((a) => a.name)).toEqual(["Cy"]);
   });
 });

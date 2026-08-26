@@ -1,4 +1,3 @@
-import { formatWhatsAppPhone } from "@rome/api-types/identities";
 import type { Account, AccountId, TalkAccounts } from "./accounts.js";
 import type { AccountActivity, TalkAccountActivity } from "./account-activity.js";
 import { pageAccounts } from "./account-paging.js";
@@ -212,8 +211,8 @@ function toAccount(id: AccountId, group: WhatsAppContactRow[]): Account {
     .sort()[0];
   if (lid) identifiers["whatsapp:lid"] = lid;
 
-  // Field-major, not row-major: a saved name on any row of the account beats a
-  // push name on another.
+  // Field-major, not row-major: a saved name on any row of the account beats
+  // the name the contact sent on another.
   const pick = (field: (row: WhatsAppContactRow) => string | null) =>
     firstNonEmpty(...group.map(field));
   const name =
@@ -221,11 +220,8 @@ function toAccount(id: AccountId, group: WhatsAppContactRow[]): Account {
     pick((row) => row.notify) ??
     pick((row) => row.verifiedName) ??
     pick((row) => row.chatName);
-  // No name on record anywhere: the number, written the way a person writes
-  // one. The raw JID is a last resort, not a label.
-  const label = name ?? formatWhatsAppPhone(pick((row) => row.phoneNumber) ?? id) ?? id;
 
-  return { id, label, name, identifiers };
+  return { id, name, identifiers };
 }
 
 /** Every index key the account answers to, including its own id. */

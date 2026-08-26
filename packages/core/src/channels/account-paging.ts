@@ -6,9 +6,11 @@ import type { Account } from "./accounts.js";
  * provider paginates server-side pages there and does not use this.
  */
 
-/** Case-insensitive substring match over the label and every identifier value. */
+/** Case-insensitive substring match over the name and every identifier value.
+ *  An account the platform holds no name for is still found by any identifier
+ *  it carries. */
 function matches(account: Account, needle: string): boolean {
-  if (account.label.toLowerCase().includes(needle)) return true;
+  if (account.name != null && account.name.toLowerCase().includes(needle)) return true;
   for (const value of Object.values(account.identifiers)) {
     if (value.toLowerCase().includes(needle)) return true;
   }

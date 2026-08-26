@@ -117,12 +117,7 @@ describe("AccountNames", () => {
     const matrix = {
       resolve: async (identifier: string) =>
         identifier === "@ada:matrix.org"
-          ? {
-              id: identifier as AccountId,
-              label: "Ada on Matrix",
-              name: "Ada on Matrix",
-              identifiers: {},
-            }
+          ? { id: identifier as AccountId, name: "Ada on Matrix", identifiers: {} }
           : null,
     };
     const withMatrix = new AccountNames({ matrix }, { listLatestDisplayNames: async () => [] });
