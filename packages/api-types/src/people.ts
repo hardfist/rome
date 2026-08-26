@@ -1,13 +1,23 @@
-// The People surface's contract. This module holds the timeline read — one
-// person's history across every account they are linked to.
+// The People surface's contract. This module holds the two reads the surface
+// is built from: the account directory it browses, and one person's history
+// across every account they are linked to.
 //
-// The entry shape, the ordering and the cursor are the identity union's, and
-// they are re-exported rather than restated. The two surfaces page the same
-// entries: a stream row's `latest` is the head of the timeline the same row
-// opens, and a cursor written against one has to name a position in the other.
-// A second definition of either is a page boundary the two ends disagree about.
+// The timeline's entry shape, its ordering and its cursor are the identity
+// union's, and they are re-exported rather than restated. The two surfaces page
+// the same entries: a stream row's `latest` is the head of the timeline the
+// same row opens, and a cursor written against one has to name a position in
+// the other. A second definition of either is a page boundary the two ends
+// disagree about.
 
-import { TIMELINE_PAGE_DEFAULT_LIMIT, TIMELINE_PAGE_MAX_LIMIT } from "./identities.js";
+import {
+  compareCodePoints,
+  compareDisplayNames,
+  isChannelIdentifier,
+  TIMELINE_PAGE_DEFAULT_LIMIT,
+  TIMELINE_PAGE_MAX_LIMIT,
+  type IdentityDynamic,
+} from "./identities.js";
+import { STRANGER_PERSON_ID } from "./persons.js";
 
 export {
   compareTimelineEntries,
@@ -35,4 +45,347 @@ export function timelinePageLimit(raw: string | number | null | undefined): numb
   return Number.isFinite(requested) && requested >= 1
     ? Math.min(Math.floor(requested), TIMELINE_PAGE_MAX_LIMIT)
     : TIMELINE_PAGE_DEFAULT_LIMIT;
+}
+
+/**
+ * The newest thing that happened on an account: which surface it happened on,
+ * when, and one line of it.
+ *
+ * The identity union's shape, under the name the account contract uses for it.
+ * A directory row's `latest` is the head of the history that row opens, so the
+ * two are one type rather than two that can disagree.
+ */
+export type AccountDynamic = IdentityDynamic;
+
+/**
+ * What the guardian has decided about an account.
+ *
+ * "unlinked" is the absence of a decision rather than one Rome writes down: an
+ * account it has observed and nobody has placed. The other two are decisions —
+ * a link onto a person, and a dismissal, which files the account under the
+ * stranger sentinel.
+ *
+ * The three partition the directory, so their counts sum to it.
+ */
+export const ACCOUNT_STATES = ["unlinked", "linked", "dismissed"] as const;
+
+export type AccountState = (typeof ACCOUNT_STATES)[number];
+
+/** Parse a `?state=` value, or null when it names no state — an unknown filter
+ *  is a caller's bug, and answering it as the whole directory would silently
+ *  show the wrong accounts. */
+export function parseAccountState(raw: string | undefined | null): AccountState | null {
+  if (raw == null || raw === "") return null;
+  return (ACCOUNT_STATES as readonly string[]).includes(raw) ? (raw as AccountState) : null;
+}
+
+/** How an account's link renders: its state, and the person it names. */
+export interface AccountPresentation {
+  state: AccountState;
+  /** The person the account is linked to, or null in either other state. */
+  personId: string | null;
+  personName: string | null;
+}
+
+/**
+ * Read a link the way every surface has to read it.
+ *
+ * The stranger sentinel is a row in the persons table that every dismissed
+ * account is mapped onto, not someone the guardian knows. So a dismissal
+ * answers a state and no person: a caller handed the sentinel's id would render
+ * it as a person, open a timeline merging everyone ever dismissed, and address
+ * writes at a row no write may touch.
+ */
+export function accountPresentation(
+  link: { personId: string; displayName: string } | null | undefined,
+): AccountPresentation {
+  if (link == null) return { state: "unlinked", personId: null, personName: null };
+  if (link.personId === STRANGER_PERSON_ID) {
+    return { state: "dismissed", personId: null, personName: null };
+  }
+  return { state: "linked", personId: link.personId, personName: link.displayName };
+}
+
+/**
+ * One account in the directory: one person on one channel, however many
+ * addresses that channel reaches them at.
+ *
+ * `channel` and `channelUserId` are its identity — the pair a link, a dismissal
+ * or a timeline read names. {@link accountRef} renders the pair as the single
+ * token a key or a path segment needs.
+ */
+export interface DirectoryAccount {
+  channel: string;
+  /** The address the channel folds its other addressings of this account onto.
+   *  Stable across a re-sync and across which addressing a message arrives on. */
+  channelUserId: string;
+  /**
+   * Every address the channel can reach the account at, `channelUserId`
+   * included, ordered by code point.
+   *
+   * A search reads these, so an omitted one is an account the guardian cannot
+   * find by the phone number they know.
+   */
+  addresses: string[];
+  /**
+   * What the account's own platform calls it, then the name its sender put on a
+   * message, then the address itself. Never empty, and never the linked
+   * person's name — {@link personName} answers that, and a guardian renaming a
+   * person does not rename the account.
+   */
+  displayName: string;
+  state: AccountState;
+  /** Never the stranger sentinel's id — see {@link accountPresentation}. */
+  personId: string | null;
+  personName: string | null;
+  /** The newest thing on record for this account, or null when nothing is. */
+  latest: AccountDynamic | null;
+  /**
+   * Every record the producers hold for this account — not every line a
+   * timeline renders. A reaction counts, and so does a message Rome sent, so
+   * this is not the length of a {@link TimelinePage} and a client that treats
+   * it as one will disagree with the timeline it paged.
+   */
+  messageCount: number;
+}
+
+/**
+ * An account with nothing on record that nobody has decided about: a synced
+ * address-book contact and no more.
+ *
+ * Derived rather than carried, so no producer can report an account as silent
+ * while its own `latest` says otherwise. A link or a dismissal is a decision
+ * the guardian made about the account, and a decided account is never held
+ * back — the directory's toggle hides the address book, not the guardian's own
+ * work.
+ */
+export function isSilentAccount(account: DirectoryAccount): boolean {
+  return account.latest === null && account.state === "unlinked";
+}
+
+/** How many accounts sit in each state. */
+export interface AccountCounts extends Record<AccountState, number> {}
+
+/**
+ * One page of the account directory, newest activity first.
+ *
+ * `counts` and `silentTotal` describe the whole directory the query and the
+ * silent toggle admit, never the page — so every number a client renders is the
+ * server's, and no chip collapses as the client pages.
+ */
+export interface AccountDirectory {
+  accounts: DirectoryAccount[];
+  /** Opaque, and null on the last page. */
+  nextCursor: string | null;
+  /** Per state, over everything the query and the silent toggle admit and
+   *  before `state` narrows the page — so each chip's number is the size of the
+   *  listing that chip shows. */
+  counts: AccountCounts;
+  /** Every matching silent account, whether or not the toggle let them onto the
+   *  page — the number the toggle itself offers. */
+  silentTotal: number;
+}
+
+/**
+ * Render an account's identity as one token, for a client's row key and for the
+ * path segment a write addresses it by.
+ *
+ * Only the first colon is structural, so a channel carrying one would make the
+ * token ambiguous. Channel names are short slugs, so refusing the separator
+ * costs nothing and removes the ambiguity rather than documenting it. A caller
+ * passing one has a bug that a silently collapsed row would hide until a write
+ * landed on the wrong account.
+ */
+export function accountRef(account: { channel: string; channelUserId: string }): string {
+  if (!isChannelIdentifier(account.channel)) {
+    throw new Error(
+      `channel must be non-empty and free of ":" — received ${JSON.stringify(account.channel)}`,
+    );
+  }
+  if (!account.channelUserId) throw new Error("channelUserId must be non-empty");
+  return `${account.channel}:${account.channelUserId}`;
+}
+
+/** Decode an {@link accountRef}, or null when it is not one. `channelUserId`
+ *  may itself contain colons — WhatsApp JIDs carry `:device` suffixes — so only
+ *  the first separator is structural. */
+export function parseAccountRef(
+  raw: string | undefined | null,
+): { channel: string; channelUserId: string } | null {
+  if (!raw) return null;
+  const separator = raw.indexOf(":");
+  if (separator <= 0 || separator === raw.length - 1) return null;
+  return { channel: raw.slice(0, separator), channelUserId: raw.slice(separator + 1) };
+}
+
+/** What `?q=` matches: the display name, the linked person's name, and every
+ *  address — so a phone number finds an account the platform named something
+ *  else, and a person's name finds the accounts they were placed on. */
+export function accountMatchesQuery(account: DirectoryAccount, query: string): boolean {
+  // NFC first, the way the orderings normalize: a keyboard that composes "José"
+  // should find an account that stored it decomposed, and the reverse.
+  const needle = query.normalize("NFC").trim().toLowerCase();
+  if (!needle) return true;
+  const haystack = [account.displayName, account.personName ?? "", account.channel]
+    .concat(account.addresses)
+    .join(" ")
+    .normalize("NFC")
+    .toLowerCase();
+  return haystack.includes(needle);
+}
+
+/**
+ * Where one account sits in the directory's order: the tuple the ordering
+ * reads, and nothing else. A cursor carries this rather than a ref, so resuming
+ * needs a position rather than an account that still exists.
+ */
+export interface AccountCursor {
+  /** The account's `latest.timestamp`, or null for one that has never done
+   *  anything — those sort last. */
+  timestamp: number | null;
+  displayName: string;
+  ref: string;
+}
+
+export function accountCursorOf(account: DirectoryAccount): AccountCursor {
+  return {
+    timestamp: account.latest?.timestamp ?? null,
+    displayName: account.displayName,
+    ref: accountRef(account),
+  };
+}
+
+/**
+ * The directory's order: newest activity first, accounts that have never done
+ * anything last, ties broken by name and then ref so the sequence is total —
+ * which is what lets a cursor resume it.
+ */
+export function compareAccountCursors(a: AccountCursor, b: AccountCursor): number {
+  const aAt = a.timestamp;
+  const bAt = b.timestamp;
+  if ((aAt == null) !== (bAt == null)) return aAt == null ? 1 : -1;
+  if (aAt !== bAt) return (bAt ?? 0) - (aAt ?? 0);
+  const byName = compareDisplayNames(a.displayName, b.displayName);
+  return byName !== 0 ? byName : compareCodePoints(a.ref, b.ref);
+}
+
+export function compareAccounts(a: DirectoryAccount, b: DirectoryAccount): number {
+  return compareAccountCursors(accountCursorOf(a), accountCursorOf(b));
+}
+
+/**
+ * Encode the position a page ended at.
+ *
+ * The whole ordering tuple, not the last account's ref: between two requests
+ * that account is linked, dismissed, or folded onto another addressing — every
+ * one of them an ordinary write on this surface — and a cursor that has to find
+ * it again answers the next page empty and truncates the directory until the
+ * query restarts. A position is still a position after the account at it is
+ * gone.
+ *
+ * Each part is escaped, because a display name is platform-supplied text and a
+ * ref carries a JID. Neither can be trusted to leave the separator alone.
+ */
+export function encodeAccountCursor(cursor: AccountCursor): string {
+  return [cursor.timestamp ?? "", cursor.displayName, cursor.ref]
+    .map((part) => encodeURIComponent(String(part)))
+    .join("|");
+}
+
+/** Decode an {@link encodeAccountCursor}, or null when it is not one. */
+export function parseAccountCursor(raw: string | undefined | null): AccountCursor | null {
+  if (!raw) return null;
+  const parts = raw.split("|");
+  if (parts.length !== 3) return null;
+  let decoded: string[];
+  try {
+    decoded = parts.map(decodeURIComponent);
+  } catch {
+    return null;
+  }
+  const [rawTimestamp, displayName, ref] = decoded;
+  if (!ref) return null;
+  const timestamp = rawTimestamp === "" ? null : Number(rawTimestamp);
+  if (timestamp !== null && !Number.isFinite(timestamp)) return null;
+  return { timestamp, displayName, ref };
+}
+
+/** Whether an account falls after a cursor in {@link compareAccounts} order —
+ *  i.e. belongs on a later page than the one that cursor ended. */
+export function isAfterAccountCursor(account: DirectoryAccount, cursor: AccountCursor): boolean {
+  return compareAccountCursors(cursor, accountCursorOf(account)) < 0;
+}
+
+/** How many accounts one page carries when the caller names no limit, and the
+ *  ceiling it is clamped to. A synced address book is thousands of rows, so the
+ *  default is a screenful of them rather than all of them. */
+export const ACCOUNT_PAGE_DEFAULT_LIMIT = 200;
+export const ACCOUNT_PAGE_MAX_LIMIT = 500;
+
+/**
+ * The page size a `?limit=` value asks for: clamped to
+ * {@link ACCOUNT_PAGE_MAX_LIMIT}, and the default for anything that does not
+ * name a positive count.
+ *
+ * Never zero, for the reason {@link timelinePageLimit} gives.
+ */
+export function accountPageLimit(raw: string | number | null | undefined): number {
+  const requested = Number(raw);
+  return Number.isFinite(requested) && requested >= 1
+    ? Math.min(Math.floor(requested), ACCOUNT_PAGE_MAX_LIMIT)
+    : ACCOUNT_PAGE_DEFAULT_LIMIT;
+}
+
+/**
+ * Cut one page out of the directory, with the numbers that describe the whole
+ * of it.
+ *
+ * Takes every account there is, in any order: the order is this function's, so
+ * a producer cannot page one order while a client renders another.
+ *
+ * `query` scopes everything, including the counts. `state` and the cursor scope
+ * the page alone, so a client filtered to one chip still reads every chip's
+ * number, and a client on page four reads the same numbers it read on page one.
+ *
+ * A query reaches silent accounts whatever the toggle says. The toggle keeps a
+ * 9,000-contact address book out of a browsing view, and a guardian typing a
+ * name or a number is not browsing — a lookup that answered "no such account"
+ * for a contact the mirror holds would be a worse answer than a long list.
+ */
+export function sliceAccountDirectory(
+  directory: readonly DirectoryAccount[],
+  options: {
+    query?: string | null;
+    state?: AccountState | null;
+    cursor?: AccountCursor | null;
+    limit?: number | null;
+    /** Whether the page carries silent accounts. Off by default. */
+    includeSilent?: boolean;
+  } = {},
+): AccountDirectory {
+  const query = options.query?.trim() ?? "";
+  const matching = query ? directory.filter((a) => accountMatchesQuery(a, query)) : directory;
+  const silentTotal = matching.filter(isSilentAccount).length;
+
+  const admitted =
+    options.includeSilent || query !== "" ? matching : matching.filter((a) => !isSilentAccount(a));
+  const counts: AccountCounts = { unlinked: 0, linked: 0, dismissed: 0 };
+  for (const account of admitted) counts[account.state] += 1;
+
+  const ordered = [...admitted].sort(compareAccounts);
+  const state = options.state;
+  const scoped = state ? ordered.filter((a) => a.state === state) : ordered;
+  const cursor = options.cursor;
+  const remaining = cursor ? scoped.filter((a) => isAfterAccountCursor(a, cursor)) : scoped;
+
+  const limit = Math.min(
+    Math.max(options.limit ?? ACCOUNT_PAGE_DEFAULT_LIMIT, 1),
+    ACCOUNT_PAGE_MAX_LIMIT,
+  );
+  const accounts = remaining.slice(0, limit);
+  const last = accounts.at(-1);
+  const nextCursor =
+    remaining.length > accounts.length && last ? encodeAccountCursor(accountCursorOf(last)) : null;
+
+  return { accounts, nextCursor, counts, silentTotal };
 }

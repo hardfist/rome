@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { sql } from "drizzle-orm";
 import {
   channelIdentityId,
   compareCodePoints,
@@ -15,8 +14,8 @@ import {
   type IdentityRow,
 } from "@rome/api-types/identities";
 import { STRANGER_PERSON_ID } from "../../constants.js";
-import type { TalkAccountActivity } from "../../channels/account-activity.js";
-import type { TalkAccounts } from "../../channels/accounts.js";
+import { addressKey, readMirrors, type StoredIdentifiers } from "../../channels/mirrors.js";
+import type { SentinelSenderActivity } from "../../db/repositories/sentinel-log.js";
 import type { ApiDeps } from "../deps.js";
 
 // The People page's one read: a union of curated persons, unmapped senders from
@@ -25,44 +24,10 @@ import type { ApiDeps } from "../deps.js";
 // and carrying its newest dynamic. A read — no person row is materialized here,
 // ever; writes stay on the `/persons/*` mutation routes.
 
-interface SentinelActivity {
-  channel: string;
-  channelUserId: string;
-  displayName: string | null;
-  lastMessage: string | null;
-  lastMessageAt: number | null;
-  messageCount: number;
-}
-
-/**
- * One identity a channel's account plane already holds, in the shape the union
- * reads every mirror through.
- *
- * The projection is `Account` plus its activity, and nothing channel-specific
- * survives it: which addressings a channel hands out, which of them is
- * canonical, and what counts as an account at all are the channel's answers,
- * given once behind {@link TalkAccounts}. So every rule below is
- * channel-agnostic, and adding a mirror is an entry in {@link mirrorPlanes}
- * rather than another special case in the union.
- */
-interface MirrorIdentity {
-  channel: string;
-  /** The account's own address — what a mapping or a placement should name. */
-  channelUserId: string;
-  /** Every address the account answers to, `channelUserId` included. */
-  aliases: string[];
-  /** What the channel calls the account, or null when it holds no name. */
-  name: string | null;
-  latest: IdentityDynamic | null;
-  messageCount: number;
-}
-
 interface ChannelActivity {
   latest: IdentityDynamic | null;
   messageCount: number;
 }
-
-const activityKey = (channel: string, channelUserId: string) => `${channel}\n${channelUserId}`;
 
 /** The newer of two dynamics, or whichever one exists. */
 function newer(a: IdentityDynamic | null, b: IdentityDynamic | null): IdentityDynamic | null {
@@ -119,135 +84,9 @@ export function identitiesRoutes(deps: ApiDeps): Hono {
   return app;
 }
 
-/** A channel whose account plane the union reads. One entry per mirror. */
-interface MirrorPlane {
-  channel: string;
-  accounts: TalkAccounts & TalkAccountActivity;
-}
-
-function mirrorPlanes(deps: ApiDeps): MirrorPlane[] {
-  return [
-    { channel: "whatsapp", accounts: deps.whatsAppAccounts },
-    { channel: "linkedin", accounts: deps.linkedInAccounts },
-  ];
-}
-
-/**
- * One page big enough to hold any listing — what `TalkAccounts.listAccounts`
- * says to ask for when a caller needs every account exactly once. Its order is
- * stable but the listing under it is not, so walking cursors across a live
- * mirror would skip or repeat an account as an inbound message reordered it.
- */
-const WHOLE_LISTING = Number.MAX_SAFE_INTEGER;
-
-/** Every identifier the union already holds on a channel, from the person
- *  mappings and the sentinel log. Keyed by channel. */
-type StoredIdentifiers = Map<string, Set<string>>;
-
-/** The mirrors, and the index that says which identity an address belongs to. */
-interface MirrorRead {
-  identities: MirrorIdentity[];
-  byAddress: Map<string, MirrorIdentity>;
-}
-
-/**
- * Every identity the channel mirrors already hold, projected onto one shape,
- * with each of them indexed under every address it answers to.
- *
- * Read whole rather than paged: this answer is paged here, and an identity past
- * a channel's own cutoff is one the guardian cannot find and no count includes.
- */
-async function readMirrors(deps: ApiDeps, stored: StoredIdentifiers): Promise<MirrorRead> {
-  const identities: MirrorIdentity[] = [];
-  const byAddress = new Map<string, MirrorIdentity>();
-
-  for (const { channel, accounts } of mirrorPlanes(deps)) {
-    const [listing, activity, addresses] = await Promise.all([
-      accounts.listAccounts({ limit: WHOLE_LISTING }),
-      accounts.listActivity(),
-      accounts.listAddresses(),
-    ]);
-
-    // The addressing set of each account, which is the address map read the
-    // other way round. A row carries all of them because a search reads them:
-    // an omitted address is a contact the guardian cannot reach by the phone
-    // number they know.
-    const aliasesOf = new Map<string, string[]>();
-    for (const [address, accountId] of addresses) {
-      const group = aliasesOf.get(accountId);
-      if (group) group.push(address);
-      else aliasesOf.set(accountId, [address]);
-    }
-
-    const byId = new Map<string, MirrorIdentity>();
-    for (const account of listing.accounts) {
-      const seen = activity.get(account.id);
-      const identity: MirrorIdentity = {
-        channel,
-        channelUserId: account.id,
-        aliases: (aliasesOf.get(account.id) ?? [account.id]).sort(compareCodePoints),
-        name: account.name,
-        latest:
-          seen == null
-            ? null
-            : { source: channel, timestamp: seen.lastMessageAt, preview: seen.lastMessagePreview },
-        messageCount: seen?.messageCount ?? 0,
-      };
-      identities.push(identity);
-      byId.set(account.id, identity);
-      for (const alias of identity.aliases) byAddress.set(activityKey(channel, alias), identity);
-    }
-
-    // An identifier the union holds that the channel's address map did not
-    // cover. A channel can still accept one — LinkedIn derives a member id from
-    // a profile URL naming it and stores no row for the URL, so a guardian who
-    // pasted a profile link into a mapping wrote a form only `resolve` takes.
-    // Left unresolved, that mapping is a second row for someone the page
-    // already shows, and half their history hangs off it.
-    //
-    // Asked in one batch, because a plane that folds the whole mirror per call
-    // shares the read already in flight, so the misses cost one read rather
-    // than one each. The addresses stay as the channel gave them: this is the
-    // fold, not a new alias to publish on the row.
-    const missing = [...(stored.get(channel) ?? [])].filter(
-      (identifier) => !addresses.has(identifier),
-    );
-    const found = await Promise.all(
-      missing.map(async (identifier) => [identifier, await accounts.resolve(identifier)] as const),
-    );
-    for (const [identifier, account] of found) {
-      const identity = account && byId.get(account.id);
-      if (identity) byAddress.set(activityKey(channel, identifier), identity);
-    }
-  }
-  return { identities, byAddress };
-}
-
 /** The full union, unordered and unfiltered. */
 async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
-  // Bare display_name/text ride SQLite's guarantee that with a lone MAX()
-  // aggregate the other selected columns come from the row that supplied the
-  // max — i.e. the newest message names the sender.
-  const sentinelRows = (await deps.db.all(sql`
-    SELECT
-      channel,
-      channel_user_id AS channelUserId,
-      display_name AS displayName,
-      text AS lastMessage,
-      MAX(created_at) AS lastMessageAt,
-      COUNT(*) AS messageCount
-    FROM sentinel_log
-    GROUP BY channel, channel_user_id
-  `)) as Array<Record<string, unknown>>;
-
-  const senders: SentinelActivity[] = sentinelRows.map((row) => ({
-    channel: String(row.channel),
-    channelUserId: String(row.channelUserId),
-    displayName: (row.displayName as string | null) ?? null,
-    lastMessage: (row.lastMessage as string | null) ?? null,
-    lastMessageAt: row.lastMessageAt == null ? null : Number(row.lastMessageAt),
-    messageCount: Number(row.messageCount ?? 0),
-  }));
+  const senders = await deps.sentinelLogRepo.listSenderActivity();
 
   // One statement, so an identity moving between two people mid-read cannot
   // land under both of them.
@@ -268,7 +107,7 @@ async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
     for (const mapping of person.channelMappings) remember(mapping.channel, mapping.channelUserId);
   }
 
-  const { identities: mirror, byAddress: mirrorByAddress } = await readMirrors(deps, stored);
+  const { accounts: mirror, byAddress: mirrorByAddress } = await readMirrors(deps, stored);
 
   // One mirrored identity is one identity however many addresses reach it, so
   // every one of them answers to the account's own. Without this the same
@@ -279,13 +118,13 @@ async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
   // Which addresses fold onto which account is the channel's answer, not a
   // rule the union derives: it is the address map read as given.
   const canonicalId = (channel: string, channelUserId: string): string =>
-    mirrorByAddress.get(activityKey(channel, channelUserId))?.channelUserId ?? channelUserId;
+    mirrorByAddress.get(addressKey(channel, channelUserId))?.channelUserId ?? channelUserId;
   const identityKey = (channel: string, channelUserId: string) =>
-    activityKey(channel, canonicalId(channel, channelUserId));
+    addressKey(channel, canonicalId(channel, channelUserId));
   const mirrorFor = (channel: string, channelUserId: string) =>
     mirrorByAddress.get(identityKey(channel, channelUserId));
 
-  const sentinel = new Map<string, SentinelActivity[]>();
+  const sentinel = new Map<string, SentinelSenderActivity[]>();
   for (const activity of senders) {
     const key = identityKey(activity.channel, activity.channelUserId);
     const group = sentinel.get(key);
@@ -334,7 +173,7 @@ async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
     const seen = new Set<string>();
     const out: IdentityChannel[] = [];
     const add = (channel: string, channelUserId: string) => {
-      const key = activityKey(channel, channelUserId);
+      const key = addressKey(channel, channelUserId);
       if (seen.has(key)) return;
       seen.add(key);
       out.push({ channel, channelUserId });
@@ -353,7 +192,7 @@ async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
    *  identifier. */
   const displayNameFor = (channel: string, channelUserId: string): string => {
     const key = identityKey(channel, channelUserId);
-    const fromSentinel = (sentinel.get(key) ?? []).reduce<SentinelActivity | null>(
+    const fromSentinel = (sentinel.get(key) ?? []).reduce<SentinelSenderActivity | null>(
       (best, entry) =>
         best == null || (entry.lastMessageAt ?? 0) > (best.lastMessageAt ?? 0) ? entry : best,
       null,
