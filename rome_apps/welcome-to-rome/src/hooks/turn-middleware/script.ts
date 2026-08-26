@@ -16,9 +16,11 @@
 // (index.ts) turns each reply into events; this file owns *what to show / ask,
 // and when*.
 
-import { copy, type CompletionProps } from "./copy.js";
+import { copyFor, type CompletionProps, type WelcomeCopy } from "./copy.js";
 import type { AppIdea, ProgressRepository } from "../../db/repositories/progress.js";
 import { encodeIdeas } from "../../db/repositories/progress.js";
+import { genericIdeas, introQuestionsFor } from "../../i18n/locales/index.js";
+import { guardianLanguageInstruction, type WelcomeLocale } from "../../locale.js";
 import { isDismissedInteraction, readResolutionJson } from "./resolution.js";
 import type { AskQuestion } from "./component.js";
 import { scoutSuggestionsFromBasis, type ScoutSuggestion } from "./scout-suggestions.js";
@@ -58,6 +60,8 @@ export interface WelcomeEffects {
   progress: ProgressRepository;
   /** Read the guardian-chosen name for the main agent, falling back to Rome. */
   getAgentName(): Promise<string>;
+  /** Read the guardian's selected Rome language. */
+  getLocale(): Promise<WelcomeLocale>;
   /** Emit an intermediate narration block (commentary), typed out word by word.
    *  Resolves once the whole block has streamed, so callers `await` it to keep
    *  ordering against later emits. */
@@ -78,25 +82,10 @@ export interface WelcomeEffects {
   };
 }
 
-// Generic starter ideas, used when the brainstorm specialist is unavailable or
-// hands back nothing usable — onboarding should still hand the guardian a first win.
-const GENERIC_IDEAS: AppIdea[] = [
-  {
-    title: "Mood diary",
-    prompt:
-      "Build me a diary app where I can record my mood, events, people, and notes each day. Give me a calendar view, searchable entries, and simple weekly mood trends so I can reflect on patterns over time.",
-  },
-  {
-    title: "Habit garden",
-    prompt:
-      "Build me a habit tracker where I can define a few recurring habits, check them off daily, and see streaks and weekly progress in a friendly dashboard.",
-  },
-  {
-    title: "Reading shelf",
-    prompt:
-      "Build me a reading-list app where I can paste links, add notes and tags, mark items as reading or finished, and browse everything later by topic or status.",
-  },
-];
+interface WelcomeLanguage {
+  locale: WelcomeLocale;
+  copy: WelcomeCopy;
+}
 
 function ideasFromSummon(output: unknown): AppIdea[] {
   const raw =
@@ -115,10 +104,11 @@ function ideasFromSummon(output: unknown): AppIdea[] {
 // The summon prompt fed to `welcome-memory`. Its system prompt already carries
 // the full fold-into-memory instructions, so this just frames + carries the
 // source text (a ChatGPT export, or the formatted questionnaire answers).
-function memoryPrompt(source: string): string {
+function memoryPrompt(source: string, locale: WelcomeLocale): string {
   return [
     "Here is what we just learned about the guardian. Fold the useful facts into",
     "their memory per your instructions, then call submit_output with { summary }.",
+    guardianLanguageInstruction(locale),
     "",
     source,
   ].join("\n");
@@ -137,11 +127,12 @@ function formatAnswers(answers: Record<string, string>): string {
   return lines.join("\n");
 }
 
-function ideasBrief(basis: string): string {
+function ideasBrief(basis: string, locale: WelcomeLocale): string {
   return [
     "Brainstorming your first apps to build.",
     "",
     "From what Rome learned about the guardian below, brainstorm a few concrete, personalized first apps, then hand back the idea tuples via submit_output.",
+    guardianLanguageInstruction(locale),
     "",
     basis,
   ].join("\n");
@@ -151,27 +142,30 @@ function ideasBrief(basis: string): string {
 /** The email handshake card (the first step): shows the agent's + guardian's
  *  addresses and an "agree & send" button. The card itself reads identity and
  *  provisions if needed (via core APIs); the script sends the hello on agree. */
-async function emailHandshakeReply(fx: WelcomeEffects): Promise<TurnReply> {
+async function emailHandshakeReply(
+  fx: WelcomeEffects,
+  language: WelcomeLanguage,
+): Promise<TurnReply> {
   return {
     kind: "component",
-    lead: copy.emailIntro(await fx.getAgentName()),
+    lead: language.copy.emailIntro(await fx.getAgentName()),
     componentId: "email-handshake",
     props: {},
   };
 }
 
 /** The "check your inbox" card shown after the hello is sent. */
-function receiptReply(guardianEmail: string): TurnReply {
+function receiptReply(guardianEmail: string, language: WelcomeLanguage): TurnReply {
   return {
     kind: "component",
-    lead: copy.emailSentLead,
+    lead: language.copy.emailSentLead,
     componentId: "email-receipt",
     props: { guardianEmail },
   };
 }
 
-function greetReply(): TurnReply {
-  return { kind: "component", lead: copy.greet, componentId: "intro-choice", props: {} };
+function greetReply(language: WelcomeLanguage): TurnReply {
+  return { kind: "component", lead: language.copy.greet, componentId: "intro-choice", props: {} };
 }
 
 /** The "open the browser, then continue" component (ChatGPT-import branch). */
@@ -179,84 +173,36 @@ function browserStep(notSignedIn = false): TurnReply {
   return { kind: "component", componentId: "browser-step", props: { notSignedIn } };
 }
 
-// The fixed getting-to-know-you questionnaire, shown as the host's built-in
-// ask_question card (one card, mostly tap-to-answer with a free-text box). The
-// set mirrors what the old `introductions` agent asked. Answers return next turn
-// as `{ answers: [{ questionId, value }] }`.
-const INTRO_QUESTIONS: AskQuestion[] = [
-  {
-    id: "role",
-    question: "What's your role or field?",
-    type: "single",
-    freeText: true,
-    options: [
-      "Engineering",
-      "Design",
-      "Product",
-      "Founder / business",
-      "Research",
-      "Operations",
-      "Marketing / content",
-    ],
+// Card submissions use stable English action codes; each locale also accepts
+// natural-language input in the guardian's language.
+const ACTION_PATTERNS_BY_LOCALE: Record<
+  WelcomeLocale,
+  { import: RegExp; answer: RegExp; skip: RegExp; none: RegExp; restart: RegExp }
+> = {
+  en: {
+    import: /import|chatgpt/,
+    answer: /answer|question/,
+    skip: /skip/,
+    none: /^(none|no|nope|skip|later|not now)\b/,
+    restart: /\b(start over|restart|revisit|do (it|this) again|run again)\b/,
   },
-  {
-    id: "interests",
-    question: "What are you into? Pick as many as apply.",
-    type: "multi",
-    freeText: true,
-    options: [
-      "Software & engineering",
-      "AI & machine learning",
-      "Data & analytics",
-      "Science & research",
-      "Design & UX",
-      "Product & strategy",
-      "Business & entrepreneurship",
-      "Finance & investing",
-      "Marketing & growth",
-      "Writing & content",
-      "Education & learning",
-      "Health & fitness",
-      "Productivity & organization",
-    ],
+  "zh-CN": {
+    import: /import|chatgpt|导入/,
+    answer: /answer|question|回答|问题|问答/,
+    skip: /skip|跳过|暂不|以后/,
+    none: /^(none|no|nope|skip|later|not now)\b|^(跳过|以后|暂不)/,
+    restart: /\b(start over|restart|revisit|do (it|this) again|run again)\b|重新开始|再来一次|重来/,
   },
-  {
-    id: "helpFirst",
-    question: "What would you love help with first?",
-    type: "single",
-    freeText: true,
-    options: [
-      "Email & messages",
-      "Research & summaries",
-      "Writing & content",
-      "Scheduling & reminders",
-      "Building little tools",
-    ],
-  },
-  {
-    id: "commStyle",
-    question: "How should Rome talk to you?",
-    type: "single",
-    freeText: true,
-    options: [
-      "Short & to the point",
-      "Detailed & thorough",
-      "Casual & friendly",
-      "Formal & professional",
-    ],
-  },
-  {
-    id: "anythingElse",
-    question: "Anything else I should know?",
-    type: "text",
-    optional: true,
-  },
-];
+};
 
 /** The fixed getting-to-know-you questionnaire (built-in ask_question card).
  *  Resolves next turn with `{ answers: [{ questionId, value }] }`. */
-function introQuestions(): TurnReply {
-  return { kind: "ask", lead: copy.questionsLead, questions: INTRO_QUESTIONS };
+function introQuestions(language: WelcomeLanguage): TurnReply {
+  return {
+    kind: "ask",
+    lead: language.copy.questionsLead,
+    questions: introQuestionsFor(language.locale),
+  };
 }
 
 /** The "pick your first app" buttons (the ideas themselves render above as a
@@ -266,10 +212,10 @@ function ideaPicker(ideas: AppIdea[]): TurnReply {
   return { kind: "component", componentId: "idea-picker", props: { ideas } };
 }
 
-function scoutSuggestions(scouts: ScoutSuggestion[]): TurnReply {
+function scoutSuggestions(scouts: ScoutSuggestion[], language: WelcomeLanguage): TurnReply {
   return {
     kind: "component",
-    lead: copy.scoutsLead,
+    lead: language.copy.scoutsLead,
     componentId: "scout-suggestions",
     props: { scouts },
   };
@@ -300,6 +246,8 @@ function field(userText: string, key: string): string | null {
  */
 export async function runTurn(userText: string, fx: WelcomeEffects): Promise<TurnReply> {
   const p = fx.progress.get();
+  const locale = await fx.getLocale();
+  const language: WelcomeLanguage = { locale, copy: copyFor(locale) };
   const now = () => new Date().toISOString();
 
   switch (p.node) {
@@ -308,7 +256,7 @@ export async function runTurn(userText: string, fx: WelcomeEffects): Promise<Tur
       // before getting-to-know-you). The kickoff message the user typed to open
       // the conversation is intentionally not consumed.
       fx.progress.patch({ node: "await_email" });
-      return emailHandshakeReply(fx);
+      return emailHandshakeReply(fx, language);
     }
 
     case "await_email": {
@@ -319,25 +267,29 @@ export async function runTurn(userText: string, fx: WelcomeEffects): Promise<Tur
       const res = readResolutionJson(userText);
       if (res?.skip === true || isDismissedInteraction(userText)) {
         fx.progress.patch({ node: "await_choice" });
-        return greetReply();
+        return greetReply(language);
       }
       // Only an explicit `{ agreed: true }` from the card sends mail. Anything
       // else — free text like "why do I need this?", or a malformed resolution —
       // must not fire an email; re-show the handshake and wait for a real choice.
       if (res?.agreed !== true) {
-        return emailHandshakeReply(fx);
+        return emailHandshakeReply(fx, language);
       }
       // Agreed: send the hello (script, no model). On failure, don't pretend a
       // mail is coming — just move on.
       const to = field(userText, "guardianEmail") ?? "guardian";
       const agentName = await fx.getAgentName();
-      const sent = await fx.email.send(to, copy.helloEmailSubject, copy.helloEmailBody(agentName));
+      const sent = await fx.email.send(
+        to,
+        language.copy.helloEmailSubject,
+        language.copy.helloEmailBody(agentName),
+      );
       if (!sent.ok) {
         fx.progress.patch({ node: "await_choice" });
-        return greetReply();
+        return greetReply(language);
       }
       fx.progress.patch({ node: "await_email_receipt" });
-      return receiptReply(to);
+      return receiptReply(to, language);
     }
 
     case "await_email_receipt": {
@@ -348,52 +300,57 @@ export async function runTurn(userText: string, fx: WelcomeEffects): Promise<Tur
       if (res?.resend === true) {
         const to = field(userText, "guardianEmail") ?? "guardian";
         const agentName = await fx.getAgentName();
-        await fx.email.send(to, copy.helloEmailSubject, copy.helloEmailBody(agentName));
-        return receiptReply(to);
+        await fx.email.send(
+          to,
+          language.copy.helloEmailSubject,
+          language.copy.helloEmailBody(agentName),
+        );
+        return receiptReply(to, language);
       }
       fx.progress.patch({ node: "await_choice" });
-      return greetReply();
+      return greetReply(language);
     }
 
     case "await_choice": {
       const choice = field(userText, "choice") ?? normalize(userText);
-      if (/import|chatgpt/.test(choice)) {
+      const patterns = ACTION_PATTERNS_BY_LOCALE[language.locale];
+      if (patterns.import.test(choice)) {
         // Pre-open ChatGPT in the server Chrome so it's already showing when the
         // guardian opens the Browser widget. Best-effort.
         await fx.chatgpt.openTab().catch(() => {});
         fx.progress.patch({ node: "await_browser" });
         return browserStep();
       }
-      if (/answer|question/.test(choice)) {
+      if (patterns.answer.test(choice)) {
         fx.progress.patch({ node: "await_questions" });
-        return introQuestions();
+        return introQuestions(language);
       }
-      return greetReply();
+      return greetReply(language);
     }
 
     case "await_browser": {
       const action = field(userText, "action") ?? normalize(userText);
-      if (/skip/.test(action)) {
+      if (ACTION_PATTERNS_BY_LOCALE[language.locale].skip.test(action)) {
         fx.progress.patch({ node: "await_questions" });
-        return introQuestions();
+        return introQuestions(language);
       }
       // "Continue": confirm sign-in, then scrape.
       const login = await fx.chatgpt.checkLogin();
       if (!login.loggedIn) {
         return browserStep(true);
       }
-      await fx.say(copy.magicTrick);
+      await fx.say(language.copy.magicTrick);
       const scrape = await fx.chatgpt.scrape();
       if (scrape.ok && scrape.reply) {
         // Fold the export into memory inline, then continue in this same turn.
         fx.progress.patch({ introRawInput: scrape.reply });
-        await foldMemory(fx, scrape.reply);
-        return continueAfterMemory(fx, now);
+        await foldMemory(fx, scrape.reply, language);
+        return continueAfterMemory(fx, now, language);
       }
       // No memory stored, or the scrape failed — fall back to the questionnaire.
-      await fx.say(scrape.noMemory ? copy.chatgptNoMemory : copy.chatgptFailed);
+      await fx.say(scrape.noMemory ? language.copy.chatgptNoMemory : language.copy.chatgptFailed);
       fx.progress.patch({ node: "await_questions" });
-      return introQuestions();
+      return introQuestions(language);
     }
 
     case "await_questions": {
@@ -403,41 +360,41 @@ export async function runTurn(userText: string, fx: WelcomeEffects): Promise<Tur
       // completed questionnaire: re-show the card and stay parked, so their
       // input isn't dropped and onboarding doesn't jump ahead.
       if (isDismissedInteraction(userText)) {
-        return continueAfterMemory(fx, now);
+        return continueAfterMemory(fx, now, language);
       }
       const answers = readAnswers(userText);
       if (!answers) {
-        return introQuestions();
+        return introQuestions(language);
       }
       // A real submission — fold the answers into memory inline (an all-blank
       // submit yields no source and just continues), then continue this turn.
       const source = formatAnswers(answers);
       if (source) {
         fx.progress.patch({ introRawInput: source });
-        await foldMemory(fx, source);
+        await foldMemory(fx, source, language);
       }
-      return continueAfterMemory(fx, now);
+      return continueAfterMemory(fx, now, language);
     }
 
     case "await_scouts": {
-      return brainstormAppIdeas(fx, now);
+      return brainstormAppIdeas(fx, now, language);
     }
 
     case "await_idea": {
-      const ideas = p.ideas.length > 0 ? p.ideas : GENERIC_IDEAS;
-      const idea = resolveChosenIdea(userText, ideas);
+      const ideas = p.ideas.length > 0 ? p.ideas : genericIdeas(language.locale);
+      const idea = resolveChosenIdea(userText, ideas, language.locale);
       fx.progress.patch({ node: "done", completedAt: now() });
-      return completionCard(idea ? copy.pickedIdea(idea) : copy.finishedNoPick);
+      return completionCard(idea ? language.copy.pickedIdea(idea) : language.copy.finishedNoPick);
     }
 
     case "done":
     default: {
       // The "run again" button (or a typed "start over") resets and re-greets.
-      if (readResolutionJson(userText)?.revisit === true || isRestart(userText)) {
+      if (readResolutionJson(userText)?.revisit === true || isRestart(userText, language.locale)) {
         fx.progress.patch({ node: "await_choice", ...FRESH_PROGRESS });
-        return greetReply();
+        return greetReply(language);
       }
-      return completionCard(copy.alreadyDone);
+      return completionCard(language.copy.alreadyDone);
     }
   }
 }
@@ -470,9 +427,13 @@ function summaryFromSummon(output: unknown): string | null {
  *  memory files itself; we keep its returned summary for the takeaway. Best
  *  effort — a failed summon just leaves `introSummary` unset and the brainstorm
  *  falls back to the raw input. */
-async function foldMemory(fx: WelcomeEffects, source: string): Promise<void> {
-  await fx.say(copy.savingMemoryLead);
-  const summoned = await fx.summon(MEMORY_AGENT, memoryPrompt(source));
+async function foldMemory(
+  fx: WelcomeEffects,
+  source: string,
+  language: WelcomeLanguage,
+): Promise<void> {
+  await fx.say(language.copy.savingMemoryLead);
+  const summoned = await fx.summon(MEMORY_AGENT, memoryPrompt(source, language.locale));
   const summary = summoned.ok ? summaryFromSummon(summoned.output) : null;
   if (summary) fx.progress.patch({ introSummary: summary });
 }
@@ -480,47 +441,59 @@ async function foldMemory(fx: WelcomeEffects, source: string): Promise<void> {
 /** Shared tail of both intro branches: surface the memory takeaway, then either
  *  offer briefing scouts or go straight to the first-app brainstorm. Runs inline
  *  within the triggering turn (the memory fold already happened via summon). */
-async function continueAfterMemory(fx: WelcomeEffects, now: () => string): Promise<TurnReply> {
+async function continueAfterMemory(
+  fx: WelcomeEffects,
+  now: () => string,
+  language: WelcomeLanguage,
+): Promise<TurnReply> {
   const current = fx.progress.get();
   // Surface what we learned as a normal assistant text block (markdown), not a
   // bordered card inside the picker.
   const takeaway = current.introSummary;
-  if (takeaway) await fx.say(copy.takeaway(takeaway));
+  if (takeaway) await fx.say(language.copy.takeaway(takeaway));
 
   const basis = takeaway ?? current.introRawInput ?? "";
-  const scouts = scoutSuggestionsFromBasis(basis);
+  const scouts = scoutSuggestionsFromBasis(basis, language.locale);
   if (scouts.length > 0) {
     fx.progress.patch({ node: "await_scouts" });
-    return scoutSuggestions(scouts);
+    return scoutSuggestions(scouts, language);
   }
-  return brainstormAppIdeas(fx, now);
+  return brainstormAppIdeas(fx, now, language);
 }
 
-async function brainstormAppIdeas(fx: WelcomeEffects, now: () => string): Promise<TurnReply> {
+async function brainstormAppIdeas(
+  fx: WelcomeEffects,
+  now: () => string,
+  language: WelcomeLanguage,
+): Promise<TurnReply> {
   const current = fx.progress.get();
-  await fx.say(copy.ideasHandoffLead);
+  await fx.say(language.copy.ideasHandoffLead);
 
   // The brainstorm is autonomous and its real "approval" is the idea picker
   // below (the guardian picks one), so summon the specialist INLINE rather
   // than handing off — no child session, no submit-result gate.
   const basis = current.introSummary ?? current.introRawInput ?? "";
-  const summoned = await fx.summon(IDEAS_AGENT, ideasBrief(basis));
+  const summoned = await fx.summon(IDEAS_AGENT, ideasBrief(basis, language.locale));
   let ideas = summoned.ok ? ideasFromSummon(summoned.output) : [];
   const usedFallback = ideas.length === 0;
-  if (usedFallback) ideas = GENERIC_IDEAS;
+  if (usedFallback) ideas = genericIdeas(language.locale);
 
   fx.progress.patch({
     node: "await_idea",
     appIdeas: encodeIdeas(ideas),
     appIdeasGeneratedAt: now(),
   });
-  if (usedFallback) await fx.say(copy.ideasFailed);
+  if (usedFallback) await fx.say(language.copy.ideasFailed);
   return ideaPicker(ideas);
 }
 
 /** Resolve which idea the guardian chose from the idea-picker's output (or, as a
  *  fallback, typed text). Returns undefined for the explore opt-out / no match. */
-function resolveChosenIdea(userText: string, ideas: AppIdea[]): AppIdea | undefined {
+function resolveChosenIdea(
+  userText: string,
+  ideas: AppIdea[],
+  locale: WelcomeLocale,
+): AppIdea | undefined {
   if (isDismissedInteraction(userText)) return undefined;
 
   const chosen = field(userText, "ideaTitle");
@@ -530,7 +503,7 @@ function resolveChosenIdea(userText: string, ideas: AppIdea[]): AppIdea | undefi
   }
 
   // Typed fallback: accept a number or a title mention.
-  if (isNone(userText)) return undefined;
+  if (isNone(userText, locale)) return undefined;
   const pick = parsePick(userText, ideas.length);
   if (pick !== null) return ideas[pick];
   const lower = normalize(userText);
@@ -541,13 +514,13 @@ function normalize(text: string): string {
   return text.trim().toLowerCase();
 }
 
-function isNone(text: string): boolean {
-  return /^(none|no|nope|skip|later|not now)\b/.test(normalize(text));
+function isNone(text: string, locale: WelcomeLocale): boolean {
+  return ACTION_PATTERNS_BY_LOCALE[locale].none.test(normalize(text));
 }
 
 /** A typed request to run onboarding again (fallback for the revisit button). */
-function isRestart(text: string): boolean {
-  return /\b(start over|restart|revisit|do (it|this) again|run again)\b/.test(normalize(text));
+function isRestart(text: string, locale: WelcomeLocale): boolean {
+  return ACTION_PATTERNS_BY_LOCALE[locale].restart.test(normalize(text));
 }
 
 /** Parse a 1-based idea choice into a 0-based index, or null. */

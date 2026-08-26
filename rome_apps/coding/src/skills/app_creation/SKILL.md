@@ -53,19 +53,26 @@ mkdir -p "$REPO" && cd "$REPO"
 ```
 
 ```bash
-# 3. git init AFTER scaffolding. Initializing on top of the freshly
+# 3. Move the scaffolded package.json onto the current SDK release. The
+#    template carries a floor, not the latest — pnpm resolves each one now and
+#    writes back a concrete caret range. Run this BEFORE the baseline commit so
+#    the versions land in commit #1. Drop `@rome-os/ui` if package.json does not
+#    already list it: the workflow template has no web UI.
+pnpm add @rome-os/app-runtime@latest @rome-os/app-web-sdk@latest @rome-os/ui@latest
+
+# 4. git init AFTER scaffolding. Initializing on top of the freshly
 #    materialized template means commit #1 (next step) is "the scaffold as
 #    shipped" and every subsequent diff is scoped to the agent's own work.
 git init
 
-# 4. Commit the scaffold as a clean baseline. The scaffold ships a
+# 5. Commit the scaffold as a clean baseline. The scaffold ships a
 #    `.gitignore` that excludes `.rome/` and `dist/`, so build/pack output
 #    never lands in git.
 git add -A && git commit -m "Initial scaffold of <appId>"
 ```
 
 ```jsonc
-// 5. Install. One call: the daemon runs the workspace's `pnpm install` +
+// 6. Install. One call: the daemon runs the workspace's `pnpm install` +
 //    `pnpm build`, packs into $REPO/.rome/artifact, and installs the packed
 //    artifact. spec.source pins the SOURCE repo, not the artifact. No appId —
 //    the daemon derives it from the manifest and returns it.
@@ -100,9 +107,10 @@ Read both companion docs before editing any source file. They are split by purpo
 
 - **`apps.create: rootPath is required`** — `rootPath` was omitted from `op: "create"`. The daemon never picks a default; supply the absolute path chosen in step 1.
 - **`scaffoldDevApp: rootPath must be an absolute path`** — the path you passed was relative or contained an unexpanded `~`. Resolve to a fully-qualified path first.
-- **`App directory <path> already exists and is non-empty`** — either reuse the existing repo (skip steps 2–3 and jump to step 5) or pick a fresh path. A common trigger is running `git init` *before* `op: "create"` — scaffold into the empty dir first, then `git init`. Do not delete pre-existing contents to "fix" this — they may be the user's prior attempt.
-- **`op: "install"` fails because `source` is missing** — every install requires `source`. Pass `{ mode: "source", path: "<absolute $REPO>" }` on every iteration, exactly as shown in step 5.
+- **`App directory <path> already exists and is non-empty`** — either reuse the existing repo (skip steps 2–5 and jump to step 6) or pick a fresh path. A common trigger is running `git init` *before* `op: "create"` — scaffold into the empty dir first, then `git init`. Do not delete pre-existing contents to "fix" this — they may be the user's prior attempt.
+- **`op: "install"` fails because `source` is missing** — every install requires `source`. Pass `{ mode: "source", path: "<absolute $REPO>" }` on every iteration, exactly as shown in step 6.
 - **`op: "install"` fails with ARTIFACT_INVALID naming a mode/shape mismatch** — the declared `source.mode` disagrees with what's on disk (e.g. `mode: "source"` pointing at `$REPO/.rome/artifact`, or `mode: "bundle"` pointing at the repo root). The error names the exact source to pass — follow it verbatim; do not delete or restructure the directory to "fix" the shape.
+- **`pnpm add` in step 3 fails to reach the registry** — skip it and continue. The template floor installs, and `pnpm up` from `$REPO` takes the app to the current release once the network returns.
 - **`op: "install"` fails with "App build failed in …"** — the workspace's own `pnpm install` / `pnpm build` failed inside the daemon. The previously installed version keeps running. Reproduce locally with `pnpm --dir "$REPO" install && pnpm --dir "$REPO" run build`, fix the error, re-install.
 
 ## Scope

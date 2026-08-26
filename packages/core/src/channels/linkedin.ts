@@ -20,6 +20,7 @@ import { createLogger } from "../logger.js";
 import {
   OpencliAuthError,
   parseInbox,
+  parseThreadParticipants,
   parseThreadSnapshot,
   type LinkedInInboxRow,
   type RunOpencli,
@@ -95,6 +96,8 @@ export class LinkedInInboxPoller {
    *  in-flight tick's snapshot loop and suppresses rescheduling. */
   private stopped = false;
   private ticking = false;
+  /** The message-derived participant seed is a one-shot, not a per-tick cost. */
+  private participantsSeeded = false;
   private consecutiveFailures = 0;
   private lastFailureMessage: string | null = null;
   private nextRunAt: Date | null = null;
@@ -148,6 +151,7 @@ export class LinkedInInboxPoller {
    *  Public as the unit-test entry point; production ticks come off the timer. */
   async pollOnce(): Promise<void> {
     const signal = this.abort?.signal;
+    await this.seedParticipantsOnce();
     const inboxResult = await this.run(
       ["linkedin", "inbox", "--limit", String(this.inboxLimit)],
       signal ? { signal } : {},
@@ -219,11 +223,81 @@ export class LinkedInInboxPoller {
         reactionCount: m.reactionCount,
       })),
     );
+    // The snapshot's own participant count is not persisted: the thread's
+    // membership read below is what the count is derived from, so storing the
+    // snapshot's number too would just be a second answer to the same question.
     await this.sink.markThreadSynced(row.threadId, {
       conversationTitle: messages.find((m) => m.conversationTitle)?.conversationTitle ?? null,
       isGroup: messages.find((m) => m.conversationIsGroup != null)?.conversationIsGroup ?? null,
-      participantCount: messages.find((m) => m.participantCount != null)?.participantCount ?? null,
     });
+    await this.syncThreadParticipants(row, signal);
+  }
+
+  /**
+   * Read the thread's membership and replace the stored set with it. Runs
+   * after the snapshot rather than inside it: the snapshot's per-message rows
+   * only prove senders, while this command reads the conversation's own
+   * participant list and so also names members who have never posted.
+   *
+   * A failed read is not fatal. Membership is a cache of a pull-only mirror,
+   * so the honest response to a failure is to record nothing — the thread's
+   * `participants_last_read_at` simply does not advance and the previous set
+   * stays visibly stale — rather than to throw away the messages this tick
+   * already mirrored. A signed-out session is the exception: that is not a
+   * per-thread hiccup, and the grant owner has to hear about it.
+   */
+  private async syncThreadParticipants(row: LinkedInInboxRow, signal?: AbortSignal): Promise<void> {
+    const upsert = this.sink.upsertThreadParticipants?.bind(this.sink);
+    // No point paying for a crawl whose result nothing can store.
+    if (!upsert) return;
+
+    let participants: ReturnType<typeof parseThreadParticipants>;
+    try {
+      const result = await this.run(
+        ["linkedin", "thread-participants", "--thread-url", row.threadUrl],
+        { timeoutMs: SNAPSHOT_TIMEOUT_MS, ...(signal ? { signal } : {}) },
+      );
+      participants = parseThreadParticipants(result);
+    } catch (err) {
+      if (err instanceof OpencliAuthError) throw err;
+      log.warn("linkedin participant read failed; membership left as-is", {
+        threadId: row.threadId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+
+    await upsert(
+      row.threadId,
+      participants.map((p) => ({
+        participantId: p.participantId,
+        name: p.name,
+        headline: p.headline,
+        type: p.type,
+        isSelf: p.isSelf,
+      })),
+    );
+  }
+
+  /**
+   * Seed the participant tables from messages the mirror already holds, once
+   * per process. Every sender already recorded carries their member id, so an
+   * inbox polled before participants existed knows most of its membership
+   * without a single new page load. Best-effort: a failed seed must not cost
+   * the poll that follows it.
+   */
+  private async seedParticipantsOnce(): Promise<void> {
+    if (this.participantsSeeded) return;
+    this.participantsSeeded = true;
+    const backfill = this.sink.backfillParticipantsFromMessages?.bind(this.sink);
+    if (!backfill) return;
+    try {
+      await backfill();
+    } catch (err) {
+      log.warn("linkedin participant backfill failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   private async tick(): Promise<void> {

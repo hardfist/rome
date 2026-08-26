@@ -18,6 +18,34 @@ describe("PersonMappingRepository", () => {
     testDb.close();
   });
 
+  it("findAllWithMappings() reads every person and their identities at once", async () => {
+    // One statement, so an identity moving between two people mid-read cannot
+    // land under both of them — which is the identity union's whole premise.
+    const alice = await repo.create({
+      displayName: "Alice",
+      bondLevel: "inner-circle",
+      channelMappings: [
+        { channel: "telegram", channelUserId: "tg-alice" },
+        { channel: "whatsapp", channelUserId: "wa-alice" },
+      ],
+    });
+    const bob = await repo.create({ displayName: "Bob", bondLevel: "acquaintance" });
+
+    const rows = await repo.findAllWithMappings();
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    expect(byId.size).toBe(rows.length);
+    expect(byId.get(alice)!.displayName).toBe("Alice");
+    expect(
+      byId
+        .get(alice)!
+        .channelMappings.map((m) => `${m.channel}:${m.channelUserId}`)
+        .sort(),
+    ).toEqual(["telegram:tg-alice", "whatsapp:wa-alice"]);
+    // A person holding no identity is still a person, and the left join has to
+    // answer them with an empty list rather than dropping them.
+    expect(byId.get(bob)!.channelMappings).toEqual([]);
+  });
+
   it("createPerson() inserts person record", async () => {
     const id = await repo.create({
       displayName: "Alice",

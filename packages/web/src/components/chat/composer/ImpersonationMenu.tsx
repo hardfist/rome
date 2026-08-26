@@ -48,10 +48,10 @@ export function ImpersonationMenu({
             </>
           }
           className={cn(
-            "relative",
+            "relative touch-target",
             selectedPerson
               ? "bg-info-bg text-info-fg hover:bg-info-bg"
-              : "bg-surface text-muted-foreground hover:bg-surface-muted hover:text-foreground",
+              : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
           )}
         />
       </DropdownMenuTrigger>

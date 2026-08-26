@@ -10,6 +10,8 @@ import { runTurn, type TurnReply, type WelcomeEffects } from "./script.js";
 import { emitComponent, emitAskQuestion } from "./component.js";
 import { checkChatGptLogin, openChatGptTab, scrapeChatGpt } from "./chatgpt.js";
 import type { SummonResult } from "./script.js";
+import { copyFor } from "./copy.js";
+import { normalizeWelcomeLocale, type WelcomeLocale } from "../../locale.js";
 
 const AGENT_NAME = "welcome-to-rome";
 
@@ -83,7 +85,7 @@ class WelcomeTurnMiddleware implements TurnMiddlewareHook {
       });
       await this.emitReply(ctx, {
         kind: "text",
-        text: "Something went wrong with the welcome — you can start chatting with Rome normally.",
+        text: copyFor(await this.getLocale()).unexpectedError,
       });
     }
     // Deliberately do NOT call next(): the model is never invoked for this turn.
@@ -128,6 +130,7 @@ class WelcomeTurnMiddleware implements TurnMiddlewareHook {
           return "Rome";
         }
       },
+      getLocale: () => this.getLocale(),
       // Intermediate narration, typed out: a commentary block streams in word by
       // word (text_delta previews) then persists, so the UI feels alive while a
       // slow step (e.g. the ChatGPT scrape) runs. Awaited by callers to keep
@@ -145,10 +148,20 @@ class WelcomeTurnMiddleware implements TurnMiddlewareHook {
     };
   }
 
-  /** Send the onboarding hello via the host `send_message` action (channel:
-   *  email). No model involved — a deterministic script step. Any failure (no
-   *  appContext, action error, throw) resolves to `{ ok: false }` so the state
-   *  machine can move on instead of stranding onboarding. */
+  /** Read the server-side language selected by the guardian. */
+  private async getLocale(): Promise<WelcomeLocale> {
+    const appContext = this.deps.appContext;
+    if (!appContext) return "en";
+    try {
+      return normalizeWelcomeLocale(
+        await appContext.repositories.settings.get<unknown>("guardianLanguage"),
+      );
+    } catch {
+      return "en";
+    }
+  }
+
+  /** Send the deterministic onboarding hello through the email action. */
   private async sendEmail(to: string, subject: string, text: string): Promise<{ ok: boolean }> {
     const appContext = this.deps.appContext;
     if (!appContext) return { ok: false };

@@ -1,8 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
+import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema.js";
 import { WebChatRepository, channelConversationId, validateTurnRecapAudioUrl } from "./webchat.js";
+
+// Records which statement entry points (`select`, `insert`, `update`, `delete`,
+// `transaction`) a repository reaches for on the connection itself, so a test
+// can assert a write goes through one transaction rather than as separate
+// autocommit statements.
+function trackStatements(db: DrizzleDb): { db: DrizzleDb; statements: string[] } {
+  const statements: string[] = [];
+  const tracked = new Proxy(db as object, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop);
+      if (typeof value !== "function") return value;
+      if (
+        prop === "select" ||
+        prop === "insert" ||
+        prop === "update" ||
+        prop === "delete" ||
+        prop === "transaction"
+      ) {
+        statements.push(prop);
+      }
+      return value.bind(target);
+    },
+  }) as DrizzleDb;
+  return { db: tracked, statements };
+}
 
 describe("WebChatRepository", () => {
   let testDb: TestDb;
@@ -115,6 +141,116 @@ describe("WebChatRepository", () => {
       await expect(
         repo.addConversationMessage({ ...message, sessionId: second.id }),
       ).resolves.toEqual({ inserted: true });
+    });
+
+    describe("addConversationMessage atomicity", () => {
+      it("writes the message and the session activity update through one transaction", async () => {
+        const conversation = await repo.ensureChannelConversation({
+          channel: "telegram",
+          threadId: "atomic-single-transaction",
+          agentName: "main",
+        });
+        const { db, statements } = trackStatements(testDb.db);
+        const trackedRepo = new WebChatRepository(db);
+
+        await expect(
+          trackedRepo.addConversationMessage({
+            sessionId: conversation.id,
+            role: "user",
+            content: textContent("hello"),
+            platformMessageId: "atomic-1",
+            createdAt: new Date("2026-08-03T09:00:00.000Z"),
+          }),
+        ).resolves.toEqual({ inserted: true });
+
+        expect(statements).toEqual(["transaction"]);
+      });
+
+      it("returns { inserted: false } for a duplicate platform message id without advancing session activity", async () => {
+        const conversation = await repo.ensureChannelConversation({
+          channel: "telegram",
+          threadId: "atomic-duplicate",
+          agentName: "main",
+        });
+        const message = {
+          sessionId: conversation.id,
+          role: "user" as const,
+          content: textContent("hello"),
+          platformMessageId: "atomic-duplicate-1",
+        };
+        await expect(
+          repo.addConversationMessage({
+            ...message,
+            createdAt: new Date("2026-08-03T09:00:00.000Z"),
+          }),
+        ).resolves.toEqual({ inserted: true });
+        const [afterInsert] = await testDb.db
+          .select()
+          .from(romeSessions)
+          .where(eq(romeSessions.id, conversation.id));
+
+        await expect(
+          repo.addConversationMessage({
+            ...message,
+            content: textContent("hello again"),
+            createdAt: new Date("2026-08-03T10:00:00.000Z"),
+          }),
+        ).resolves.toEqual({ inserted: false });
+
+        const [afterDuplicate] = await testDb.db
+          .select()
+          .from(romeSessions)
+          .where(eq(romeSessions.id, conversation.id));
+        expect(afterDuplicate.activityAt.getTime()).toBe(afterInsert.activityAt.getTime());
+        const rows = await testDb.db
+          .select({ content: romeAgentMessages.content })
+          .from(romeAgentMessages)
+          .where(eq(romeAgentMessages.sessionId, conversation.id));
+        expect(rows).toEqual([{ content: textContent("hello") }]);
+      });
+
+      it("leaves no message row behind when the session activity update fails", async () => {
+        const conversation = await repo.ensureChannelConversation({
+          channel: "telegram",
+          threadId: "atomic-rollback",
+          agentName: "main",
+        });
+        const [before] = await testDb.db
+          .select()
+          .from(romeSessions)
+          .where(eq(romeSessions.id, conversation.id));
+        // Fail the activity write at the database, the way a constraint or a
+        // disk error would, so the assertion is about the rollback and not
+        // about a stubbed repository method.
+        testDb.db.run(sql`
+          CREATE TRIGGER reject_session_activity_update
+          BEFORE UPDATE OF activity_at ON rome_sessions
+          BEGIN
+            SELECT RAISE(ABORT, 'session activity update failed');
+          END;
+        `);
+
+        await expect(
+          repo.addConversationMessage({
+            sessionId: conversation.id,
+            role: "user",
+            content: textContent("hello"),
+            platformMessageId: "atomic-rollback-1",
+            createdAt: new Date("2026-08-03T09:00:00.000Z"),
+          }),
+        ).rejects.toThrow(/session activity update failed/);
+
+        const rows = await testDb.db
+          .select()
+          .from(romeAgentMessages)
+          .where(eq(romeAgentMessages.sessionId, conversation.id));
+        expect(rows).toEqual([]);
+        const [after] = await testDb.db
+          .select()
+          .from(romeSessions)
+          .where(eq(romeSessions.id, conversation.id));
+        expect(after.activityAt.getTime()).toBe(before.activityAt.getTime());
+      });
     });
 
     it("loads pending notifications and the exact replied-to message, then marks only notifications injected", async () => {
@@ -722,6 +858,64 @@ describe("WebChatRepository", () => {
     await expect(repo.getSession("sess-wild-nested")).resolves.toBeNull();
     await expect(repo.getSession("sess-alphabet-nested")).resolves.toMatchObject({
       id: "sess-alphabet-nested",
+    });
+  });
+
+  describe("deleteSessionsByProjectPathPrefix id read", () => {
+    it("reads the session ids inside the same transaction as the deletes", async () => {
+      await repo.createSession("sess-tx", "Tx", undefined, "alpha", null, "alpha");
+      const { db, statements } = trackStatements(testDb.db);
+      const trackedRepo = new WebChatRepository(db);
+
+      await expect(trackedRepo.deleteSessionsByProjectPathPrefix("alpha")).resolves.toBe(1);
+
+      // A `select` on the connection itself means the id list was read in its
+      // own autocommit statement before the transaction opened.
+      expect(statements).toEqual(["transaction"]);
+    });
+
+    it("deletes a session created for the project after the id read", async () => {
+      await repo.createSession("sess-alpha", "Alpha", undefined, "alpha", null, "alpha");
+      await repo.createSession("sess-other", "Other", undefined, "other", null, "other");
+
+      // Stand in for the concurrent create that lands in the window between the
+      // id read and the deletes. Reading the ids first leaves this session
+      // pointing at a project that no longer exists.
+      const original = testDb.db.transaction.bind(testDb.db);
+      const spy = vi
+        .spyOn(testDb.db, "transaction")
+        .mockImplementation((cb: Parameters<typeof original>[0]) => {
+          const now = new Date();
+          testDb.db
+            .insert(romeSessions)
+            .values({
+              id: "sess-alpha-raced",
+              name: "Alpha Raced",
+              projectName: "alpha",
+              projectPath: "alpha",
+              type: "webchat",
+              createdAt: now,
+              activityAt: now,
+            })
+            .run();
+          return original(cb);
+        });
+
+      await expect(repo.deleteSessionsByProjectPathPrefix("alpha")).resolves.toBe(2);
+      spy.mockRestore();
+
+      await expect(repo.listSessionRefsByProjectPathPrefix("alpha")).resolves.toEqual([]);
+      await expect(repo.getSession("sess-alpha")).resolves.toBeNull();
+      await expect(repo.getSession("sess-alpha-raced")).resolves.toBeNull();
+      await expect(repo.getSession("sess-other")).resolves.toMatchObject({ id: "sess-other" });
+    });
+
+    it("returns 0 and deletes nothing when no session matches the prefix", async () => {
+      await repo.createSession("sess-other", "Other", undefined, "other", null, "other");
+
+      await expect(repo.deleteSessionsByProjectPathPrefix("alpha")).resolves.toBe(0);
+
+      await expect(repo.getSession("sess-other")).resolves.toMatchObject({ id: "sess-other" });
     });
   });
 

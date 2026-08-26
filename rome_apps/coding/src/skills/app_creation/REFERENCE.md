@@ -299,18 +299,21 @@ decide whether to load the skill.
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
-    // ⚠️ Pin every published Rome package to a concrete semver range
-    //    (e.g. "^0.5.3").
+    // Step 3 of the scaffold flow runs `pnpm add <pkg>@latest` for each of
+    // these, so a new app opens on the current release. Read the range from
+    // your own package.json — never copy one out of a doc.
+    //
+    // ⚠️ Editing one by hand: keep it a concrete caret range.
     //   - NEVER "workspace:*" — apps install from npm on user machines;
     //     the workspace protocol does not resolve outside a monorepo.
     //   - NEVER "latest" — it silently pulls whatever the registry returns
     //     at install time, which breaks reproducibility and can ship a
     //     breaking SDK change to users without warning.
-    "@rome-os/app-runtime": "^0.5.3",
-    "@rome-os/app-web-sdk": "^0.2.4",
+    "@rome-os/app-runtime": "<the release pnpm resolved>",
+    "@rome-os/app-web-sdk": "<the release pnpm resolved>",
     // The component kit, when the app has a web UI. `pnpm up @rome-os/ui`
     // is how an app takes component fixes ("--latest" to cross a 0.x minor).
-    "@rome-os/ui": "^0.1.3"
+    "@rome-os/ui": "<the release pnpm resolved>"
   }
 }
 ```
@@ -533,8 +536,17 @@ export function createApiHandler(ctx: RomeAppContext): RomeAppApiHandler {
   identity, the single trustworthy "who is calling" answer:
   `{ kind: "guardian"; userId; via: "cookie" | "loopback" }` |
   `{ kind: "visitor"; accountId; email }` | `{ kind: "anonymous" }`.
-  Gate owner-only routes with
-  `if (request.caller.kind !== "guardian") return Response.json({ error: "forbidden" }, { status: 401 })`.
+  The host already enforces the app's access mode **before** dispatch: on a
+  private app only the guardian reaches the handler, on a shared app the
+  guardian and the allow-listed visitors, on a public app anyone. A request
+  that reaches the handler is already authorized to use the app, so most
+  handlers need no caller check at all. Read `caller.kind` only when the app
+  differentiates between the guardian and visitors — an owner-privileged
+  route (settings writes, agent dispatch, destructive operations) gated with
+  `if (request.caller.kind !== "guardian") return Response.json({ error: "forbidden" }, { status: 403 })`,
+  or per-visitor data keyed on `caller.email`. Never gate the whole handler
+  this way — that rejects every visitor and public caller, so sharing the
+  app stops working.
   Never derive identity from headers yourself — the host strips identity
   headers (`X-Rome-User-Id`, `x-rome-visitor-*`) before dispatch, and on a
   public app any surviving header is attacker-controlled. In the web UI,
@@ -914,6 +926,16 @@ See the community sample repo for full web app examples.
   `:host` when it injects the bundle into the shadow root
   (`packages/web/src/components/rome-app-host.tsx`), which is what makes an
   app-declared value beat the inherited host token.
+- **Read only the tokens your own bundle supplies.** The host promises one
+  thing across the shadow boundary: the theme layer, meaning color and shadow
+  values, which arrive as inherited custom properties and track the live theme
+  and mode. Everything else — geometry, typography, the control scale — holds
+  the same value under every theme, and the two imports above are what put it
+  in your bundle. Custom properties inherit and inheritance cannot be narrowed,
+  so your app also reaches every other property the host page happens to
+  declare. Reading one renders correctly in the Rome dashboard and breaks
+  against any other host, and no build or test in your app catches it. An app
+  that ships no kit stylesheet declares the few constants it uses itself.
 - Components come from the kit — `import { Button } from "@rome-os/ui/button"`,
   one subpath per component. Do not copy a component the kit publishes into
   `components/ui/`; the copy is frozen and drifts. See

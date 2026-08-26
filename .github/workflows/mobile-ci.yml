@@ -56,7 +56,21 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # 20 of expo-doctor's 21 checks are a pure function of the checked-out
+      # tree. The 21st — "packages match versions required by installed Expo
+      # SDK" — resolves its expected versions from api.expo.dev at run time
+      # rather than from the installed expo package's bundledNativeModules.json,
+      # so it fails whenever Expo publishes an SDK 57 patch, against an
+      # unchanged repo and a frozen lockfile. It is a semver-range check rather
+      # than a compatibility test: the major/minor/patch bucketing only picks a
+      # heading, so patch drift blocks a PR as hard as a major mismatch does.
+      # Skipping it keeps this job a function of the commit under test. To
+      # check dependency freshness deliberately, run `pnpm dlx expo-doctor` in
+      # packages/mobile with the variable unset.
+      # See https://expo.fyi/dependency-validation.
       - name: Expo doctor
+        env:
+          EXPO_DOCTOR_SKIP_DEPENDENCY_VERSION_CHECK: "1"
         run: pnpm dlx expo-doctor
 
       # Smoke-test the real Metro/Expo bundle path. This catches resolver, Babel,

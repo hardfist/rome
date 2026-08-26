@@ -4,6 +4,7 @@ import { ArrowRight, Check, Loader2 } from "lucide-react";
 import { defineComponent, type AppComponentContext } from "@rome-os/app-web-sdk";
 import { Button } from "@rome-os/ui/button";
 import { CoachPointer, findWidgetCoachTarget } from "@/lib/coach";
+import { getWelcomeCopy } from "@/lib/copy";
 
 // The "open the browser, sign in to ChatGPT, then continue" step. Submits
 // `{ action: "continue" | "skip" }`. Two phases:
@@ -36,6 +37,7 @@ function Step({ label, children }: { label: string; children: React.ReactNode })
 }
 
 function BrowserStep({ ctx }: { ctx: AppComponentContext }) {
+  const copy = getWelcomeCopy(ctx.bootstrap.shell.locale);
   const notSignedIn = ctx.props.notSignedIn === true;
   const browserOpen = useBrowserOpen();
   const resolved = ctx.host.resolved;
@@ -59,12 +61,10 @@ function BrowserStep({ ctx }: { ctx: AppComponentContext }) {
     <div className="w-full max-w-md space-y-3">
       {!browserOpen ? (
         <div className="rounded-12 border border-border bg-card p-3">
-          <p className="mb-2 text-sm font-medium text-foreground">
-            Let's borrow what ChatGPT knows about you ✨
-          </p>
+          <p className="mb-2 text-sm font-medium text-foreground">{copy.browserStep.heading}</p>
           <ol className="space-y-1.5">
             <Step label="1">
-              Open the browser here: click{" "}
+              {copy.browserStep.openBefore}{" "}
               <strong
                 ref={anchorRef}
                 className={
@@ -73,21 +73,20 @@ function BrowserStep({ ctx }: { ctx: AppComponentContext }) {
                     : "inline-flex items-center rounded-8 border border-primary/35 bg-primary/5 px-1.5 py-0.5 text-foreground shadow-1 whitespace-nowrap"
                 }
               >
-                ➕ Add widget → Browser
+                {copy.browserStep.addBrowser}
               </strong>{" "}
-              (follow the arrow).
+              {copy.browserStep.openAfter}
             </Step>
-            <Step label="2">Sign in to chatgpt.com in that browser.</Step>
-            <Step label="3">Come back and hit “I've signed in.”</Step>
+            <Step label="2">{copy.browserStep.signIn}</Step>
+            <Step label="3">{copy.browserStep.returnWhenReady}</Step>
           </ol>
         </div>
       ) : (
         <div className="flex items-center justify-between gap-3 rounded-12 border border-border bg-card p-3">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">Sign in to ChatGPT in the browser</p>
+            <p className="text-sm font-medium text-foreground">{copy.browserStep.openHeading}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Sign in to <strong className="text-foreground">chatgpt.com</strong> on the right, then
-              hit “I've signed in.”
+              {copy.browserStep.openDescription}
             </p>
           </div>
           <ArrowRight
@@ -99,7 +98,7 @@ function BrowserStep({ ctx }: { ctx: AppComponentContext }) {
 
       {notSignedIn ? (
         <p className="rounded-8 bg-warning-bg/60 px-2.5 py-1.5 text-xs text-warning-fg">
-          I don't see ChatGPT signed in yet — sign in, then hit “I've signed in” again.
+          {copy.browserStep.notSignedIn}
         </p>
       ) : null}
 
@@ -107,27 +106,27 @@ function BrowserStep({ ctx }: { ctx: AppComponentContext }) {
         <Button
           className="w-full"
           disabled={resolved}
-          onClick={() => ctx.host.submit({ action: "continue" }, "I've signed in")}
+          onClick={() => ctx.host.submit({ action: "continue" }, copy.browserStep.signedIn)}
         >
           {checking ? (
             <>
-              <Loader2 className="animate-spin" /> Checking…
+              <Loader2 className="animate-spin" /> {copy.browserStep.checking}
             </>
           ) : submitted ? (
             <>
-              <Check /> I've signed in
+              <Check /> {copy.browserStep.signedIn}
             </>
           ) : (
-            "I've signed in"
+            copy.browserStep.signedIn
           )}
         </Button>
         <Button
           className="w-full"
           variant="outline"
           disabled={resolved}
-          onClick={() => ctx.host.submit({ action: "skip" }, "Skip — ask me questions")}
+          onClick={() => ctx.host.submit({ action: "skip" }, copy.browserStep.skipSummary)}
         >
-          Skip for now
+          {copy.browserStep.skip}
         </Button>
       </div>
 

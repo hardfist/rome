@@ -3,6 +3,7 @@ import { Compass } from "lucide-react";
 import { defineComponent, startChat, type AppComponentContext } from "@rome-os/app-web-sdk";
 import { Button } from "@rome-os/ui/button";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
+import { getWelcomeCopy } from "@/lib/copy";
 
 // The "pick your first app" card. props: `{ ideas: [{title, prompt}] }`. Each
 // idea renders as a shadcn Item (title + description, with a "Build this" action
@@ -31,6 +32,7 @@ function readIdeas(value: unknown): Idea[] {
 }
 
 function IdeaPicker({ ctx }: { ctx: AppComponentContext }) {
+  const copy = getWelcomeCopy(ctx.bootstrap.shell.locale);
   const ideas = readIdeas(ctx.props.ideas);
   const resolved = ctx.host.resolved;
 
@@ -40,7 +42,7 @@ function IdeaPicker({ ctx }: { ctx: AppComponentContext }) {
 
   return (
     <div className="w-full max-w-md space-y-2">
-      <p className="text-sm font-medium text-foreground">Pick your first app to build</p>
+      <p className="text-sm font-medium text-foreground">{copy.ideas.heading}</p>
 
       {ideas.map((idea) => (
         <Item key={idea.title}>
@@ -50,7 +52,7 @@ function IdeaPicker({ ctx }: { ctx: AppComponentContext }) {
           </ItemContent>
           <ItemActions>
             <Button size="sm" disabled={resolved} onClick={() => build(idea)}>
-              Build this
+              {copy.ideas.build}
             </Button>
           </ItemActions>
         </Item>
@@ -61,9 +63,9 @@ function IdeaPicker({ ctx }: { ctx: AppComponentContext }) {
         size="sm"
         disabled={resolved}
         className="text-muted-foreground"
-        onClick={() => ctx.host.submit({ ideaTitle: EXPLORE }, "I'll explore on my own")}
+        onClick={() => ctx.host.submit({ ideaTitle: EXPLORE }, copy.ideas.exploreSummary)}
       >
-        <Compass /> I'll explore on my own
+        <Compass /> {copy.ideas.explore}
       </Button>
     </div>
   );

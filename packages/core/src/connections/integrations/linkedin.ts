@@ -37,6 +37,7 @@ import {
   type RunOpencli,
 } from "../../channels/linkedin-cli.js";
 import { LinkedInInboxPoller } from "../../channels/linkedin.js";
+import { linkedInMemberIdFromProfileUrl } from "../../channels/linkedin-sync.js";
 import type { LinkedInHistoryMessage, LinkedInSyncSink } from "../../channels/linkedin-sync.js";
 import { CredentialRejected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
@@ -260,12 +261,31 @@ interface LinkedInTalker extends Talker {
   getRuntimeDegradation(): CapabilityDegradation | null;
 }
 
+/**
+ * The `channel_mappings.channel_user_id` a LinkedIn message resolves through.
+ *
+ * The bare member id is the identity the mirror keys on — `linkedin_participants`
+ * is primary-keyed by it and promotion writes it into the mapping — so a promoted
+ * participant is recognised on their next message with nothing else wired up.
+ *
+ * The stored profile URL stays the fallback rather than being replaced by one:
+ * a URL carrying no member id is a vanity handle (`/in/ada-lovelace`), which is
+ * the form the guardian's own mapping is conferred in at connect time. Narrowing
+ * to the member id alone would strand it.
+ */
+function linkedInChannelUserId(row: LinkedInHistoryMessage): string {
+  return (
+    linkedInMemberIdFromProfileUrl(row.senderProfileUrl) ??
+    row.senderProfileUrl ??
+    (row.senderIsSelf ? "linkedin:self" : "linkedin:unknown")
+  );
+}
+
 function toHistoryNormalizedMessage(row: LinkedInHistoryMessage): NormalizedMessage {
   return {
     id: row.messageId,
     channel: "linkedin",
-    channelUserId:
-      row.senderProfileUrl ?? (row.senderIsSelf ? "linkedin:self" : "linkedin:unknown"),
+    channelUserId: linkedInChannelUserId(row),
     displayName: row.senderName ?? "",
     threadId: row.threadId,
     ...(row.threadName ? { threadName: row.threadName } : {}),

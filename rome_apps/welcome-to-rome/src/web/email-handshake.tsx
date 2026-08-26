@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { ArrowRight, Check, Loader2, Mail } from "lucide-react";
 import { defineComponent, type AppComponentContext } from "@rome-os/app-web-sdk";
 import { Button } from "@rome-os/ui/button";
+import { getWelcomeCopy } from "@/lib/copy";
 
 // The first onboarding step: a mutual-email handshake. The card reads the two
 // addresses from the registry-native surfaces — the agent's provisioned address
@@ -93,6 +94,7 @@ function Address({ label, email }: { label: string; email: string }) {
 }
 
 function EmailHandshake({ ctx }: { ctx: AppComponentContext }) {
+  const copy = getWelcomeCopy(ctx.bootstrap.shell.locale);
   const resolved = ctx.host.resolved;
   const [phase, setPhase] = useState<Phase>(() =>
     resolved ? { kind: "ready", agentEmail: "", guardianEmail: "" } : { kind: "checking" },
@@ -125,7 +127,7 @@ function EmailHandshake({ ctx }: { ctx: AppComponentContext }) {
   if (resolved) {
     return (
       <div className="flex w-full max-w-md items-center gap-2 rounded-12 border border-primary/40 bg-primary/5 p-3 text-sm text-foreground">
-        <Check className="size-4 text-primary" /> Email confirmed
+        <Check className="size-4 text-primary" /> {copy.emailHandshake.confirmed}
       </div>
     );
   }
@@ -133,7 +135,7 @@ function EmailHandshake({ ctx }: { ctx: AppComponentContext }) {
   if (phase.kind === "checking") {
     return (
       <div className="flex w-full max-w-md items-center gap-2 rounded-12 border border-border bg-card p-3 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" /> Setting up email…
+        <Loader2 className="size-4 animate-spin" /> {copy.emailHandshake.settingUp}
       </div>
     );
   }
@@ -141,11 +143,12 @@ function EmailHandshake({ ctx }: { ctx: AppComponentContext }) {
   if (phase.kind === "unavailable") {
     return (
       <div className="w-full max-w-md space-y-3 rounded-12 border border-border bg-card p-3">
-        <p className="text-sm text-foreground">
-          Email isn't set up in this environment yet — we can sort that out later.
-        </p>
-        <Button className="w-full" onClick={() => ctx.host.submit({ skip: true }, "Skipped email")}>
-          Continue <ArrowRight />
+        <p className="text-sm text-foreground">{copy.emailHandshake.unavailable}</p>
+        <Button
+          className="w-full"
+          onClick={() => ctx.host.submit({ skip: true }, copy.emailHandshake.continue)}
+        >
+          {copy.emailHandshake.continue} <ArrowRight />
         </Button>
       </div>
     );
@@ -154,19 +157,19 @@ function EmailHandshake({ ctx }: { ctx: AppComponentContext }) {
   return (
     <div className="w-full max-w-md space-y-3 rounded-12 border border-border bg-card p-4">
       <div className="space-y-2">
-        <Address label="My address" email={phase.agentEmail} />
-        <Address label="Yours" email={phase.guardianEmail} />
+        <Address label={copy.emailHandshake.agentAddress} email={phase.agentEmail} />
+        <Address label={copy.emailHandshake.guardianAddress} email={phase.guardianEmail} />
       </div>
       <Button
         className="w-full"
         onClick={() =>
           ctx.host.submit(
             { agreed: true, guardianEmail: phase.guardianEmail },
-            "Looks right — say hello",
+            copy.emailHandshake.agree,
           )
         }
       >
-        Looks right — say hello <ArrowRight />
+        {copy.emailHandshake.agree} <ArrowRight />
       </Button>
     </div>
   );

@@ -9,18 +9,22 @@ import {
   personIdentityId,
   timelineCursor,
   whatsAppDisplayName,
-  TIMELINE_PAGE_DEFAULT_LIMIT,
-  TIMELINE_PAGE_MAX_LIMIT,
   type TimelineEntry,
   type TimelinePage,
 } from "@rome/api-types/identities";
 import {
   accountPresentation,
-  parseAccountStateFilter,
-  type AccountDirectory,
-  type AccountDirectoryRow,
-  type AccountRef,
+  comparePeople,
+  countPeople,
+  parseAccountCursor,
+  parseAccountState,
+  parsePersonFilterLevel,
+  personMatchesLevel,
+  personMatchesQuery,
+  sliceAccountDirectory,
+  timelinePageLimit,
   type CreatePersonRequest,
+  type DirectoryAccount,
   type LinkAccountRequest,
   type LinkConflict,
   type MergeRequest,
@@ -51,6 +55,7 @@ const { persons, sentinelSenders, whatsappContacts, ownerOf, nextPersonId, summa
   proposedApiStore;
 
 type PersonFixture = (typeof persons)[number];
+type AccountRef = { channel: string; channelUserId: string };
 
 /** Stand-in for the per-provider account directory seam: what the platform
  *  calls this account, mirror profile first, push name second, raw id last.
@@ -84,22 +89,22 @@ function personResource(person: PersonFixture): PersonResource {
       channelUserId: a.channelUserId,
       displayName: accountDisplayName(a.channel, a.channelUserId),
     })),
-    messageCount: person.channelMappings.reduce(
-      (total, a) => total + messageCountFor(a.channel, a.channelUserId),
-      0,
-    ),
+    // Timeline entries, not records: the contract pins a person's count to the
+    // history GET /api/people/:id/messages pages.
+    messageCount: entries.length,
     latest: latestDynamic(entries),
   };
 }
 
-function directoryRow(ref: AccountRef): AccountDirectoryRow {
+function directoryRow(ref: AccountRef): DirectoryAccount {
   const owner = ownerOf(ref.channel, ref.channelUserId);
   const entries = buildTimeline(channelIdentityId(ref.channel, ref.channelUserId)) ?? [];
   return {
     channel: ref.channel,
     channelUserId: ref.channelUserId,
+    addresses: [ref.channelUserId],
     displayName: accountDisplayName(ref.channel, ref.channelUserId),
-    ...accountPresentation(owner),
+    ...accountPresentation(owner ? { personId: owner.id, displayName: owner.displayName } : null),
     messageCount: messageCountFor(ref.channel, ref.channelUserId),
     latest: latestDynamic(entries),
   };
@@ -165,35 +170,40 @@ export const proposedPeopleHandlers = [
   // Curated people only — the sentinel's holdings surface on /api/accounts as
   // dismissed rows, never as a person.
   http.get("/api/people", ({ request }) => {
-    const q = (new URL(request.url).searchParams.get("q") ?? "").trim().toLowerCase();
-    const rows = persons
+    const params = new URL(request.url).searchParams;
+    const q = (params.get("q") ?? "").trim();
+    const rawLevel = params.get("level");
+    const level = parsePersonFilterLevel(rawLevel);
+    if (rawLevel != null && rawLevel !== "" && level === null) {
+      return HttpResponse.json({ error: `level must name a bond level or "all"` }, { status: 400 });
+    }
+    // Counts cover everything the query matches; `?level=` narrows the rows
+    // alone, so every chip keeps its number while one is selected.
+    const matching = persons
       .filter((p) => p.id !== STRANGER_PERSON_ID)
       .map(personResource)
-      .filter(
-        (p) =>
-          !q ||
-          p.displayName.toLowerCase().includes(q) ||
-          p.accounts.some((a) => a.displayName.toLowerCase().includes(q)),
-      )
-      .sort(
-        (a, b) =>
-          (b.latest?.timestamp ?? -1) - (a.latest?.timestamp ?? -1) ||
-          a.displayName.localeCompare(b.displayName),
-      );
-    return HttpResponse.json({ people: rows } satisfies PeopleList);
+      .filter((p) => !q || personMatchesQuery(p, q));
+    const rows = matching.filter((p) => !level || personMatchesLevel(p, level)).sort(comparePeople);
+    return HttpResponse.json({ people: rows, counts: countPeople(matching) } satisfies PeopleList);
   }),
 
   // Every account ever observed — from links, the sentinel log, and channel
   // mirrors — with its derived state. `?state=unlinked` is the discovery queue
   // that replaces /api/persons/unknown and the union's unknown rows.
   http.get("/api/accounts", ({ request }) => {
-    const rawState = new URL(request.url).searchParams.get("state");
-    const state = parseAccountStateFilter(rawState);
+    const params = new URL(request.url).searchParams;
+    const rawState = params.get("state");
+    const state = parseAccountState(rawState);
     if (rawState != null && rawState !== "" && state === null) {
       return HttpResponse.json(
         { error: "state must be unlinked, linked, or dismissed" },
         { status: 400 },
       );
+    }
+    const rawCursor = params.get("cursor");
+    const cursor = parseAccountCursor(rawCursor);
+    if (rawCursor != null && rawCursor !== "" && cursor === null) {
+      return HttpResponse.json({ error: "cursor is not an account cursor" }, { status: 400 });
     }
     const seen = new Map<string, AccountRef>();
     const add = (channel: string, channelUserId: string) => {
@@ -203,11 +213,17 @@ export const proposedPeopleHandlers = [
     for (const s of sentinelSenders) add(s.channel, s.channelUserId);
     for (const c of whatsappContacts) if (!c.isGroup) add("whatsapp", c.jid);
 
-    const rows = [...seen.values()]
-      .map(directoryRow)
-      .filter((row) => !state || row.state === state)
-      .sort((a, b) => (b.latest?.timestamp ?? -1) - (a.latest?.timestamp ?? -1));
-    return HttpResponse.json({ accounts: rows } satisfies AccountDirectory);
+    // Paging, counts, the silent toggle and ordering are the shared rule's job,
+    // so the fixtures cannot drift from the route on any of them.
+    return HttpResponse.json(
+      sliceAccountDirectory([...seen.values()].map(directoryRow), {
+        query: params.get("q"),
+        state,
+        cursor,
+        limit: params.get("limit") ? Number(params.get("limit")) : null,
+        includeSilent: params.get("includeSilent") === "true",
+      }),
+    );
   }),
 
   // Dismiss: deliberately attribute the account to no one the guardian tracks.
@@ -287,11 +303,7 @@ export const proposedPeopleHandlers = [
     if (rawCursor != null && rawCursor !== "" && cursor === null) {
       return HttpResponse.json({ error: "cursor is not a timeline cursor" }, { status: 400 });
     }
-    const rawLimit = Number(search.get("limit"));
-    const limit =
-      Number.isFinite(rawLimit) && rawLimit > 0
-        ? Math.min(rawLimit, TIMELINE_PAGE_MAX_LIMIT)
-        : TIMELINE_PAGE_DEFAULT_LIMIT;
+    const limit = timelinePageLimit(search.get("limit"));
     const remaining: TimelineEntry[] = cursor
       ? all.filter((entry) => isAfterTimelineCursor(entry, cursor))
       : all;

@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QuestionCard } from "./QuestionCard";
+import i18n from "@/i18n";
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.restoreAllMocks();
+  await i18n.changeLanguage("en");
 });
 
 const MULTI_PROPS = {
@@ -54,6 +56,32 @@ describe("QuestionCard — multi-choice", () => {
       { answers: [{ questionId: "interests", value: "AI, Finance" }] },
       "AI, Finance",
     );
+  });
+
+  it("uses the active Rome language for the card controls", async () => {
+    await i18n.changeLanguage("zh-CN");
+    renderCard({
+      questions: [
+        {
+          id: "interests",
+          question: "你感兴趣什么？",
+          type: "multi",
+          options: ["人工智能"],
+          freeText: true,
+        },
+        {
+          id: "note",
+          question: "其他信息",
+          type: "text",
+          optional: true,
+        },
+      ],
+    });
+
+    expect(screen.getByText("可选")).toBeTruthy();
+    expect(screen.getByPlaceholderText("添加自己的选项…")).toBeTruthy();
+    expect(screen.getByPlaceholderText("输入你的答案…")).toBeTruthy();
+    expect(optionButton("发送")).toBeTruthy();
   });
 
   it("toggles an option off when tapped twice", async () => {

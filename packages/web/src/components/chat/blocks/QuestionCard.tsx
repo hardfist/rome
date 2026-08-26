@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -88,6 +89,7 @@ export interface QuestionCardProps {
 }
 
 export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: QuestionCardProps) {
+  const { t } = useTranslation("chat");
   const questions = parseQuestions(props);
   const resolved = result !== undefined;
   // Dismissed (the guardian skipped the card — tapped Dismiss, or answered in
@@ -169,7 +171,9 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
               <FieldLabel>
                 {q.question}
                 {q.optional ? (
-                  <span className="ml-2 text-aux text-muted-foreground">optional</span>
+                  <span className="ml-2 text-aux text-muted-foreground">
+                    {t("questionCard.optional")}
+                  </span>
                 ) : null}
               </FieldLabel>
               {q.type === "single" || q.type === "multi" ? (
@@ -225,7 +229,7 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
                             multi || !options.includes(drafts[q.id]) ? (drafts[q.id] ?? "") : ""
                           }
                           onChange={(e) => setDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
-                          placeholder={multi ? "Add your own…" : "Or type your own…"}
+                          placeholder={multi ? t("questionCard.addOwn") : t("questionCard.typeOwn")}
                           className={cn("text-ui", stacked ? "w-full" : "min-w-[10rem] flex-1")}
                         />
                       ) : null}
@@ -238,7 +242,7 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
                   onChange={(e) => setDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
                   rows={2}
                   className="resize-none"
-                  placeholder="Type your answer…"
+                  placeholder={t("questionCard.typeAnswer")}
                 />
               )}
             </Field>
@@ -248,15 +252,19 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
 
       <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
         <span className="text-aux text-muted-foreground">
-          {locked ? (dismissed ? "Dismissed" : "Answered") : "Asked by Rome"}
+          {locked
+            ? dismissed
+              ? t("questionCard.dismissed")
+              : t("questionCard.answered")
+            : t("questionCard.askedByRome")}
         </span>
         {!locked && (
           <div className="flex gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => onDismiss(toolUseId)}>
-              Dismiss
+              {t("questionCard.dismiss")}
             </Button>
             <Button type="button" size="sm" onClick={submit} disabled={!allAnswered}>
-              Send
+              {t("questionCard.send")}
             </Button>
           </div>
         )}

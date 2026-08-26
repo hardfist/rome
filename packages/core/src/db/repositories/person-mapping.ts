@@ -162,24 +162,41 @@ export class PersonMappingRepository {
     return results;
   }
 
-  async findAll() {
-    const rows = await this.db.select().from(persons);
+  /**
+   * Every person with their channel mappings, read as one statement.
+   *
+   * One statement rather than one per person, and not only to save the reads:
+   * a mapping moving between two people mid-read would otherwise land under
+   * both of them (or neither), because each person's mappings would arrive in
+   * their own autocommit query. Every reader of this table assumes an identity
+   * has one owner.
+   */
+  async findAllWithMappings() {
+    const rows = await this.db
+      .select({ person: persons, mapping: channelMappings })
+      .from(persons)
+      .leftJoin(channelMappings, eq(channelMappings.personId, persons.id));
 
-    const results = [];
-    for (const person of rows) {
-      const mappings = await this.db
-        .select()
-        .from(channelMappings)
-        .where(eq(channelMappings.personId, person.id));
-      results.push({
-        ...person,
-        channelMappings: mappings.map((m) => ({
-          channel: m.channel,
-          channelUserId: m.channelUserId,
-        })),
-      });
+    const byPerson = new Map<
+      string,
+      typeof persons.$inferSelect & {
+        channelMappings: { channel: string; channelUserId: string }[];
+      }
+    >();
+    for (const row of rows) {
+      let person = byPerson.get(row.person.id);
+      if (!person) {
+        person = { ...row.person, channelMappings: [] };
+        byPerson.set(row.person.id, person);
+      }
+      if (row.mapping) {
+        person.channelMappings.push({
+          channel: row.mapping.channel,
+          channelUserId: row.mapping.channelUserId,
+        });
+      }
     }
-    return results;
+    return [...byPerson.values()];
   }
 
   /**

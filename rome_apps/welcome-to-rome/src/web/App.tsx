@@ -5,6 +5,7 @@ import { fetchAppApi, startChat, type RomeAppBootstrap } from "@rome-os/app-web-
 import { Button } from "@rome-os/ui/button";
 import { cn } from "@/lib/utils";
 import { fireBurst, fireWelcome } from "@/lib/confetti";
+import { getWelcomeCopy } from "@/lib/copy";
 
 // Side-effect imports: each module's top-level `defineComponent(...)` registers
 // an inline chat component into the SDK registry at bundle load, so the host can
@@ -25,16 +26,8 @@ const ROME_LOGO_VIDEO = new URL("./assets/rome-logo-2.mp4", import.meta.url).hre
 const FALLBACK_AGENT_NAME = "Rome";
 
 // The agent's opening line — written to read like a person saying hello, not a
-// product tagline. Typed out word by word below.
-function greeting(agentName: string): string {
-  return `Hi! So good to meet you. I'm ${agentName} — I'll be helping you with pretty much everything from here on. Let me get you set up.`;
-}
-
-// The kickoff message becomes the guardian's first chat turn. The turn-middleware
-// state machine ignores its text and greets (script.ts `greet` node), but it
-// still shows in the transcript — so it reads like something the guardian said.
-const KICKOFF = "Let's get started 👋";
-
+// product tagline. The active locale supplies it via `copy.landing.greeting`;
+// it is typed out word by word below.
 // Typewriter pacing — deliberately gentle (a greeting, not a loading bar); a
 // longer beat trails sentence-ending punctuation for a natural cadence. Mirrors
 // the in-chat typeOut feel (hooks/turn-middleware/index.ts).
@@ -91,13 +84,14 @@ function readAgentName(value: unknown): string {
   return typeof value === "string" && value.trim() ? value.trim() : FALLBACK_AGENT_NAME;
 }
 
-export default function App(_props: { bootstrap: RomeAppBootstrap }) {
+export default function App({ bootstrap }: { bootstrap: RomeAppBootstrap }) {
+  const copy = getWelcomeCopy(bootstrap.shell.locale);
   const [agentName, setAgentName] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const { shown, done } = useTypewriter(agentName ? greeting(agentName) : "");
+  const { shown, done } = useTypewriter(agentName ? copy.landing.greeting(agentName) : "");
 
   useEffect(() => {
     let cancelled = false;
@@ -134,6 +128,10 @@ export default function App(_props: { bootstrap: RomeAppBootstrap }) {
     }
   }, []);
 
+  // The kickoff message becomes the guardian's first chat turn. The
+  // turn-middleware state machine ignores its text and greets (script.ts
+  // `greet` node), but it still shows in the transcript — so it reads like
+  // something the guardian said.
   async function handleStart() {
     if (starting) return;
     setStarting(true);
@@ -153,16 +151,21 @@ export default function App(_props: { bootstrap: RomeAppBootstrap }) {
     try {
       // Reset the welcome progress so every entry from this screen — a true
       // first run or a "run the welcome again" restart that landed back here —
-      // replays from a clean slate. No-op on first run (already fresh); a failure
-      // shouldn't block the chat, so it's best-effort.
-      await fetchAppApi("reset", { method: "POST" }).catch(() => {});
-
+      // replays from a clean slate. This full-mode page is outside
+      // RomeShellLayout, so include its bootstrap locale for the server-side
+      // middleware before opening the chat. A reset failure shouldn't block the
+      // chat, so this remains best-effort.
+      await fetchAppApi("reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locale: bootstrap.shell.locale }),
+      }).catch(() => {});
       // startChat creates the session with the welcome-to-rome agent, posts the
       // kickoff turn, and soft-navigates to /chat/<id> — where the conversational
       // onboarding takes over.
-      await startChat({ message: KICKOFF, agentName: "welcome-to-rome" });
+      await startChat({ message: copy.landing.kickoff, agentName: "welcome-to-rome" });
     } catch {
-      setError("Couldn't open the chat just yet — give it another tap.");
+      setError(copy.landing.openError);
       setStarting(false);
     }
   }
@@ -217,7 +220,7 @@ export default function App(_props: { bootstrap: RomeAppBootstrap }) {
           disabled={starting || !done}
           className={cn("group", starting && "opacity-80")}
         >
-          {starting ? "Opening…" : "Start chat"}
+          {starting ? copy.landing.opening : copy.landing.start}
           <ArrowRight className="transition-transform group-hover:translate-x-0.5" />
         </Button>
         {error ? <span className="text-xs text-destructive">{error}</span> : null}

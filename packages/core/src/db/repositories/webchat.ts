@@ -676,13 +676,24 @@ export class WebChatRepository {
   }
 
   async deleteSessionsByProjectPathPrefix(projectPath: string): Promise<number> {
-    const sessions = await this.listSessionRefsByProjectPathPrefix(projectPath);
-    const sessionIds = sessions.map((session) => session.id);
-    if (sessionIds.length === 0) return 0;
+    // The id read belongs in the same transaction as the deletes it drives.
+    // Reading first and awaiting leaves a window where a session created for
+    // the project lands after the list is taken: it isn't in the id list, so
+    // it survives the delete and is left pointing at a project that no longer
+    // exists. `.all()` is the synchronous terminal the better-sqlite3
+    // transaction scope requires (the same shape the deletes' `.run()` uses).
+    return this.db.transaction((tx) => {
+      const sessionIds = tx
+        .select({ id: romeSessions.id })
+        .from(romeSessions)
+        .where(projectPathPrefixCondition(projectPath))
+        .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
+        .all()
+        .map((row) => row.id);
+      if (sessionIds.length === 0) return 0;
 
-    // Same persistence contract as deleteSession(), but batched for project
-    // deletion and all session kinds (top-level chats plus handoff children).
-    await this.db.transaction((tx) => {
+      // Same persistence contract as deleteSession(), but batched for project
+      // deletion and all session kinds (top-level chats plus handoff children).
       for (const chunk of chunkArray(sessionIds, SESSION_DELETE_CHUNK_SIZE)) {
         tx.delete(romeAgentTraceBlocks).where(inArray(romeAgentTraceBlocks.sessionId, chunk)).run();
         tx.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, chunk)).run();
@@ -693,9 +704,9 @@ export class WebChatRepository {
         tx.delete(sharedChats).where(inArray(sharedChats.sessionId, chunk)).run();
         tx.delete(romeSessions).where(inArray(romeSessions.id, chunk)).run();
       }
-    });
 
-    return sessionIds.length;
+      return sessionIds.length;
+    });
   }
 
   async listProjects(): Promise<StoredWebchatProject[]> {
@@ -859,30 +870,37 @@ export class WebChatRepository {
     createdAt?: Date;
   }): Promise<{ inserted: boolean }> {
     const createdAt = input.createdAt ?? new Date();
-    const rows = await this.db
-      .insert(romeAgentMessages)
-      .values({
-        id: conversationPlatformMessageId(input.sessionId, input.platformMessageId),
-        sessionId: input.sessionId,
-        turnId: null,
-        role: input.role,
-        content: input.content,
-        platformMessageId: input.platformMessageId,
-        senderId: input.senderId ?? null,
-        senderName: input.senderName ?? null,
-        replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
-        contextInjectedTurnId: null,
-        createdAt,
-      })
-      .onConflictDoNothing()
-      .returning({ id: romeAgentMessages.id });
-    if (rows.length > 0) {
-      await this.db
-        .update(romeSessions)
+    // The row and the session activity it advances are one fact. Splitting them
+    // across two writes lets a failure in between store the message against
+    // stale activity, which sorts the conversation by the wrong timestamp.
+    return this.db.transaction((tx) => {
+      const rows = tx
+        .insert(romeAgentMessages)
+        .values({
+          id: conversationPlatformMessageId(input.sessionId, input.platformMessageId),
+          sessionId: input.sessionId,
+          turnId: null,
+          role: input.role,
+          content: input.content,
+          platformMessageId: input.platformMessageId,
+          senderId: input.senderId ?? null,
+          senderName: input.senderName ?? null,
+          replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
+          contextInjectedTurnId: null,
+          createdAt,
+        })
+        .onConflictDoNothing()
+        .returning({ id: romeAgentMessages.id })
+        .all();
+      // A platform message id we already stored is a redelivery, not new
+      // activity — leave the session's timestamp where it is.
+      if (rows.length === 0) return { inserted: false };
+      tx.update(romeSessions)
         .set(advanceSessionActivitySet(createdAt))
-        .where(eq(romeSessions.id, input.sessionId));
-    }
-    return { inserted: rows.length > 0 };
+        .where(eq(romeSessions.id, input.sessionId))
+        .run();
+      return { inserted: true };
+    });
   }
 
   async promoteConversationMessageToUser(

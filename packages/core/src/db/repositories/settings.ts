@@ -11,19 +11,18 @@ export class SettingsRepository {
     return rows[0].value as T;
   }
 
+  // One atomic upsert rather than a read-then-branch: two concurrent writers to
+  // the same key would both observe an empty read and race into a duplicate
+  // insert on the `settings.key` primary key.
   async set(key: string, value: unknown): Promise<void> {
     const now = new Date();
-    const existing = await this.db.select().from(settings).where(eq(settings.key, key));
-
-    if (existing.length > 0) {
-      await this.db.update(settings).set({ value, updatedAt: now }).where(eq(settings.key, key));
-    } else {
-      await this.db.insert(settings).values({
-        key,
-        value,
-        updatedAt: now,
+    await this.db
+      .insert(settings)
+      .values({ key, value, updatedAt: now })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: { value, updatedAt: now },
       });
-    }
   }
 
   async delete(key: string): Promise<void> {

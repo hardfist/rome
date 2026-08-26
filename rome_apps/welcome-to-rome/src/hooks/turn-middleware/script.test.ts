@@ -33,6 +33,7 @@ function makeEffects(node: WelcomeProgress["node"], overrides: Partial<WelcomePr
   const fx = {
     progress,
     getAgentName: vi.fn(async () => "Rome"),
+    getLocale: vi.fn(async () => "en" as const),
     say: vi.fn(async () => {}),
     summon: vi.fn(),
     chatgpt: {} as WelcomeEffects["chatgpt"],
@@ -54,6 +55,18 @@ describe("runTurn — email handshake gate", () => {
     expect(reply).toMatchObject({
       componentId: "email-handshake",
       lead: expect.stringContaining("I'm Nova."),
+    });
+  });
+
+  it("uses Chinese copy from the first welcome step", async () => {
+    const { fx } = makeEffects("greet");
+    vi.mocked(fx.getLocale).mockResolvedValue("zh-CN");
+
+    const reply = await runTurn("开始设置", fx);
+
+    expect(reply).toMatchObject({
+      componentId: "email-handshake",
+      lead: expect.stringContaining("👋 你好，我是 Rome。"),
     });
   });
 
@@ -117,6 +130,30 @@ describe("runTurn — getting-to-know-you questionnaire", () => {
     expect(getNode()).toBe("await_questions");
   });
 
+  it("uses Chinese questions when the guardian selected Chinese", async () => {
+    const { fx, getNode } = makeEffects("await_choice");
+    vi.mocked(fx.getLocale).mockResolvedValue("zh-CN");
+
+    const reply = await runTurn(resolution({ choice: "回答几个问题" }), fx);
+
+    expect(reply.kind).toBe("ask");
+    if (reply.kind === "ask") {
+      expect(reply.lead).toBe("很好，回答几个小问题吧。点击或输入都可以：");
+      expect(reply.questions[0]).toMatchObject({ question: "你的角色或所在领域是什么？" });
+    }
+    expect(getNode()).toBe("await_questions");
+  });
+
+  it("accepts the Chinese browser-skip action", async () => {
+    const { fx, getNode } = makeEffects("await_browser");
+    vi.mocked(fx.getLocale).mockResolvedValue("zh-CN");
+
+    const reply = await runTurn(resolution({ action: "暂时跳过" }), fx);
+
+    expect(reply).toMatchObject({ kind: "ask" });
+    expect(getNode()).toBe("await_questions");
+  });
+
   it("folds the answers into memory via an inline welcome-memory summon", async () => {
     const { fx, getNode } = makeEffects("await_questions");
     // Route the memory summon vs. the later ideas summon by agent name.
@@ -153,6 +190,27 @@ describe("runTurn — getting-to-know-you questionnaire", () => {
     expect(fx.summon).not.toHaveBeenCalled();
     expect(reply).toMatchObject({ kind: "ask" });
     expect(getNode()).toBe("await_questions");
+  });
+});
+
+describe("runTurn — locale fallback ideas", () => {
+  it("uses the Chinese fallback title without changing the English one", async () => {
+    const { fx } = makeEffects("await_idea");
+    vi.mocked(fx.getLocale).mockResolvedValue("zh-CN");
+
+    const reply = await runTurn(resolution({ ideaTitle: "培养习惯" }), fx);
+
+    expect(reply).toMatchObject({
+      componentId: "completion-card",
+      props: { heading: "我们来做「培养习惯」。" },
+    });
+
+    const { fx: englishFx } = makeEffects("await_idea");
+    const englishReply = await runTurn(resolution({ ideaTitle: "Habit garden" }), englishFx);
+    expect(englishReply).toMatchObject({
+      componentId: "completion-card",
+      props: { heading: 'Let\'s build "Habit garden".' },
+    });
   });
 });
 
@@ -198,5 +256,36 @@ describe("runTurn — briefing scout suggestions", () => {
     expect(fx.summon).toHaveBeenCalledOnce();
     expect(reply).toMatchObject({ componentId: "idea-picker" });
     expect(getNode()).toBe("await_idea");
+  });
+
+  it("localizes Chinese scout suggestions from Chinese answers", async () => {
+    const { fx } = makeEffects("await_questions");
+    vi.mocked(fx.getLocale).mockResolvedValue("zh-CN");
+    vi.mocked(fx.summon).mockResolvedValue({
+      ok: true,
+      output: { summary: "对人工智能和软件工程感兴趣。" },
+    });
+
+    const reply = await runTurn(
+      resolution({
+        answers: [{ questionId: "interests", value: "人工智能, 软件与工程" }],
+      }),
+      fx,
+    );
+
+    expect(reply).toMatchObject({
+      componentId: "scout-suggestions",
+      lead: "我还可以为你的 Briefing 添加几个观察任务，让 Rome 持续留意对你有用的信息。",
+      props: {
+        scouts: expect.arrayContaining([
+          expect.objectContaining({ title: "AI 发布雷达" }),
+          expect.objectContaining({ title: "开发者工具观察" }),
+        ]),
+      },
+    });
+    expect(fx.summon).toHaveBeenCalledWith(
+      "welcome-memory",
+      expect.stringContaining("Write every guardian-facing field in Simplified Chinese."),
+    );
   });
 });

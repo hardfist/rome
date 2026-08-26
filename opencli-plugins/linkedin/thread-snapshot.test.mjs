@@ -353,6 +353,69 @@ function fakePage({ probe, responses }) {
   };
 }
 
+test("the command keeps every column it returns today and adds the sender participant id", () => {
+  const command = getRegistry().get("linkedin/thread-snapshot");
+  assert.ok(command);
+  // Adding participant identifiers is additive: every column callers already
+  // read (packages/core parses these rows) must survive.
+  const established = [
+    "thread_url",
+    "thread_id",
+    "conversation_name",
+    "conversation_title",
+    "conversation_is_group",
+    "participant_count",
+    "returned_index",
+    "returned_message_count",
+    "message_id",
+    "sent_at",
+    "sender_name",
+    "sender_type",
+    "sender_profile_url",
+    "sender_headline",
+    "sender_is_self",
+    "text",
+    "subject",
+    "reaction_count",
+    "is_latest",
+  ];
+  for (const column of established) {
+    assert.ok(command.columns.includes(column), `dropped column ${column}`);
+  }
+  assert.ok(command.columns.includes("sender_participant_id"));
+});
+
+test("message rows carry the sender's bare participant id", () => {
+  const rows = parseThreadMessagePayloads(
+    [
+      payload([
+        message("m1", THREAD_ID, SELF, 1000, "first"),
+        message("m2", THREAD_ID, EVAN, 2000, "second"),
+      ]),
+    ],
+    { threadId: THREAD_ID, threadUrl: THREAD_URL, limit: 20 },
+  );
+
+  assert.equal(rows[0].sender_participant_id, "self");
+  assert.equal(rows[1].sender_participant_id, "evan");
+  // An unresolvable sender stays empty rather than inventing an id.
+  const orphan = parseThreadMessagePayloads(
+    [
+      {
+        included: [
+          {
+            $type: "com.linkedin.messenger.Conversation",
+            entityUrn: `urn:li:msg_conversation:(urn:li:fsd_profile:self,${THREAD_ID})`,
+          },
+          message("m1", THREAD_ID, "urn:li:msg_messagingParticipant:missing", 1000, "hi"),
+        ],
+      },
+    ],
+    { threadId: THREAD_ID, threadUrl: THREAD_URL, limit: 20 },
+  );
+  assert.equal(orphan[0].sender_participant_id, "");
+});
+
 test("the command returns one row per message from the requested thread", async () => {
   const command = getRegistry().get("linkedin/thread-snapshot");
   assert.ok(command);

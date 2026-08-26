@@ -189,8 +189,10 @@ export const linkedinThreads = sqliteTable("linkedin_threads", {
   // LinkedIn's own group flag from the thread snapshot; null until the first
   // snapshot reports it (inbox listings carry no group information).
   isGroup: integer("is_group", { mode: "boolean" }),
-  // Participants including the account owner, per the thread snapshot.
-  participantCount: integer("participant_count"),
+  // Deliberately no participant_count column. How many people are on a thread
+  // is counted from `linkedin_thread_participants` when it is read, so the
+  // membership and its size are one fact and cannot drift apart. The snapshot
+  // still reports a count; the mirror no longer keeps a second copy of it.
   lastMessagePreview: text("last_message_preview"),
   lastMessageAt: integer("last_message_at", { mode: "timestamp" }),
   unread: integer("unread", { mode: "boolean" }).notNull().default(false),
@@ -199,6 +201,12 @@ export const linkedinThreads = sqliteTable("linkedin_threads", {
   // LinkedIn inbox categories, e.g. 'INBOX,PRIMARY_INBOX'.
   category: text("category"),
   lastSyncedAt: integer("last_synced_at", { mode: "timestamp" }),
+  // When this thread's membership was last read from LinkedIn. The participant
+  // tables are a cache of a pull-only mirror, so a reader has to be able to
+  // tell how old the set is. Null means the membership has never been read
+  // authoritatively — including a thread seeded from stored messages, where
+  // senders alone cannot prove membership and a lurker is invisible.
+  participantsLastReadAt: integer("participants_last_read_at", { mode: "timestamp" }),
   firstSyncedAt: integer("first_synced_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
@@ -227,6 +235,42 @@ export const linkedinMessages = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.threadId, table.messageId] }),
     index("idx_linkedin_messages_thread_sent").on(table.threadId, table.sentAt),
+  ],
+);
+
+// One row per LinkedIn identity seen in a thread's participant list. Person-level
+// facts live here rather than on the membership row so a name or headline is
+// stored once, not once per thread the person appears in.
+export const linkedinParticipants = sqliteTable("linkedin_participants", {
+  // LinkedIn member id, bare (`ACoAA…`) — no urn: prefix and no profile URL —
+  // so it matches `channel_mappings.channel_user_id` for `channel = "linkedin"`
+  // and a mirrored participant can be promoted into `persons` with no
+  // translation step.
+  participantId: text("participant_id").primaryKey(),
+  name: text("name"),
+  headline: text("headline"),
+  // 'member' | 'organization' | 'agent' | 'custom', as the snapshot reports it.
+  type: text("type"),
+  // True for the account owner's own row in a thread's participant list.
+  isSelf: integer("is_self", { mode: "boolean" }).notNull().default(false),
+  firstSyncedAt: integer("first_synced_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+// Thread membership: which identities belong to which thread. Rows carry no
+// person-level facts — those live once on `linkedin_participants`.
+export const linkedinThreadParticipants = sqliteTable(
+  "linkedin_thread_participants",
+  {
+    threadId: text("thread_id").notNull(),
+    participantId: text("participant_id").notNull(),
+    firstSyncedAt: integer("first_synced_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.threadId, table.participantId] }),
+    // The primary key already serves thread → participants; this index serves
+    // the reverse lookup, participant → the threads they are in.
+    index("idx_linkedin_thread_participants_participant").on(table.participantId),
   ],
 );
 

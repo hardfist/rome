@@ -11,6 +11,13 @@
     sans-serif;
   font-size: 14px;
   color: var(--foreground);
+
+  /* The control radius, held here rather than read from the host. This app
+     ships no kit stylesheet, so an undeclared `var(--control-r-md)` resolves
+     only by inheriting the dashboard's `:root`, which renders correctly against
+     that one host and nowhere else. Geometry does not vary with theme or mode,
+     so a local copy costs nothing. Contract: docs/design-system.md. */
+  --control-r-md: 10px;
 }
 
 .ws-root {

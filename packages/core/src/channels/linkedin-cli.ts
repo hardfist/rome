@@ -255,6 +255,12 @@ export interface LinkedInSnapshotMessage {
   conversationTitle: string | null;
   /** LinkedIn's own group flag; null when the installed plugin predates it. */
   conversationIsGroup: boolean | null;
+  /**
+   * What the snapshot page claimed, reported as the plugin sends it. The
+   * mirror does not store this: the count a reader sees is counted from the
+   * membership `linkedin thread-participants` reads, so a thread has exactly
+   * one answer to how many people are on it.
+   */
   participantCount: number | null;
   messageId: string;
   sentAt: Date | null;
@@ -291,6 +297,87 @@ export function parseThreadSnapshot(result: OpencliResult): LinkedInSnapshotMess
     subject: row.subject ?? null,
     reactionCount: row.reaction_count ?? null,
   }));
+}
+
+// ── thread-participants ───────────────────────────────────────────────────
+// The Rome-owned command (opencli-plugins/linkedin/thread-participants.js).
+// It reads the conversation's participant reference list, so it names everyone
+// on the thread — including members who have never sent a message, who are
+// invisible in `thread-snapshot`'s per-message rows.
+
+const participantRowSchema = z.object({
+  thread_id: z.string().min(1),
+  participant_id: z.string(),
+  name: z.string().nullish(),
+  headline: z.string().nullish(),
+  type: z.string().nullish(),
+  is_self: z.boolean(),
+  profile_url: z.string().nullish(),
+});
+
+export interface LinkedInThreadParticipant {
+  threadId: string;
+  /** LinkedIn's obfuscated member id, bare (`ACoAA…`). */
+  participantId: string;
+  name: string | null;
+  headline: string | null;
+  /** `member` | `organization` | `agent` | `custom`. */
+  type: string | null;
+  /** True for the account owner's own row in the participant list. */
+  isSelf: boolean;
+  profileUrl: string | null;
+}
+
+/** The plugin writes "" for a field it could not read; the mirror stores "not
+ *  known" as null so a later read can still fill it in. */
+function emptyToNull(value: string | null | undefined): string | null {
+  const trimmed = (value ?? "").trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * Parse `linkedin thread-participants`. Rows without a member id are dropped
+ * rather than stored as a blank identity — `participant_id` is the primary key
+ * of `linkedin_participants` and has to match `channel_mappings.channel_user_id`.
+ *
+ * An empty result is a failure, not an empty thread: the store reads an empty
+ * participant set as "everyone left" and would wipe the thread's membership,
+ * so a read that proved nothing must never reach it.
+ */
+export function parseThreadParticipants(result: OpencliResult): LinkedInThreadParticipant[] {
+  const raw = parseJsonOutput("linkedin thread-participants", result);
+  const rows = z.array(participantRowSchema).safeParse(raw);
+  if (!rows.success) {
+    throw new OpencliCommandError("linkedin thread-participants", "unexpected output shape");
+  }
+  const participants = rows.data
+    .filter((row) => row.participant_id.trim() !== "")
+    .map((row) => ({
+      threadId: row.thread_id,
+      participantId: row.participant_id.trim(),
+      name: emptyToNull(row.name),
+      headline: emptyToNull(row.headline),
+      type: emptyToNull(row.type),
+      isSelf: row.is_self,
+      profileUrl: emptyToNull(row.profile_url),
+    }));
+  if (participants.length === 0) {
+    throw new OpencliCommandError("linkedin thread-participants", "reported no participants");
+  }
+  return participants;
+}
+
+/** Read one thread's full participant list through opencli. */
+export async function readLinkedInThreadParticipants(
+  input: { threadUrl: string },
+  run: RunOpencli = runOpencli,
+  opts: RunOpencliOptions = {},
+): Promise<LinkedInThreadParticipant[]> {
+  const result = await run(
+    ["linkedin", "thread-participants", "--thread-url", input.threadUrl],
+    opts,
+  );
+  return parseThreadParticipants(result);
 }
 
 // ── safe-send ────────────────────────────────────────────────────────────

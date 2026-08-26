@@ -206,8 +206,18 @@
     "send": "发送",
     "sendTitle": "发送",
     "queueTurnTitle": "排队新一轮对话",
-    "stop": "停止",
     "stopGenerating": "停止生成"
+  },
+  "questionCard": {
+    "optional": "可选",
+    "addOwn": "添加自己的选项…",
+    "typeOwn": "或输入自己的答案…",
+    "typeAnswer": "输入你的答案…",
+    "dismissed": "已跳过",
+    "answered": "已回答",
+    "askedByRome": "Rome 正在提问",
+    "dismiss": "跳过",
+    "send": "发送"
   },
   "modelSelector": {
     "label": "模型",

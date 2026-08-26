@@ -38,7 +38,7 @@ export function ReasoningEffortMenu({
           type="button"
           variant="ghost"
           disabled={disabled}
-          className="text-muted-foreground"
+          className="touch-target text-muted-foreground"
           aria-label={t("reasoningEffort.label")}
           title={t("reasoningEffort.label")}
         >

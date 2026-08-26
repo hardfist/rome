@@ -7,6 +7,7 @@ import {
   navigateRome,
   type AppComponentContext,
 } from "@rome-os/app-web-sdk";
+import { getWelcomeCopy } from "@/lib/copy";
 
 // The full-mode welcome screen — the first screen of Rome (src/web/App.tsx),
 // shown standalone via the /full/apps route. "Run the welcome again" sends the
@@ -20,7 +21,9 @@ const SHOWCASES_APP_ID = "showcases";
 // (which clears the welcome progress on its next "Start chat"); the primary
 // action opens Showcases so the guardian has a natural next place to explore.
 function CompletionCard({ ctx }: { ctx: AppComponentContext }) {
-  const heading = typeof ctx.props.heading === "string" ? ctx.props.heading : "You're all set.";
+  const copy = getWelcomeCopy(ctx.bootstrap.shell.locale);
+  const heading =
+    typeof ctx.props.heading === "string" ? ctx.props.heading : copy.completion.fallbackHeading;
   const body = typeof ctx.props.body === "string" ? ctx.props.body : "";
   const kickoff = typeof ctx.props.kickoffPrompt === "string" ? ctx.props.kickoffPrompt : "";
   const [copied, setCopied] = useState(false);
@@ -44,7 +47,7 @@ function CompletionCard({ ctx }: { ctx: AppComponentContext }) {
     );
   };
 
-  const copy = async () => {
+  const copyKickoff = async () => {
     try {
       await navigator.clipboard.writeText(kickoff);
       setCopied(true);
@@ -64,25 +67,23 @@ function CompletionCard({ ctx }: { ctx: AppComponentContext }) {
           <p className="whitespace-pre-wrap text-xs text-foreground">{kickoff}</p>
           <button
             type="button"
-            onClick={copy}
+            onClick={copyKickoff}
             className="mt-2 inline-flex items-center gap-1.5 rounded-8 border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
           >
             {copied ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
-            {copied ? "Copied" : "Copy prompt"}
+            {copied ? copy.completion.copied : copy.completion.copyPrompt}
           </button>
         </div>
       ) : null}
 
-      <p className="mt-3 text-xs text-muted-foreground">
-        Browse more Rome apps and see what you can build next.
-      </p>
+      <p className="mt-3 text-xs text-muted-foreground">{copy.completion.explore}</p>
       <button
         type="button"
         disabled={openingShowcases}
         onClick={openShowcases}
         className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-8 bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
       >
-        {openingShowcases ? "Opening…" : "Open Showcases"}
+        {openingShowcases ? copy.completion.opening : copy.completion.openShowcases}
         <ArrowRight className="size-4" />
       </button>
 
@@ -93,7 +94,7 @@ function CompletionCard({ ctx }: { ctx: AppComponentContext }) {
         className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
       >
         <RotateCcw className="size-3.5" />
-        {restarting ? "Opening…" : "Run the welcome again"}
+        {restarting ? copy.completion.opening : copy.completion.runAgain}
       </button>
     </div>
   );

@@ -46,6 +46,8 @@ test("proposed /people contract walkthrough", async () => {
   expect(r.body.people.map((p: { id: string }) => p.id)).not.toContain(STRANGER_PERSON_ID);
   const ray = r.body.people.find((p: { id: string }) => p.id === "ray-oster");
   expect(ray.accounts).toHaveLength(2);
+  // Counts ride the listing and cover the whole match.
+  expect(r.body.counts.all).toBe(r.body.people.length);
 
   // The sentinel is not addressable as a person.
   r = await call("GET", `/api/people/${STRANGER_PERSON_ID}`);
@@ -61,6 +63,10 @@ test("proposed /people contract walkthrough", async () => {
   const unlinked = r.body.accounts.map((a: { channelUserId: string }) => a.channelUserId);
   expect(unlinked).toContain(DEV_JID);
   expect(unlinked).toContain(JULES_TG);
+  // Silent address-book contacts stay off the default page and are counted
+  // for the toggle; the state counts describe the admitted directory.
+  expect(r.body.silentTotal).toBeGreaterThan(0);
+  expect(r.body.counts.unlinked).toBeGreaterThanOrEqual(r.body.accounts.length);
   r = await call("GET", "/api/accounts?state=bogus");
   expect(r.status).toBe(400);
 

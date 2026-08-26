@@ -4,6 +4,7 @@ import { Check, Loader2, Plus, Radar, SkipForward, TriangleAlert } from "lucide-
 import { defineComponent, type AppComponentContext } from "@rome-os/app-web-sdk";
 import { Button } from "@rome-os/ui/button";
 import { cn } from "@/lib/utils";
+import { getWelcomeCopy } from "@/lib/copy";
 
 interface ScoutSuggestion {
   title: string;
@@ -42,14 +43,10 @@ function readScouts(value: unknown): ScoutSuggestion[] {
   });
 }
 
-function intervalLabel(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
-  if (minutes % 1440 === 0) return minutes === 1440 ? "Daily" : `Every ${minutes / 1440} days`;
-  if (minutes % 60 === 0) return `Every ${minutes / 60}h`;
-  return `${minutes} min`;
-}
-
-async function addScout(scout: ScoutSuggestion): Promise<string | null> {
+async function addScout(
+  scout: ScoutSuggestion,
+  fallbackError: (status: number) => string,
+): Promise<string | null> {
   const res = await fetch("/api/apps/briefing/scouts", {
     method: "POST",
     credentials: "include",
@@ -63,10 +60,11 @@ async function addScout(scout: ScoutSuggestion): Promise<string | null> {
   });
   if (res.ok) return null;
   const body = (await res.json().catch(() => null)) as { error?: string } | null;
-  return body?.error ?? `Could not add this scout (${res.status}).`;
+  return body?.error ?? fallbackError(res.status);
 }
 
 function ScoutSuggestions({ ctx }: { ctx: AppComponentContext }) {
+  const copy = getWelcomeCopy(ctx.bootstrap.shell.locale);
   const scouts = readScouts(ctx.props.scouts);
   const resolved = ctx.host.resolved;
   const resolvedAdded = Array.isArray(ctx.result?.addedTitles)
@@ -100,7 +98,7 @@ function ScoutSuggestions({ ctx }: { ctx: AppComponentContext }) {
       return;
     }
     setStates((prev) => ({ ...prev, [scout.title]: { kind: "adding" } }));
-    const error = await addScout(scout);
+    const error = await addScout(scout, copy.scouts.error);
     setStates((prev) => ({
       ...prev,
       [scout.title]: error ? { kind: "error", message: error } : { kind: "added" },
@@ -111,9 +109,7 @@ function ScoutSuggestions({ ctx }: { ctx: AppComponentContext }) {
     const count = addedTitles.length;
     ctx.host.submit(
       { addedTitles },
-      count === 0
-        ? "Skipped briefing scouts"
-        : `Added ${count} briefing scout${count === 1 ? "" : "s"}`,
+      count === 0 ? copy.scouts.skippedSummary : copy.scouts.addedSummary(count),
     );
   };
 
@@ -121,7 +117,7 @@ function ScoutSuggestions({ ctx }: { ctx: AppComponentContext }) {
     return (
       <div className="w-full max-w-md rounded-12 border border-border bg-card p-4">
         <p className="text-sm font-medium text-foreground">
-          {resolvedAdded.length > 0 ? "Briefing scouts added" : "Briefing scouts skipped"}
+          {resolvedAdded.length > 0 ? copy.scouts.addedHeading : copy.scouts.skippedHeading}
         </p>
         {resolvedAdded.length > 0 ? (
           <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
@@ -133,9 +129,7 @@ function ScoutSuggestions({ ctx }: { ctx: AppComponentContext }) {
             ))}
           </ul>
         ) : (
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            You can add scouts later from the Briefing app.
-          </p>
+          <p className="mt-1.5 text-xs text-muted-foreground">{copy.scouts.addLater}</p>
         )}
       </div>
     );
@@ -146,11 +140,9 @@ function ScoutSuggestions({ ctx }: { ctx: AppComponentContext }) {
       <div>
         <p className="flex items-center gap-2 text-sm font-medium text-foreground">
           <Radar className="size-4 text-primary" aria-hidden />
-          Add scouts to your briefing
+          {copy.scouts.heading}
         </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          These run in the background and roll useful findings into your morning and evening briefs.
-        </p>
+        <p className="mt-1 text-xs text-muted-foreground">{copy.scouts.description}</p>
       </div>
 
       <div className="space-y-2">
@@ -169,7 +161,7 @@ function ScoutSuggestions({ ctx }: { ctx: AppComponentContext }) {
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">{scout.title}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    {scout.reason} • {intervalLabel(scout.intervalMinutes)}
+                    {scout.reason} • {copy.scouts.interval(scout.intervalMinutes)}
                   </p>
                 </div>
                 <Button
@@ -185,7 +177,11 @@ function ScoutSuggestions({ ctx }: { ctx: AppComponentContext }) {
                   ) : (
                     <Plus className="size-3.5" aria-hidden />
                   )}
-                  {state.kind === "adding" ? "Adding" : isAdded ? "Added" : "Add"}
+                  {state.kind === "adding"
+                    ? copy.scouts.adding
+                    : isAdded
+                      ? copy.scouts.added
+                      : copy.scouts.add}
                 </Button>
               </div>
               <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-muted-foreground">
@@ -212,12 +208,12 @@ function ScoutSuggestions({ ctx }: { ctx: AppComponentContext }) {
           {addedTitles.length > 0 ? (
             <>
               <Check className="size-3.5" aria-hidden />
-              Continue
+              {copy.scouts.continue}
             </>
           ) : (
             <>
               <SkipForward className="size-3.5" aria-hidden />
-              Skip for now
+              {copy.scouts.skip}
             </>
           )}
         </Button>
