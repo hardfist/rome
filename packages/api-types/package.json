@@ -20,6 +20,7 @@
     "./discord-broker": "./src/discord-broker.ts",
     "./favors": "./src/favors.ts",
     "./identities": "./src/identities.ts",
+    "./people": "./src/people.ts",
     "./persons": "./src/persons.ts"
   },
   "scripts": {
