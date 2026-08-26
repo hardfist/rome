@@ -635,6 +635,7 @@ describe("Identities API", () => {
     const SELF = "ACoAASelf0003";
     const LINUS = "ACoAALinus004";
     const ADA_URL = `https://www.linkedin.com/in/${ADA}/`;
+    const VANITY_URL = "https://www.linkedin.com/in/ada-lovelace/";
 
     const participant = (participantId: string, name: string, isSelf = false) => ({
       participantId,
@@ -780,6 +781,105 @@ describe("Identities API", () => {
       // placement writes.
       expect(matching[0].id).toBe(`channel:linkedin:${ADA}`);
       expect(matching[0].latest?.preview).toBe("from the url form");
+    });
+    describe("timeline", () => {
+      async function fetchTimeline(id: string, query = ""): Promise<TimelinePage> {
+        const res = await app.request(`/identities/${encodeURIComponent(id)}/timeline${query}`);
+        expect(res.status).toBe(200);
+        return (await res.json()) as TimelinePage;
+      }
+
+      it("reads a direct thread for an identity with no person row", async () => {
+        const page = await fetchTimeline(`channel:linkedin:${ADA}`);
+        // Refs carry the thread, because a LinkedIn message id is unique
+        // within a thread and this list merges a person's threads.
+        expect(page.entries.map((entry) => entry.ref)).toEqual(["li-ada:m-2", "li-ada:m-1"]);
+        expect(page.entries[0]).toMatchObject({
+          source: "linkedin",
+          body: "thanks",
+          direction: "outbound",
+        });
+        expect(page.entries[1]!.direction).toBe("inbound");
+      });
+
+      it("merges LinkedIn into a person's other channels, newest first", async () => {
+        await deps.personMappingRepo.addChannelMapping(
+          baseline.persons.innerCircleId,
+          "linkedin",
+          ADA,
+          "Ada Lovelace",
+        );
+        const page = await fetchTimeline(`person:${baseline.persons.innerCircleId}`);
+        const sources = page.entries.map((entry) => entry.source);
+        expect(sources).toContain("linkedin");
+        expect(sources).toContain("telegram");
+        const timestamps = page.entries.map((entry) => entry.timestamp);
+        expect([...timestamps].sort((a, b) => b - a)).toEqual(timestamps);
+      });
+
+      it("reads the mirror through a mapping written as a profile URL", async () => {
+        const personId = await deps.personMappingRepo.create({
+          displayName: "Ada Lovelace",
+          bondLevel: "acquaintance",
+          approved: true,
+          channelMappings: [{ channel: "linkedin", channelUserId: ADA_URL }],
+        });
+        const page = await fetchTimeline(`person:${personId}`);
+        expect(page.entries.map((entry) => entry.ref)).toEqual(["li-ada:m-2", "li-ada:m-1"]);
+      });
+
+      it("renders an InMail's subject with the body it was sent apart from", async () => {
+        await deps.linkedInStoreRepo.upsertMessages([
+          liMessage("li-linus", "m-inmail", "2026-08-17T13:00:00Z", "Are you open to a chat?", {
+            subject: "An opportunity",
+          }),
+        ]);
+        const page = await fetchTimeline(`channel:linkedin:${LINUS}`);
+        expect(page.entries[0]!.body).toBe("An opportunity\nAre you open to a chat?");
+      });
+
+      it("falls back to the sentinel log for a mapping that names no member", async () => {
+        // A vanity URL is the form the guardian's own mapping is conferred in,
+        // and it can never appear in the participant mirror — so the sentinel
+        // log is where that identity's history actually is.
+        await deps.sentinelLogRepo.create({
+          messageId: "msg-vanity-1",
+          channel: "linkedin",
+          channelUserId: VANITY_URL,
+          displayName: "Ada Lovelace",
+          text: "sent under a vanity handle",
+          action: "replied",
+          response: "answered",
+        });
+        const personId = await deps.personMappingRepo.create({
+          displayName: "Vanity Ada",
+          bondLevel: "acquaintance",
+          approved: true,
+          channelMappings: [{ channel: "linkedin", channelUserId: VANITY_URL }],
+        });
+
+        const page = await fetchTimeline(`person:${personId}`);
+        expect(page.entries.map((entry) => entry.body)).toEqual([
+          "answered",
+          "sent under a vanity handle",
+        ]);
+      });
+
+      it("pages a participant's direct threads without repeating an entry", async () => {
+        const refs: string[] = [];
+        let cursor: string | null = null;
+        for (let page = 0; page < 5; page += 1) {
+          const answer: TimelinePage = await fetchTimeline(
+            `channel:linkedin:${ADA}`,
+            `?limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+          );
+          refs.push(...answer.entries.map((entry) => entry.ref));
+          cursor = answer.nextCursor;
+          if (!cursor) break;
+        }
+        expect(cursor).toBeNull();
+        expect(refs).toEqual(["li-ada:m-2", "li-ada:m-1"]);
+      });
     });
   });
 });

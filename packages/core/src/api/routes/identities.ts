@@ -154,7 +154,9 @@ export function identitiesRoutes(deps: ApiDeps): Hono {
     // WhatsApp addresses one person by two jids (a phone one and a `@lid`
     // one), and history can sit under either. Resolving the mapping to every
     // alias is what keeps a person mapped to the phone jid from showing an
-    // empty timeline while their thread hangs off the lid.
+    // empty timeline while their thread hangs off the lid. LinkedIn's two
+    // forms need no such read: a profile URL resolves to its member id by
+    // derivation, inside `readChannelWindow`.
     const aliases = channels.some((mapping) => mapping.channel === "whatsapp")
       ? await whatsAppAliases(deps)
       : new Map<string, string[]>();
@@ -205,12 +207,12 @@ export function identitiesRoutes(deps: ApiDeps): Hono {
  * Every dynamic one channel identity has, newest first, from whichever store
  * holds that channel's history.
  *
- * The WhatsApp mirror holds full threads; the sentinel log holds one row per
- * exchange another channel saw — what arrived, and Rome's reply when it made
- * one. A mirrored channel reads its mirror and not the sentinel log, because
- * the sentinel row and the mirrored message are the same message seen twice.
- * Adding a producer is adding a branch here: the entries it returns are already
- * in the generic shape.
+ * The WhatsApp and LinkedIn mirrors hold full threads; the sentinel log holds
+ * one row per exchange another channel saw — what arrived, and Rome's reply
+ * when it made one. A mirrored channel reads its mirror and not the sentinel
+ * log, because the sentinel row and the mirrored message are the same message
+ * seen twice. Adding a producer is adding a branch here: the entries it
+ * returns are already in the generic shape.
  *
  * Reads one row past the page so the caller can tell "this is everything" from
  * "this is a page", and answers `saturated` when it hit that cap.
@@ -270,6 +272,34 @@ async function readChannelWindow(
         body: message.text,
         direction: message.fromMe ? ("outbound" as const) : ("inbound" as const),
         ref: message.id,
+      })),
+      rows: messages.length,
+    };
+  }
+
+  // A LinkedIn mapping is written in whichever form the write that created it
+  // had, and only the member-id forms can name a mirrored participant. The
+  // vanity-URL form — how the guardian's own mapping is conferred at connect
+  // time — names none, so it falls through to the sentinel log below, which is
+  // where its history actually is.
+  const memberId = mapping.channel === "linkedin" ? linkedInMemberId(mapping.channelUserId) : null;
+  if (memberId != null) {
+    const messages = await deps.linkedInStoreRepo.getParticipantMessages(memberId, window);
+    return {
+      entries: messages.map((message) => ({
+        source: "linkedin",
+        timestamp: message.timestamp,
+        // An InMail carries its subject apart from its body, and some carry
+        // only a subject — the same fold the channel applies on the way in.
+        body: message.subject
+          ? `${message.subject}\n${message.text ?? ""}`.trim()
+          : (message.text ?? null),
+        direction: message.senderIsSelf ? ("outbound" as const) : ("inbound" as const),
+        // LinkedIn message ids are unique within a thread, not within an
+        // account, and this list merges a person's threads — an unqualified id
+        // would collide with another thread's and lose one of the pair to the
+        // cursor.
+        ref: `${message.threadId}:${message.messageId}`,
       })),
       rows: messages.length,
     };

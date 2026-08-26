@@ -97,6 +97,19 @@ export interface LinkedInParticipantContactRow {
   messageCount: number;
 }
 
+/** One mirrored message on a participant's direct threads. */
+export interface LinkedInParticipantMessageRow {
+  /** LinkedIn message ids are unique within a thread, not within an account,
+   *  so a reader that merges threads has to carry the thread with the id. */
+  threadId: string;
+  messageId: string;
+  /** Unix seconds — sent_at when LinkedIn reported one, else first-seen. */
+  timestamp: number;
+  text: string | null;
+  subject: string | null;
+  senderIsSelf: boolean;
+}
+
 /** One thread's membership paired with the age of the read that produced it. */
 export interface LinkedInThreadParticipantSet {
   participants: LinkedInParticipantRow[];
@@ -634,6 +647,56 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
       lastMessagePreview: (r.lastMessagePreview as string | null) ?? null,
       messageCount: Number(r.messageCount ?? 0),
     }));
+  }
+
+  /**
+   * One participant's mirrored history: every message on their direct threads,
+   * both directions, oldest→newest.
+   *
+   * Across threads rather than within one, because a person can hold more than
+   * one direct thread (an InMail beside an ordinary conversation) and their
+   * dossier is one list. `before` and `at` bound the window by timestamp:
+   * `before` excludes that second and everything after it, `at` restricts the
+   * read to exactly that second. A caller paging a merged order that timestamps
+   * alone cannot settle reads the boundary second with `at` and no limit,
+   * because a cap applied inside a second drops whichever of its messages the
+   * cap did not reach.
+   */
+  async getParticipantMessages(
+    participantId: string,
+    opts: { limit?: number | null; before?: number; at?: number } = {},
+  ): Promise<LinkedInParticipantMessageRow[]> {
+    const limitClause =
+      opts.limit === null ? sql`` : sql`LIMIT ${Math.min(Math.max(opts.limit ?? 50, 1), 500)}`;
+    const at = sql`coalesce(m.sent_at, m.created_at)`;
+    const beforeClause = opts.before != null ? sql`AND ${at} < ${opts.before}` : sql``;
+    const atClause = opts.at != null ? sql`AND ${at} = ${opts.at}` : sql``;
+    const rows = (await this.db.all(sql`
+      WITH ${DIRECT_THREADS}
+      SELECT
+        m.thread_id AS threadId,
+        m.message_id AS messageId,
+        ${at} AS timestamp,
+        m.text AS text,
+        m.subject AS subject,
+        m.sender_is_self AS senderIsSelf
+      FROM linkedin_messages m
+      JOIN direct_threads d ON d.threadId = m.thread_id
+      WHERE d.participantId = ${participantId} ${beforeClause} ${atClause}
+      ORDER BY ${at} DESC, m.rowid DESC
+      ${limitClause}
+    `)) as Array<Record<string, unknown>>;
+
+    return rows
+      .map((r) => ({
+        threadId: String(r.threadId),
+        messageId: String(r.messageId),
+        timestamp: Number(r.timestamp),
+        text: (r.text as string | null) ?? null,
+        subject: (r.subject as string | null) ?? null,
+        senderIsSelf: Boolean(r.senderIsSelf),
+      }))
+      .reverse();
   }
 
   /** One thread's participants with their person-level facts, by member id. */

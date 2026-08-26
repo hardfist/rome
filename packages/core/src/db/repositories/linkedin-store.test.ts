@@ -920,6 +920,53 @@ describe("LinkedInStoreRepository", () => {
       expect(await repo.listParticipants({ limit: 2 })).toHaveLength(2);
       expect(await repo.listParticipants({ limit: null })).toHaveLength(3);
     });
+
+    it("reads one participant's direct-thread messages across every thread", async () => {
+      await repo.upsertThreads([thread("t-inmail", new Date("2026-08-18T20:00:00Z"))]);
+      await repo.upsertThreadParticipants("t-inmail", [ada, self]);
+      await repo.upsertMessages([
+        message("t-inmail", "m-1", "2026-08-18T10:00:00Z", "body", { subject: "An offer" }),
+      ]);
+
+      const messages = await repo.getParticipantMessages(ada.participantId);
+      // One person, two direct threads, one list — and the id repeated across
+      // them, which is why the caller carries the thread with it.
+      expect(messages.map((m) => `${m.threadId}:${m.messageId}`)).toEqual([
+        "t-inmail:m-1",
+        "t-direct:m-1",
+        "t-direct:m-2",
+      ]);
+      expect(messages.find((m) => m.threadId === "t-inmail")?.subject).toBe("An offer");
+      expect(messages.find((m) => m.messageId === "m-2")?.senderIsSelf).toBe(true);
+      // The group thread's message is nobody's history here.
+      expect(messages.some((m) => m.threadId === "t-group")).toBe(false);
+    });
+
+    it("windows a participant's messages by whole seconds", async () => {
+      const noon = "2026-08-19T12:00:00Z";
+      await repo.upsertMessages([
+        message("t-direct", "m-noon-a", noon, "a"),
+        message("t-direct", "m-noon-b", noon, "b"),
+      ]);
+
+      const before = await repo.getParticipantMessages(ada.participantId, {
+        before: seconds(noon),
+      });
+      expect(before.map((m) => m.messageId)).toEqual(["m-1", "m-2"]);
+
+      // `at` with no limit is how a caller completes a second a cap cut
+      // through, so it must answer the whole second however small the page was.
+      const at = await repo.getParticipantMessages(ada.participantId, {
+        at: seconds(noon),
+        limit: null,
+      });
+      expect(at.map((m) => m.messageId).sort()).toEqual(["m-noon-a", "m-noon-b"]);
+    });
+
+    it("answers empty for a participant no direct thread holds", async () => {
+      expect(await repo.getParticipantMessages(grace.participantId)).toEqual([]);
+      expect(await repo.getParticipantMessages("ACoAANobody0000")).toEqual([]);
+    });
   });
 });
 
