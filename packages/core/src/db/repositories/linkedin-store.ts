@@ -6,6 +6,7 @@ import {
   linkedinThreads,
 } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
+import { linkedInMemberIdFromProfileUrl } from "../../channels/linkedin-sync.js";
 import type {
   LinkedInHistoryMessage,
   LinkedInMessageInput,
@@ -16,9 +17,15 @@ import type {
   LinkedInThreadInput,
 } from "../../channels/linkedin-sync.js";
 
+// The member-id form lives with the poller/store contract, not here: it is the
+// identity both sides of the mirror agree on. Re-exported so callers reading
+// participant rows reach it from the same module those rows come from.
+export { linkedInMemberIdFromProfileUrl };
+
 const UPSERT_CHUNK = 200;
 const HISTORY_READ_LIMIT = 1000;
 const THREADS_READ_LIMIT = 10000;
+const PARTICIPANTS_READ_LIMIT = 10000;
 
 /** One thread row for the People tab's LinkedIn section. */
 export interface LinkedInThreadRow {
@@ -60,6 +67,27 @@ export interface LinkedInMessageRow {
   reactionCount: number | null;
 }
 
+/**
+ * One mirrored LinkedIn identity, annotated with whether it has been promoted
+ * to a curated `persons` entry. `isSelf` rides along rather than being filtered
+ * out here: which identities a caller offers for promotion is its own policy,
+ * and the guardian's own row is still a real member of the threads it appears
+ * in.
+ */
+export interface LinkedInParticipantContactRow {
+  /** Bare LinkedIn member id — the `channelUserId` promotion writes. */
+  participantId: string;
+  name: string | null;
+  headline: string | null;
+  type: string | null;
+  isSelf: boolean;
+  /** How many mirrored threads this identity belongs to. */
+  threadCount: number;
+  /** The person this identity was promoted into, or null when unpromoted. */
+  linkedPersonId: string | null;
+  linkedPersonName: string | null;
+}
+
 /** One thread's membership paired with the age of the read that produced it. */
 export interface LinkedInThreadParticipantSet {
   participants: LinkedInParticipantRow[];
@@ -73,19 +101,6 @@ export interface LinkedInParticipantBackfillResult {
   threads: number;
   /** Distinct identities the seed proved. */
   participants: number;
-}
-
-// The obfuscated member id inside a mirrored profile URL —
-// `https://www.linkedin.com/in/ACoAA…/`. A vanity handle (`/in/ada-lovelace`)
-// deliberately does not match: it is a public alias, not the member id these
-// tables key on, and storing one would break the correspondence with
-// `channel_mappings.channel_user_id`.
-const MEMBER_ID_IN_PROFILE_URL = /\/in\/(ACoAA[A-Za-z0-9_-]+)/;
-
-/** The bare LinkedIn member id inside a stored profile URL, or null. */
-export function linkedInMemberIdFromProfileUrl(url: string | null | undefined): string | null {
-  if (!url) return null;
-  return MEMBER_ID_IN_PROFILE_URL.exec(url)?.[1] ?? null;
 }
 
 function chunked<T>(items: T[], size: number): T[][] {
@@ -502,6 +517,48 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
       threads: new Set([...memberships.values()].map((m) => m.threadId)).size,
       participants: identities.size,
     };
+  }
+
+  /**
+   * Every stored LinkedIn identity, each row saying whether it has already been
+   * promoted to a person. The join is on the member id itself — no translation
+   * step — because `linkedin_participants.participant_id` and a `linkedin`
+   * `channel_mappings.channel_user_id` are the same identifier by construction.
+   *
+   * Promotion is a guardian action against these rows, not something this
+   * repository performs: a LinkedIn inbox holds many identities that should
+   * never enter the curated person graph, so nothing here writes `persons`.
+   */
+  async listParticipants(): Promise<LinkedInParticipantContactRow[]> {
+    const rows = (await this.db.all(sql`
+      SELECT
+        p.participant_id AS participantId,
+        p.name AS name,
+        p.headline AS headline,
+        p.type AS type,
+        p.is_self AS isSelf,
+        (SELECT COUNT(*) FROM linkedin_thread_participants tp
+           WHERE tp.participant_id = p.participant_id) AS threadCount,
+        cm.person_id AS linkedPersonId,
+        person.display_name AS linkedPersonName
+      FROM linkedin_participants p
+      LEFT JOIN channel_mappings cm
+        ON cm.channel = 'linkedin' AND cm.channel_user_id = p.participant_id
+      LEFT JOIN persons person ON person.id = cm.person_id
+      ORDER BY lower(coalesce(p.name, p.participant_id)) ASC, p.participant_id ASC
+      LIMIT ${PARTICIPANTS_READ_LIMIT}
+    `)) as Array<Record<string, unknown>>;
+
+    return rows.map((r) => ({
+      participantId: String(r.participantId),
+      name: (r.name as string | null) ?? null,
+      headline: (r.headline as string | null) ?? null,
+      type: (r.type as string | null) ?? null,
+      isSelf: Boolean(r.isSelf),
+      threadCount: Number(r.threadCount ?? 0),
+      linkedPersonId: (r.linkedPersonId as string | null) ?? null,
+      linkedPersonName: (r.linkedPersonName as string | null) ?? null,
+    }));
   }
 
   /** One thread's participants with their person-level facts, by member id. */

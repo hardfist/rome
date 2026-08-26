@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { sql } from "drizzle-orm";
 import {
   LinkedInInboxPoller,
   pollDelayMs,
@@ -6,6 +7,8 @@ import {
   type LinkedInPollerOptions,
 } from "./linkedin.js";
 import { OpencliAuthError, type OpencliResult } from "./linkedin-cli.js";
+import { createTestDb } from "../test/helpers.js";
+import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import type {
   LinkedInMessageInput,
   LinkedInParticipantInput,
@@ -110,7 +113,7 @@ class ParticipantSink extends FakeSink {
 }
 
 function makePoller(
-  sink: FakeSink,
+  sink: LinkedInSyncSink,
   run: LinkedInPollerOptions["run"],
   overrides: Partial<LinkedInPollerOptions> = {},
 ) {
@@ -427,5 +430,43 @@ describe("LinkedInInboxPoller fault handling", () => {
     failing = false;
     await vi.waitFor(() => expect(poller.getRuntimeDegradation()).toBeNull());
     poller.stop();
+  });
+});
+
+/**
+ * Promotion is a guardian action, never a consequence of syncing. A LinkedIn
+ * inbox holds many identities — recruiters, newsletters, strangers — that must
+ * not walk into the curated person graph on their own.
+ *
+ * The sink contract is the guarantee: it exposes no way to write `persons`. This
+ * runs the poller against the real store to show that holds end to end, not just
+ * against a fake that could not have promoted anyone anyway.
+ */
+describe("LinkedInInboxPoller and the person graph", () => {
+  it("mirrors a thread's participants without promoting any of them", async () => {
+    const testDb = createTestDb();
+    try {
+      const store = new LinkedInStoreRepository(testDb.db);
+      const run = vi.fn(async (args: string[]) => {
+        if (args[1] === "inbox") return ok([inboxRow("t1", "2026-08-19T20:00:00.000Z")]);
+        if (args[1] === "thread-participants") return ok([participantRow("t1", "ACoAAAda0001")]);
+        return ok([snapshotRow("t1", "m1")]);
+      });
+
+      await makePoller(store, run).pollOnce();
+
+      // The mirror did its job...
+      expect((await store.getThreadParticipants("t1")).map((p) => p.participantId)).toEqual([
+        "ACoAAAda0001",
+      ]);
+      // ...and left the person graph alone.
+      expect(await store.listParticipants()).toEqual([
+        expect.objectContaining({ participantId: "ACoAAAda0001", linkedPersonId: null }),
+      ]);
+      expect(testDb.db.all(sql`SELECT id FROM persons`)).toEqual([]);
+      expect(testDb.db.all(sql`SELECT id FROM channel_mappings`)).toEqual([]);
+    } finally {
+      testDb.close();
+    }
   });
 });

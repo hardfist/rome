@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { OpencliAuthError } from "../../channels/linkedin-cli.js";
 import { linkedinThreadsRoutes } from "./linkedin-threads.js";
-import type { LinkedInThreadRow } from "../../db/repositories/linkedin-store.js";
+import type {
+  LinkedInParticipantContactRow,
+  LinkedInThreadRow,
+} from "../../db/repositories/linkedin-store.js";
 import type { ApiDeps } from "../deps.js";
 
 type SendReplySpy = ReturnType<typeof vi.fn>;
@@ -22,10 +25,22 @@ const THREAD: LinkedInThreadRow = {
   messageCount: 2,
 };
 
-function buildDeps(threads = [THREAD]): ApiDeps {
+const ADA: LinkedInParticipantContactRow = {
+  participantId: "ACoAAAda0001",
+  name: "Ada Lovelace",
+  headline: "Engineer",
+  type: "member",
+  isSelf: false,
+  threadCount: 2,
+  linkedPersonId: null,
+  linkedPersonName: null,
+};
+
+function buildDeps(threads = [THREAD], participants = [ADA]): ApiDeps {
   return {
     linkedInStoreRepo: {
       listThreads: async () => threads,
+      listParticipants: async () => participants,
       getMessages: async () => [],
     },
   } as unknown as ApiDeps;
@@ -52,6 +67,34 @@ function successfulSender(): SendReplySpy {
     messageChars: 15,
   }));
 }
+
+describe("GET /linkedin/participants", () => {
+  // Promotion goes through `/api/persons/create` + `/api/persons/link`; this
+  // route exists so a caller can tell which identities have already been there.
+  it("serves each mirrored identity with its promotion state", async () => {
+    const res = await mount(successfulSender()).request("/linkedin/participants");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([ADA]);
+  });
+
+  it("carries the person a promoted identity resolves to", async () => {
+    const promoted = {
+      ...ADA,
+      linkedPersonId: "ada-lovelace",
+      linkedPersonName: "Ada Lovelace",
+    };
+    const res = await mount(successfulSender(), buildDeps([THREAD], [promoted])).request(
+      "/linkedin/participants",
+    );
+
+    const rows = (await res.json()) as LinkedInParticipantContactRow[];
+    expect(rows[0].linkedPersonId).toBe("ada-lovelace");
+    // The headline stays on the mirror row — `channel_mappings` has no column
+    // for it, and it belongs in the person's memory profile.
+    expect(rows[0].headline).toBe("Engineer");
+  });
+});
 
 describe("GET /linkedin/threads", () => {
   // The count is now derived from stored membership rather than copied off the

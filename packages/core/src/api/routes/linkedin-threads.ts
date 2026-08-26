@@ -13,6 +13,13 @@ import type { ApiDeps } from "../deps.js";
  * LinkedIn connection's poller (channels/linkedin.ts). Replies go through
  * opencli `linkedin safe-send`. It verifies the visible thread and recipient
  * before sending.
+ *
+ * Promoting a mirrored participant to a curated `persons` entry reuses the
+ * existing `/api/persons/create` + `/api/persons/link` routes — a participant's
+ * bare member id is the `channelUserId` those endpoints expect for LinkedIn,
+ * and it is what an inbound LinkedIn message resolves through. Nothing here
+ * promotes: the mirror is read-only towards the person graph, and the guardian
+ * decides which of an inbox's many identities earns a person.
  */
 export interface LinkedInThreadsSeams {
   sendReply?: (input: LinkedInSafeSendInput) => Promise<LinkedInSafeSendResult>;
@@ -24,6 +31,14 @@ export function linkedinThreadsRoutes(deps: ApiDeps, seams: LinkedInThreadsSeams
 
   app.get("/linkedin/threads", async (c) => {
     const rows = await deps.linkedInStoreRepo.listThreads();
+    return c.json(rows);
+  });
+
+  // Every mirrored identity, each row carrying the person it was promoted into
+  // (or null). A caller needs that to tell "promote" from "already promoted"
+  // without guessing — the same annotation `/api/whatsapp/contacts` carries.
+  app.get("/linkedin/participants", async (c) => {
+    const rows = await deps.linkedInStoreRepo.listParticipants();
     return c.json(rows);
   });
 

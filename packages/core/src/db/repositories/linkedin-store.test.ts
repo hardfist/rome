@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { LinkedInStoreRepository, linkedInMemberIdFromProfileUrl } from "./linkedin-store.js";
+import { PersonMappingRepository } from "./person-mapping.js";
 
 describe("LinkedInStoreRepository", () => {
   let testDb: TestDb;
@@ -576,6 +577,103 @@ describe("LinkedInStoreRepository", () => {
           sql`SELECT name FROM pragma_table_info('linkedin_threads')`,
         ) as Array<{ name: string }>;
         expect(columns.map((c) => c.name)).not.toContain("participant_count");
+      });
+    });
+
+    // A mirrored participant becomes a Rome person through the existing person
+    // create/link flow — there is no second write path here. The bare member id
+    // is the channel identity on both sides, so promotion needs no translation
+    // step and nothing in this repository ever writes `persons`.
+    describe("promotion to a person", () => {
+      let people: PersonMappingRepository;
+
+      const personCount = () =>
+        Number(
+          (testDb.db.all(sql`SELECT COUNT(*) AS n FROM persons`) as Array<{ n: number }>)[0].n,
+        );
+
+      beforeEach(async () => {
+        people = new PersonMappingRepository(testDb.db);
+        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+        await repo.upsertThreadParticipants("t1", [ada, self]);
+      });
+
+      it("lists a mirrored identity as unpromoted until a person claims it", async () => {
+        const rows = await repo.listParticipants();
+
+        expect(rows.map((r) => r.participantId)).toEqual([ada.participantId, self.participantId]);
+        expect(rows.map((r) => r.linkedPersonId)).toEqual([null, null]);
+        expect(rows[0].threadCount).toBe(1);
+      });
+
+      it("promoting writes a person and a linkedin mapping carrying the member id", async () => {
+        await people.createWithChannelMapping(
+          "ada-lovelace",
+          { displayName: "Ada Lovelace", bondLevel: "acquaintance", approved: true },
+          { channel: "linkedin", channelUserId: ada.participantId, displayName: ada.name },
+        );
+
+        const mapping = (
+          testDb.db.all(
+            sql`SELECT channel, channel_user_id AS channelUserId, person_id AS personId
+                FROM channel_mappings`,
+          ) as Array<Record<string, string>>
+        )[0];
+        expect(mapping).toEqual({
+          channel: "linkedin",
+          channelUserId: ada.participantId,
+          personId: "ada-lovelace",
+        });
+
+        const rows = await repo.listParticipants();
+        const promoted = rows.find((r) => r.participantId === ada.participantId);
+        expect(promoted?.linkedPersonId).toBe("ada-lovelace");
+        expect(promoted?.linkedPersonName).toBe("Ada Lovelace");
+        // The headline stays on the mirror row: `channel_mappings` has nowhere
+        // to put it, and it belongs in the person's memory profile.
+        expect(promoted?.headline).toBe("Engineer");
+        // Promoting one identity says nothing about the rest of the inbox.
+        expect(rows.find((r) => r.participantId === self.participantId)?.linkedPersonId).toBeNull();
+      });
+
+      it("refuses to promote a participant a person already holds", async () => {
+        await people.createWithChannelMapping(
+          "ada-lovelace",
+          { displayName: "Ada Lovelace", bondLevel: "acquaintance", approved: true },
+          { channel: "linkedin", channelUserId: ada.participantId },
+        );
+
+        await expect(
+          people.createWithChannelMapping(
+            "ada-lovelace-2",
+            { displayName: "Ada Lovelace", bondLevel: "acquaintance", approved: true },
+            { channel: "linkedin", channelUserId: ada.participantId },
+          ),
+        ).rejects.toThrow(/already belongs to person/);
+
+        expect(personCount()).toBe(1);
+        expect((await repo.listParticipants())[0].linkedPersonId).toBe("ada-lovelace");
+      });
+
+      it("linking an already-promoted participant re-points the one mapping", async () => {
+        await people.createWithChannelMapping(
+          "ada-lovelace",
+          { displayName: "Ada Lovelace", bondLevel: "acquaintance", approved: true },
+          { channel: "linkedin", channelUserId: ada.participantId, displayName: "Ada Lovelace" },
+        );
+        await people.createWithId("ada-byron", {
+          displayName: "Ada Byron",
+          bondLevel: "inner-circle",
+        });
+
+        await people.addChannelMapping("ada-byron", "linkedin", ada.participantId);
+
+        expect(personCount()).toBe(2);
+        const rows = await repo.listParticipants();
+        expect(rows.find((r) => r.participantId === ada.participantId)).toMatchObject({
+          linkedPersonId: "ada-byron",
+          linkedPersonName: "Ada Byron",
+        });
       });
     });
 
