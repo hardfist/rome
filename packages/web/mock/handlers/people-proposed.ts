@@ -37,9 +37,10 @@ import { buildTimeline, proposedApiStore } from "./people";
  * incrementally. Wire types and route map: `@rome/api-types/people`;
  * vocabulary: docs/concepts/identity.md.
  *
- * No core route serves this surface yet. Like /api/identities before it, the
- * contract lives here and in its walkthrough test
- * (src/pages/people/proposed-people-api.test.ts) until the backend lands.
+ * No core route serves this surface yet. The contract itself lives in
+ * `@rome/api-types/people` — this file is only mock mode's implementation of
+ * it, typed against that module like every other handler here, so the
+ * dashboard can build against the surface before the backend lands.
  *
  * The stranger sentinel is implementation, not contract: dismissal is stored
  * as a link to the sentinel row, presented as `state: "dismissed"` through

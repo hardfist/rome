@@ -19,9 +19,9 @@
 //   POST   /api/accounts/:channel/:channelUserId/dismiss  -> AccountDirectoryRow
 //   POST   /api/accounts/:channel/:channelUserId/restore  -> AccountDirectoryRow
 //
-// No core route serves this contract yet. The dashboard's mock backend is its
-// reference implementation, and typing both sides here is what keeps them from
-// drifting apart before the backend lands.
+// No core route serves this contract yet — it leads, and the backend and the
+// dashboard's mock follow, both typed against this module so neither can
+// drift from it.
 
 import type { AssignableBondLevel, IdentityDynamic } from "./identities.js";
 import { STRANGER_PERSON_ID } from "./persons.js";
