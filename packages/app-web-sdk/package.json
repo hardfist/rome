@@ -36,7 +36,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@rome-os/ui": "workspace:^",
     "@rsbuild/plugin-react": "^2.0.0",
     "@rslib/core": "^0.21.3",
     "@tailwindcss/postcss": "^4.1.0",
@@ -57,5 +56,13 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@rome-os/ui": "^0.2.2"
+  },
+  "peerDependenciesMeta": {
+    "@rome-os/ui": {
+      "optional": true
+    }
   }
 }

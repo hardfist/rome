@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@rome-os/app-web-sdk": "^0.2.21",
+    "@rome-os/ui": "^0.2.2",
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
