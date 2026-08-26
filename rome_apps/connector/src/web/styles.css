@@ -3,3 +3,10 @@
    tracks Rome's design language (including `.dark`) automatically. The full
    token reference lives in @rome-os/app-web-sdk → src/runtime/styles.css. */
 @import "@rome-os/app-web-sdk/styles";
+
+/* The canon again, resolved from THIS app's `@rome-os/ui`. The SDK sheet imports
+   it too, but through the SDK's own copy of the kit, while a component import
+   (`@rome-os/ui/button`) resolves this app's copy. Let the two ranges drift and
+   Tailwind scans one copy's `@source` files while the bundle ships the other's
+   components, so their classes vanish from the CSS with a passing build. */
+@import "@rome-os/ui/styles.css";

@@ -1,3 +1,8 @@
+/* Tailwind and the design-system canon, which put the token vocabulary inside
+   this app's shadow root. Kit components are not used here, so the SDK sheet's
+   copy of the canon is the only one needed. */
+@import "@rome-os/app-web-sdk/styles";
+
 /* Colors come from the Rome host's theme tokens (--foreground, --muted-foreground,
    --border, --primary, …). They are inherited custom properties that pierce the
    shadow boundary and flip with the dashboard's `.dark` class, so the app tracks
@@ -11,13 +16,6 @@
     sans-serif;
   font-size: 14px;
   color: var(--foreground);
-
-  /* The control radius, held here rather than read from the host. This app
-     ships no kit stylesheet, so an undeclared `var(--control-r-md)` resolves
-     only by inheriting the dashboard's `:root`, which renders correctly against
-     that one host and nowhere else. Geometry does not vary with theme or mode,
-     so a local copy costs nothing. Contract: docs/design-system.md. */
-  --control-r-md: 10px;
 }
 
 .ws-root {
