@@ -86,6 +86,7 @@ function consolidateByIdentity(rows: WhatsAppContactRow[]): WhatsAppContactRow[]
     );
     merged.push({
       ...primary,
+      aliases: group.flatMap((r) => r.aliases),
       phoneNumber: coalesceField(group, "phoneNumber"),
       name: coalesceField(group, "name"),
       notify: coalesceField(group, "notify"),
@@ -104,6 +105,15 @@ function consolidateByIdentity(rows: WhatsAppContactRow[]): WhatsAppContactRow[]
 
 export interface WhatsAppContactRow {
   jid: string;
+  /**
+   * Every jid this row stands for, the representative `jid` included.
+   *
+   * One person reachable at both a phone jid and a `@lid` jid is one contact
+   * here, but a channel mapping may name either address. Readers that resolve
+   * a mapping to activity or history match against these rather than `jid`,
+   * so which alias was mapped stops being visible.
+   */
+  aliases: string[];
   phoneNumber: string | null;
   name: string | null;
   notify: string | null;
@@ -251,8 +261,16 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
   /**
    * The synced address book, newest-conversation-first then alphabetical,
    * each row annotated with whether it has been promoted to a `persons` entry.
+   *
+   * Bounded by default, for the endpoint that hands the list to a client in one
+   * payload. `{ limit: null }` reads it whole, for a caller that pages its own
+   * answer and therefore cannot inherit a cutoff: a truncated read there is a
+   * contact missing from a search, uncounted, and — because the cut can fall
+   * inside an alias group — a contact split in two.
    */
-  async listContacts(): Promise<WhatsAppContactRow[]> {
+  async listContacts(opts: { limit?: number | null } = {}): Promise<WhatsAppContactRow[]> {
+    const limit = opts.limit === undefined ? CONTACTS_READ_LIMIT : opts.limit;
+    const limitClause = limit == null ? sql`` : sql`LIMIT ${limit}`;
     const rows = (await this.db.all(sql`
       WITH wa_threads AS (
         SELECT jid FROM wa_contacts
@@ -294,11 +312,12 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
       )
       ORDER BY (lastMessageAt IS NULL) ASC, lastMessageAt DESC,
         lower(coalesce(c.name, c.notify, c.verified_name, ch.name, c.phone_number, t.jid)) ASC
-      LIMIT ${CONTACTS_READ_LIMIT}
+      ${limitClause}
     `)) as Array<Record<string, unknown>>;
 
     const mapped = rows.map((r) => ({
       jid: String(r.jid),
+      aliases: [String(r.jid)],
       phoneNumber: (r.phoneNumber as string | null) ?? null,
       name: (r.name as string | null) ?? null,
       notify: (r.notify as string | null) ?? null,
@@ -316,13 +335,23 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
     return consolidateByIdentity(mapped);
   }
 
-  /** Recent messages for one chat, oldest→newest (newest at the bottom). */
+  /**
+   * Recent messages for one chat, oldest→newest (newest at the bottom).
+   *
+   * `before` and `at` bound the window by timestamp: `before` excludes that
+   * second and everything after it, `at` restricts the read to exactly that
+   * second. A caller paging a merged order that timestamps alone cannot settle
+   * reads the boundary second with `at` and no limit, because a cap applied
+   * inside a second drops whichever of its messages the cap did not reach.
+   */
   async getMessages(
     chatJid: string,
-    opts: { limit?: number; before?: number } = {},
+    opts: { limit?: number | null; before?: number; at?: number } = {},
   ): Promise<WhatsAppMessageRow[]> {
-    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
+    const limitClause =
+      opts.limit === null ? sql`` : sql`LIMIT ${Math.min(Math.max(opts.limit ?? 50, 1), 500)}`;
     const beforeClause = opts.before != null ? sql`AND timestamp < ${opts.before}` : sql``;
+    const atClause = opts.at != null ? sql`AND timestamp = ${opts.at}` : sql``;
     const rows = (await this.db.all(sql`
       SELECT m.id AS id, m.sender_jid AS senderJid,
         coalesce(sc.name, sc.notify, sc.verified_name) AS senderName,
@@ -332,9 +361,9 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
         reacts_to_id AS reactsToId
       FROM wa_messages m
       LEFT JOIN wa_contacts sc ON sc.jid = m.sender_jid
-      WHERE m.chat_jid = ${chatJid} ${beforeClause}
+      WHERE m.chat_jid = ${chatJid} ${beforeClause} ${atClause}
       ORDER BY m.timestamp DESC, m.rowid DESC
-      LIMIT ${limit}
+      ${limitClause}
     `)) as Array<Record<string, unknown>>;
 
     return rows

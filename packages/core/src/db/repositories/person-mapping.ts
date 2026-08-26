@@ -183,6 +183,42 @@ export class PersonMappingRepository {
   }
 
   /**
+   * Every person with their channel mappings, read as one statement.
+   *
+   * One snapshot, unlike {@link findAll}: a mapping moving between two people
+   * mid-read would otherwise land under both of them (or neither), because
+   * each person's mappings arrive in their own autocommit query. The identity
+   * union's whole premise is that an identity has one owner, so it reads this.
+   */
+  async findAllWithMappings() {
+    const rows = await this.db
+      .select({ person: persons, mapping: channelMappings })
+      .from(persons)
+      .leftJoin(channelMappings, eq(channelMappings.personId, persons.id));
+
+    const byPerson = new Map<
+      string,
+      typeof persons.$inferSelect & {
+        channelMappings: { channel: string; channelUserId: string }[];
+      }
+    >();
+    for (const row of rows) {
+      let person = byPerson.get(row.person.id);
+      if (!person) {
+        person = { ...row.person, channelMappings: [] };
+        byPerson.set(row.person.id, person);
+      }
+      if (row.mapping) {
+        person.channelMappings.push({
+          channel: row.mapping.channel,
+          channelUserId: row.mapping.channelUserId,
+        });
+      }
+    }
+    return [...byPerson.values()];
+  }
+
+  /**
    * Create a person and claim their channel identities, both or neither.
    *
    * An identity filed under the stranger sentinel is a dismissal rather than a

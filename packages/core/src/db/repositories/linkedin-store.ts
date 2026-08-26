@@ -6,7 +6,7 @@ import {
   linkedinThreads,
 } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
-import { linkedInMemberIdFromProfileUrl } from "../../channels/linkedin-sync.js";
+import { linkedInMemberId, linkedInMemberIdFromProfileUrl } from "../../channels/linkedin-sync.js";
 import type {
   LinkedInHistoryMessage,
   LinkedInMessageInput,
@@ -17,10 +17,10 @@ import type {
   LinkedInThreadInput,
 } from "../../channels/linkedin-sync.js";
 
-// The member-id form lives with the poller/store contract, not here: it is the
-// identity both sides of the mirror agree on. Re-exported so callers reading
-// participant rows reach it from the same module those rows come from.
-export { linkedInMemberIdFromProfileUrl };
+// The member-id forms live with the poller/store contract, not here: they are
+// the identity both sides of the mirror agree on. Re-exported so callers
+// reading participant rows reach them from the same module those rows come from.
+export { linkedInMemberId, linkedInMemberIdFromProfileUrl };
 
 const UPSERT_CHUNK = 200;
 const HISTORY_READ_LIMIT = 1000;
@@ -86,6 +86,28 @@ export interface LinkedInParticipantContactRow {
   /** The person this identity was promoted into, or null when unpromoted. */
   linkedPersonId: string | null;
   linkedPersonName: string | null;
+  /**
+   * Unix seconds of the newest message on this identity's direct threads, or
+   * null when the mirror holds none. See {@link DIRECT_THREADS} for why a group
+   * thread contributes nothing.
+   */
+  lastMessageAt: number | null;
+  lastMessagePreview: string | null;
+  /** Mirrored messages on this identity's direct threads, both directions. */
+  messageCount: number;
+}
+
+/** One mirrored message on a participant's direct threads. */
+export interface LinkedInParticipantMessageRow {
+  /** LinkedIn message ids are unique within a thread, not within an account,
+   *  so a reader that merges threads has to carry the thread with the id. */
+  threadId: string;
+  messageId: string;
+  /** Unix seconds — sent_at when LinkedIn reported one, else first-seen. */
+  timestamp: number;
+  text: string | null;
+  subject: string | null;
+  senderIsSelf: boolean;
 }
 
 /** One thread's membership paired with the age of the read that produced it. */
@@ -102,6 +124,44 @@ export interface LinkedInParticipantBackfillResult {
   /** Distinct identities the seed proved. */
   participants: number;
 }
+
+/**
+ * Every (thread, counterparty) pair where that counterparty is the only one on
+ * the thread — the LinkedIn analog of a WhatsApp 1:1 chat.
+ *
+ * A thread is what carries messages, and only a direct thread's messages are
+ * unambiguously *this* person's history: a timeline entry names no sender, so
+ * folding a ten-person thread into one member's dossier would put nine other
+ * people's words in their mouth. The People page already holds group chats out
+ * of the identity union for the same reason — a group cannot hold a bond.
+ *
+ * Membership decides it, not LinkedIn's `is_group` flag alone: that flag is
+ * null until a thread snapshot reports one, and a thread seeded from stored
+ * messages has membership but no snapshot. The flag still gets a veto, so a
+ * thread LinkedIn calls a group is never direct however little of its
+ * membership has been mirrored.
+ *
+ * The account owner is not a counterparty: their own row is on every thread
+ * they are in, and treating it as one would make every 1:1 thread look like a
+ * pair.
+ */
+const DIRECT_THREADS = sql`
+  direct_threads AS (
+    SELECT tp.thread_id AS threadId, tp.participant_id AS participantId
+    FROM linkedin_thread_participants tp
+    LEFT JOIN linkedin_threads t ON t.thread_id = tp.thread_id
+    LEFT JOIN linkedin_participants p ON p.participant_id = tp.participant_id
+    WHERE coalesce(p.is_self, 0) = 0
+      AND coalesce(t.is_group, 0) = 0
+      AND NOT EXISTS (
+        SELECT 1 FROM linkedin_thread_participants other
+        LEFT JOIN linkedin_participants op ON op.participant_id = other.participant_id
+        WHERE other.thread_id = tp.thread_id
+          AND other.participant_id <> tp.participant_id
+          AND coalesce(op.is_self, 0) = 0
+      )
+  )
+`;
 
 function chunked<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -521,16 +581,27 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
 
   /**
    * Every stored LinkedIn identity, each row saying whether it has already been
-   * promoted to a person. The join is on the member id itself — no translation
-   * step — because `linkedin_participants.participant_id` and a `linkedin`
+   * promoted to a person and what its direct threads last carried. The join is
+   * on the member id itself — no translation step — because
+   * `linkedin_participants.participant_id` and a `linkedin`
    * `channel_mappings.channel_user_id` are the same identifier by construction.
    *
    * Promotion is a guardian action against these rows, not something this
    * repository performs: a LinkedIn inbox holds many identities that should
    * never enter the curated person graph, so nothing here writes `persons`.
+   *
+   * Bounded by default, for the endpoint that hands the list to a client in one
+   * payload. `{ limit: null }` reads it whole, for the identity union, which
+   * pages its own answer and therefore cannot inherit a cutoff: a truncated
+   * read there is an identity missing from a search and from every count.
    */
-  async listParticipants(): Promise<LinkedInParticipantContactRow[]> {
+  async listParticipants(
+    opts: { limit?: number | null } = {},
+  ): Promise<LinkedInParticipantContactRow[]> {
+    const limit = opts.limit === undefined ? PARTICIPANTS_READ_LIMIT : opts.limit;
+    const limitClause = limit == null ? sql`` : sql`LIMIT ${limit}`;
     const rows = (await this.db.all(sql`
+      WITH ${DIRECT_THREADS}
       SELECT
         p.participant_id AS participantId,
         p.name AS name,
@@ -540,13 +611,27 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
         (SELECT COUNT(*) FROM linkedin_thread_participants tp
            WHERE tp.participant_id = p.participant_id) AS threadCount,
         cm.person_id AS linkedPersonId,
-        person.display_name AS linkedPersonName
+        person.display_name AS linkedPersonName,
+        (SELECT MAX(coalesce(m.sent_at, m.created_at))
+           FROM linkedin_messages m
+           JOIN direct_threads d ON d.threadId = m.thread_id
+           WHERE d.participantId = p.participant_id) AS lastMessageAt,
+        (SELECT coalesce(nullif(m.text, ''), m.subject)
+           FROM linkedin_messages m
+           JOIN direct_threads d ON d.threadId = m.thread_id
+           WHERE d.participantId = p.participant_id
+           ORDER BY coalesce(m.sent_at, m.created_at) DESC, m.rowid DESC
+           LIMIT 1) AS lastMessagePreview,
+        (SELECT COUNT(*)
+           FROM linkedin_messages m
+           JOIN direct_threads d ON d.threadId = m.thread_id
+           WHERE d.participantId = p.participant_id) AS messageCount
       FROM linkedin_participants p
       LEFT JOIN channel_mappings cm
         ON cm.channel = 'linkedin' AND cm.channel_user_id = p.participant_id
       LEFT JOIN persons person ON person.id = cm.person_id
       ORDER BY lower(coalesce(p.name, p.participant_id)) ASC, p.participant_id ASC
-      LIMIT ${PARTICIPANTS_READ_LIMIT}
+      ${limitClause}
     `)) as Array<Record<string, unknown>>;
 
     return rows.map((r) => ({
@@ -558,7 +643,60 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
       threadCount: Number(r.threadCount ?? 0),
       linkedPersonId: (r.linkedPersonId as string | null) ?? null,
       linkedPersonName: (r.linkedPersonName as string | null) ?? null,
+      lastMessageAt: r.lastMessageAt == null ? null : Number(r.lastMessageAt),
+      lastMessagePreview: (r.lastMessagePreview as string | null) ?? null,
+      messageCount: Number(r.messageCount ?? 0),
     }));
+  }
+
+  /**
+   * One participant's mirrored history: every message on their direct threads,
+   * both directions, oldest→newest.
+   *
+   * Across threads rather than within one, because a person can hold more than
+   * one direct thread (an InMail beside an ordinary conversation) and their
+   * dossier is one list. `before` and `at` bound the window by timestamp:
+   * `before` excludes that second and everything after it, `at` restricts the
+   * read to exactly that second. A caller paging a merged order that timestamps
+   * alone cannot settle reads the boundary second with `at` and no limit,
+   * because a cap applied inside a second drops whichever of its messages the
+   * cap did not reach.
+   */
+  async getParticipantMessages(
+    participantId: string,
+    opts: { limit?: number | null; before?: number; at?: number } = {},
+  ): Promise<LinkedInParticipantMessageRow[]> {
+    const limitClause =
+      opts.limit === null ? sql`` : sql`LIMIT ${Math.min(Math.max(opts.limit ?? 50, 1), 500)}`;
+    const at = sql`coalesce(m.sent_at, m.created_at)`;
+    const beforeClause = opts.before != null ? sql`AND ${at} < ${opts.before}` : sql``;
+    const atClause = opts.at != null ? sql`AND ${at} = ${opts.at}` : sql``;
+    const rows = (await this.db.all(sql`
+      WITH ${DIRECT_THREADS}
+      SELECT
+        m.thread_id AS threadId,
+        m.message_id AS messageId,
+        ${at} AS timestamp,
+        m.text AS text,
+        m.subject AS subject,
+        m.sender_is_self AS senderIsSelf
+      FROM linkedin_messages m
+      JOIN direct_threads d ON d.threadId = m.thread_id
+      WHERE d.participantId = ${participantId} ${beforeClause} ${atClause}
+      ORDER BY ${at} DESC, m.rowid DESC
+      ${limitClause}
+    `)) as Array<Record<string, unknown>>;
+
+    return rows
+      .map((r) => ({
+        threadId: String(r.threadId),
+        messageId: String(r.messageId),
+        timestamp: Number(r.timestamp),
+        text: (r.text as string | null) ?? null,
+        subject: (r.subject as string | null) ?? null,
+        senderIsSelf: Boolean(r.senderIsSelf),
+      }))
+      .reverse();
   }
 
   /** One thread's participants with their person-level facts, by member id. */

@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
-import { LinkedInStoreRepository, linkedInMemberIdFromProfileUrl } from "./linkedin-store.js";
+import {
+  LinkedInStoreRepository,
+  linkedInMemberId,
+  linkedInMemberIdFromProfileUrl,
+} from "./linkedin-store.js";
 import { PersonMappingRepository } from "./person-mapping.js";
 
 describe("LinkedInStoreRepository", () => {
@@ -807,6 +811,163 @@ describe("LinkedInStoreRepository", () => {
       });
     });
   });
+
+  // The identity union reads a participant as a person-shaped row: who they
+  // are, what was last said, and how much of it there is. "What was said" is
+  // the direct threads only — a timeline entry names no sender, so a group
+  // thread's messages cannot be attributed to one of its members.
+  describe("participant activity", () => {
+    const ada = {
+      participantId: "ACoAAAda0001",
+      name: "Ada Lovelace",
+      headline: "Engineer",
+      type: "member",
+      isSelf: false,
+    };
+    const grace = {
+      participantId: "ACoAAGrace002",
+      name: "Grace Hopper",
+      headline: null,
+      type: "member",
+      isSelf: false,
+    };
+    const self = {
+      participantId: "ACoAASelf0003",
+      name: "Me Myself",
+      headline: null,
+      type: "member",
+      isSelf: true,
+    };
+
+    const message = (
+      threadId: string,
+      messageId: string,
+      at: string,
+      text: string | null,
+      overrides: { senderIsSelf?: boolean; subject?: string | null } = {},
+    ) => ({
+      messageId,
+      threadId,
+      sentAt: new Date(at),
+      senderName: "Ada Lovelace",
+      senderProfileUrl: `https://www.linkedin.com/in/${ada.participantId}/`,
+      senderHeadline: null,
+      senderType: "member",
+      senderIsSelf: overrides.senderIsSelf ?? false,
+      text,
+      subject: overrides.subject ?? null,
+      reactionCount: null,
+    });
+
+    const seconds = (at: string) => Math.floor(Date.parse(at) / 1000);
+
+    beforeEach(async () => {
+      await repo.upsertThreads([
+        thread("t-direct", new Date("2026-08-19T20:00:00Z")),
+        thread("t-group", new Date("2026-08-20T20:00:00Z")),
+      ]);
+      await repo.upsertThreadParticipants("t-direct", [ada, self]);
+      await repo.upsertThreadParticipants("t-group", [ada, grace, self]);
+      await repo.upsertMessages([
+        message("t-direct", "m-1", "2026-08-19T10:00:00Z", "hello from the 1:1"),
+        message("t-direct", "m-2", "2026-08-19T11:00:00Z", "on my way", { senderIsSelf: true }),
+        message("t-group", "m-3", "2026-08-20T10:00:00Z", "hello everyone"),
+      ]);
+    });
+
+    it("reports a direct thread's newest message, both directions counted", async () => {
+      const row = (await repo.listParticipants()).find(
+        (r) => r.participantId === ada.participantId,
+      )!;
+      expect(row.lastMessageAt).toBe(seconds("2026-08-19T11:00:00Z"));
+      expect(row.lastMessagePreview).toBe("on my way");
+      expect(row.messageCount).toBe(2);
+    });
+
+    it("leaves a group thread out of a member's activity", async () => {
+      const rows = await repo.listParticipants();
+      // Grace is only ever on the group thread, so nothing is attributable to
+      // her — the newer group message is not her news, and never Ada's either.
+      expect(rows.find((r) => r.participantId === grace.participantId)).toMatchObject({
+        lastMessageAt: null,
+        lastMessagePreview: null,
+        messageCount: 0,
+      });
+      const ada_ = rows.find((r) => r.participantId === ada.participantId)!;
+      expect(ada_.lastMessageAt).toBeLessThan(seconds("2026-08-20T10:00:00Z"));
+    });
+
+    it("counts a thread LinkedIn calls a group as one, whatever its membership says", async () => {
+      // The flag gets a veto over the membership: a two-row participant set on
+      // a thread the snapshot flagged as a group is a set that was read before
+      // the rest of the members were.
+      await repo.upsertThreads([thread("t-flagged", new Date("2026-08-21T20:00:00Z"))]);
+      await repo.markThreadSynced("t-flagged", { isGroup: true });
+      await repo.upsertThreadParticipants("t-flagged", [grace, self]);
+      await repo.upsertMessages([
+        message("t-flagged", "m-4", "2026-08-21T10:00:00Z", "in a group"),
+      ]);
+
+      const row = (await repo.listParticipants()).find(
+        (r) => r.participantId === grace.participantId,
+      )!;
+      expect(row.messageCount).toBe(0);
+    });
+
+    it("bounds the participant read by default, and reads it whole on request", async () => {
+      // The paged identity union cannot inherit a cutoff: an identity past it
+      // is one the guardian cannot find and no count includes.
+      expect(await repo.listParticipants({ limit: 2 })).toHaveLength(2);
+      expect(await repo.listParticipants({ limit: null })).toHaveLength(3);
+    });
+
+    it("reads one participant's direct-thread messages across every thread", async () => {
+      await repo.upsertThreads([thread("t-inmail", new Date("2026-08-18T20:00:00Z"))]);
+      await repo.upsertThreadParticipants("t-inmail", [ada, self]);
+      await repo.upsertMessages([
+        message("t-inmail", "m-1", "2026-08-18T10:00:00Z", "body", { subject: "An offer" }),
+      ]);
+
+      const messages = await repo.getParticipantMessages(ada.participantId);
+      // One person, two direct threads, one list — and the id repeated across
+      // them, which is why the caller carries the thread with it.
+      expect(messages.map((m) => `${m.threadId}:${m.messageId}`)).toEqual([
+        "t-inmail:m-1",
+        "t-direct:m-1",
+        "t-direct:m-2",
+      ]);
+      expect(messages.find((m) => m.threadId === "t-inmail")?.subject).toBe("An offer");
+      expect(messages.find((m) => m.messageId === "m-2")?.senderIsSelf).toBe(true);
+      // The group thread's message is nobody's history here.
+      expect(messages.some((m) => m.threadId === "t-group")).toBe(false);
+    });
+
+    it("windows a participant's messages by whole seconds", async () => {
+      const noon = "2026-08-19T12:00:00Z";
+      await repo.upsertMessages([
+        message("t-direct", "m-noon-a", noon, "a"),
+        message("t-direct", "m-noon-b", noon, "b"),
+      ]);
+
+      const before = await repo.getParticipantMessages(ada.participantId, {
+        before: seconds(noon),
+      });
+      expect(before.map((m) => m.messageId)).toEqual(["m-1", "m-2"]);
+
+      // `at` with no limit is how a caller completes a second a cap cut
+      // through, so it must answer the whole second however small the page was.
+      const at = await repo.getParticipantMessages(ada.participantId, {
+        at: seconds(noon),
+        limit: null,
+      });
+      expect(at.map((m) => m.messageId).sort()).toEqual(["m-noon-a", "m-noon-b"]);
+    });
+
+    it("answers empty for a participant no direct thread holds", async () => {
+      expect(await repo.getParticipantMessages(grace.participantId)).toEqual([]);
+      expect(await repo.getParticipantMessages("ACoAANobody0000")).toEqual([]);
+    });
+  });
 });
 
 describe("linkedInMemberIdFromProfileUrl", () => {
@@ -825,5 +986,22 @@ describe("linkedInMemberIdFromProfileUrl", () => {
     expect(linkedInMemberIdFromProfileUrl("https://www.linkedin.com/company/acme/")).toBeNull();
     expect(linkedInMemberIdFromProfileUrl(null)).toBeNull();
     expect(linkedInMemberIdFromProfileUrl("")).toBeNull();
+  });
+});
+
+describe("linkedInMemberId", () => {
+  it("accepts both forms a stored channel identity is written in", () => {
+    expect(linkedInMemberId("ACoAAAda0001")).toBe("ACoAAAda0001");
+    expect(linkedInMemberId("https://www.linkedin.com/in/ACoAAAda0001/")).toBe("ACoAAAda0001");
+  });
+
+  it("refuses the vanity form, which names no mirrored participant", () => {
+    // `linkedin_participants` is primary keyed by the bare member id, so null
+    // here tells a reader the mirror holds nothing for this identifier without
+    // asking — and the guardian's own mapping is conferred in exactly this form.
+    expect(linkedInMemberId("https://www.linkedin.com/in/ada-lovelace/")).toBeNull();
+    expect(linkedInMemberId("linkedin:self")).toBeNull();
+    expect(linkedInMemberId(null)).toBeNull();
+    expect(linkedInMemberId("")).toBeNull();
   });
 });

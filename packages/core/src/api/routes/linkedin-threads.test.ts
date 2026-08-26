@@ -34,6 +34,9 @@ const ADA: LinkedInParticipantContactRow = {
   threadCount: 2,
   linkedPersonId: null,
   linkedPersonName: null,
+  lastMessageAt: 1_776_000_000,
+  lastMessagePreview: "See you Thursday",
+  messageCount: 2,
 };
 
 function buildDeps(threads = [THREAD], participants = [ADA]): ApiDeps {

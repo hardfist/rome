@@ -39,17 +39,42 @@ export interface LinkedInMessageInput {
   reactionCount?: number | null;
 }
 
-// The obfuscated member id inside a mirrored profile URL —
-// `https://www.linkedin.com/in/ACoAA…/`. A vanity handle (`/in/ada-lovelace`)
-// deliberately does not match: it is a public alias, not the member id these
+// The obfuscated member id LinkedIn gives an account, in the two forms the
+// mirror ever holds one: bare, and inside a profile URL
+// (`https://www.linkedin.com/in/ACoAA…/`). A vanity handle (`/in/ada-lovelace`)
+// deliberately matches neither: it is a public alias, not the member id these
 // tables key on, and storing one would break the correspondence with
 // `channel_mappings.channel_user_id`.
-const MEMBER_ID_IN_PROFILE_URL = /\/in\/(ACoAA[A-Za-z0-9_-]+)/;
+const MEMBER_ID = /ACoAA[A-Za-z0-9_-]+/;
+const MEMBER_ID_IN_PROFILE_URL = new RegExp(`/in/(${MEMBER_ID.source})`);
+const BARE_MEMBER_ID = new RegExp(`^${MEMBER_ID.source}$`);
 
 /** The bare LinkedIn member id inside a stored profile URL, or null. */
 export function linkedInMemberIdFromProfileUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   return MEMBER_ID_IN_PROFILE_URL.exec(url)?.[1] ?? null;
+}
+
+/**
+ * The member id a stored LinkedIn identifier names, or null when it names none.
+ *
+ * A `linkedin` `channel_mappings.channel_user_id` is written in whichever form
+ * the write that created it had: promotion writes the bare member id, an
+ * inbound message resolves its sender's profile URL to one, and the guardian's
+ * own mapping is conferred at connect time as a vanity URL that carries no
+ * member id at all. All but the last name the same identity, and a reader that
+ * compared them as strings would show one person as two rows and read their
+ * history under only one of them.
+ *
+ * Null is the answer for the vanity form, and it is a useful one: it says the
+ * identifier cannot appear in `linkedin_participants` — that table is primary
+ * keyed by the bare member id — so a reader knows the mirror holds nothing for
+ * it without asking.
+ */
+export function linkedInMemberId(channelUserId: string | null | undefined): string | null {
+  if (!channelUserId) return null;
+  if (BARE_MEMBER_ID.test(channelUserId)) return channelUserId;
+  return linkedInMemberIdFromProfileUrl(channelUserId);
 }
 
 /** One identity in a thread's participant list, per the thread snapshot. */
