@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
-import type { IdentityPage, IdentityRow } from "@rome/api-types/identities";
+import type { IdentityPage, IdentityRow, TimelinePage } from "@rome/api-types/identities";
 import { identitiesRoutes } from "./identities.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
@@ -13,6 +13,9 @@ import { STRANGER_PERSON_ID } from "../../constants.js";
 // placed yet — WhatsApp contacts and LinkedIn participants — all in the shared
 // IdentityRow shape. These tests pin the union's behavior: what shows up, under
 // which typed id and level, and that reading never writes.
+//
+// GET /identities/:id/timeline is the dossier's read: one identity's history,
+// merged across its channels and paged.
 
 const SILENT_JID = "15550001111@s.whatsapp.net";
 const TALKING_JID = "15550002222@s.whatsapp.net";
@@ -397,6 +400,231 @@ describe("Identities API", () => {
       }
     }
   });
+  describe("person timeline", () => {
+    async function fetchTimeline(id: string, query = ""): Promise<TimelinePage> {
+      const res = await app.request(`/identities/${encodeURIComponent(id)}/timeline${query}`);
+      expect(res.status).toBe(200);
+      return (await res.json()) as TimelinePage;
+    }
+
+    it("merges a person's channels into one newest-first timeline", async () => {
+      // Alice already carries sentinel history on Telegram; this gives her a
+      // newer WhatsApp thread, so both producers have to land in one list.
+      await deps.personMappingRepo.addChannelMapping(
+        baseline.persons.innerCircleId,
+        "whatsapp",
+        TALKING_JID,
+        "Alice WA",
+      );
+      await deps.whatsAppStoreRepo.upsertMessages([
+        {
+          id: "wa-out",
+          chatJid: TALKING_JID,
+          senderJid: null,
+          fromMe: true,
+          timestamp: new Date("2026-08-17T10:05:00Z"),
+          type: "text",
+          text: "on my way",
+          hasMedia: false,
+        },
+      ]);
+
+      const page = await fetchTimeline(`person:${baseline.persons.innerCircleId}`);
+      expect(page.entries.map((entry) => entry.source)).toContain("whatsapp");
+      expect(page.entries.map((entry) => entry.source)).toContain("telegram");
+      const timestamps = page.entries.map((entry) => entry.timestamp);
+      expect([...timestamps].sort((a, b) => b - a)).toEqual(timestamps);
+
+      const outbound = page.entries.find((entry) => entry.ref === "wa-out")!;
+      expect(outbound).toMatchObject({
+        source: "whatsapp",
+        body: "on my way",
+        direction: "outbound",
+      });
+      // Rome's own reply on Telegram is the other outbound entry: the sentinel
+      // log records both halves of an exchange, and the dossier shows both.
+      const reply = page.entries.find((entry) => entry.body === "hello")!;
+      expect(reply).toMatchObject({ source: "telegram", direction: "outbound" });
+      expect(
+        page.entries
+          .filter((entry) => entry.direction === "outbound")
+          .map((entry) => entry.ref)
+          .sort(),
+      ).toEqual(["wa-out", `sentinel:${baseline.sentinelLog.repliedId}:reply`].sort());
+    });
+
+    it("sorts a reply above the message it answers, sharing its second", async () => {
+      const page = await fetchTimeline(`person:${baseline.persons.innerCircleId}`);
+      const reply = page.entries.findIndex((entry) => entry.body === "hello");
+      const inbound = page.entries.findIndex((entry) => entry.body === "hi");
+      expect(reply).toBeGreaterThanOrEqual(0);
+      expect(reply).toBeLessThan(inbound);
+    });
+
+    it("answers for a channel-form identity that has no person row", async () => {
+      const page = await fetchTimeline(`channel:whatsapp:${TALKING_JID}`);
+      expect(page.entries.map((entry) => entry.ref)).toEqual(["wa-1"]);
+      expect(page.entries[0]!.direction).toBe("inbound");
+    });
+
+    it("stops at the end of a thread that fits in one page", async () => {
+      const first = await fetchTimeline(`channel:whatsapp:${TALKING_JID}`, "?limit=1");
+      expect(first.entries).toHaveLength(1);
+      // One message in the thread: the page is complete, so there is nothing to
+      // resume from.
+      expect(first.nextCursor).toBeNull();
+    });
+
+    it("pages through a single channel's history past the first page", async () => {
+      // The common case: one channel, more history than a page. Each producer
+      // answers capped at the page size, so "is there more" cannot be read off
+      // the merged length alone.
+      await deps.whatsAppStoreRepo.upsertMessages(
+        [1, 2, 3, 4, 5].map((n) => ({
+          id: `wa-long-${n}`,
+          chatJid: SILENT_JID,
+          senderJid: SILENT_JID,
+          fromMe: false,
+          timestamp: new Date(Date.UTC(2026, 7, 17, 12, n)),
+          type: "text",
+          text: `message ${n}`,
+          hasMedia: false,
+        })),
+      );
+
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 5; page += 1) {
+        const body: TimelinePage = await fetchTimeline(
+          `channel:whatsapp:${SILENT_JID}`,
+          `?limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+        );
+        seen.push(...body.entries.map((entry) => entry.ref));
+        cursor = body.nextCursor;
+        if (!cursor) break;
+      }
+
+      expect(cursor).toBeNull();
+      expect(seen).toEqual(["wa-long-5", "wa-long-4", "wa-long-3", "wa-long-2", "wa-long-1"]);
+      expect(new Set(seen).size).toBe(seen.length);
+    });
+
+    it("keeps every entry of a second that straddles a page boundary", async () => {
+      // Timestamps are whole seconds and collide, so a cursor that named only
+      // the second would drop whatever else shared it.
+      const sameSecond = new Date("2026-08-17T13:00:00Z");
+      await deps.whatsAppStoreRepo.upsertMessages(
+        ["a", "b", "c"].map((suffix) => ({
+          id: `wa-tie-${suffix}`,
+          chatJid: SILENT_JID,
+          senderJid: SILENT_JID,
+          fromMe: false,
+          timestamp: sameSecond,
+          type: "text",
+          text: `tie ${suffix}`,
+          hasMedia: false,
+        })),
+      );
+
+      const first = await fetchTimeline(`channel:whatsapp:${SILENT_JID}`, "?limit=2");
+      expect(first.nextCursor).not.toBeNull();
+      const second = await fetchTimeline(
+        `channel:whatsapp:${SILENT_JID}`,
+        `?limit=2&cursor=${encodeURIComponent(first.nextCursor!)}`,
+      );
+      const refs = [...first.entries, ...second.entries].map((entry) => entry.ref);
+      expect(refs).toEqual(["wa-tie-a", "wa-tie-b", "wa-tie-c"].sort());
+      expect(new Set(refs).size).toBe(3);
+    });
+
+    it("pages a second that holds more entries than a page, losing none", async () => {
+      // Four messages in one second with a two-entry page: the cursor's second
+      // has to be re-read whole, because the order inside it is not the order
+      // the store can page by.
+      const sameSecond = new Date("2026-08-17T15:00:00Z");
+      await deps.whatsAppStoreRepo.upsertMessages(
+        ["a", "b", "c", "d"].map((suffix) => ({
+          id: `wa-crowd-${suffix}`,
+          chatJid: SILENT_JID,
+          senderJid: SILENT_JID,
+          fromMe: false,
+          timestamp: sameSecond,
+          type: "text",
+          text: `crowd ${suffix}`,
+          hasMedia: false,
+        })),
+      );
+
+      const refs: string[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 10; page += 1) {
+        const query: string = `?limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+        const answer: TimelinePage = await fetchTimeline(`channel:whatsapp:${SILENT_JID}`, query);
+        refs.push(...answer.entries.map((entry) => entry.ref));
+        cursor = answer.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      expect(refs.sort()).toEqual(["wa-crowd-a", "wa-crowd-b", "wa-crowd-c", "wa-crowd-d"]);
+    });
+
+    it("rejects a cursor that is not a timeline cursor", async () => {
+      const res = await app.request(
+        `/identities/${encodeURIComponent(`channel:whatsapp:${TALKING_JID}`)}/timeline?cursor=1234`,
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("reads a WhatsApp thread through whichever alias the person is mapped to", async () => {
+      // One person, two addresses: the address book consolidates them, and the
+      // thread may hang off either. A mapping onto the phone jid still has to
+      // find history recorded against the `@lid` one.
+      const phoneJid = "15550009999@s.whatsapp.net";
+      const lidJid = "88817260012@lid";
+      await deps.whatsAppStoreRepo.upsertContacts([
+        { jid: phoneJid, phoneNumber: "15550009999", name: "Two Addresses" },
+        { jid: lidJid, phoneNumber: "15550009999", name: "Two Addresses" },
+      ]);
+      await deps.whatsAppStoreRepo.upsertMessages([
+        {
+          id: "wa-lid-1",
+          chatJid: lidJid,
+          senderJid: lidJid,
+          fromMe: false,
+          timestamp: new Date("2026-08-17T14:00:00Z"),
+          type: "text",
+          text: "sent from the lid thread",
+          hasMedia: false,
+        },
+      ]);
+      const personId = await deps.personMappingRepo.create({
+        displayName: "Two Addresses",
+        bondLevel: "acquaintance",
+        approved: true,
+        channelMappings: [{ channel: "whatsapp", channelUserId: phoneJid }],
+      });
+
+      const page = await fetchTimeline(`person:${personId}`);
+      expect(page.entries.map((entry) => entry.ref)).toEqual(["wa-lid-1"]);
+    });
+
+    it("is empty, not an error, for an identity nothing was ever said to", async () => {
+      const page = await fetchTimeline(`channel:whatsapp:${SILENT_JID}`);
+      expect(page.entries).toEqual([]);
+      expect(page.nextCursor).toBeNull();
+    });
+
+    it("rejects an id that is neither typed form, and 404s an unknown person", async () => {
+      expect((await app.request("/identities/not-an-id/timeline")).status).toBe(400);
+      expect((await app.request("/identities/person%3Anobody/timeline")).status).toBe(404);
+    });
+  });
+
+  // LinkedIn is the union's second mirror, and it folds identities on its own
+  // terms: a member id is the identity, a profile URL naming one is the same
+  // identity, and only a direct thread's messages are attributable to one
+  // person. These pin that it lands in the same row shape as WhatsApp.
+
   // LinkedIn is the union's second mirror, and it folds identities on its own
   // terms: a member id is the identity, a profile URL naming one is the same
   // identity, and only a direct thread's messages are attributable to one

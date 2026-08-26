@@ -335,13 +335,23 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
     return consolidateByIdentity(mapped);
   }
 
-  /** Recent messages for one chat, oldest→newest (newest at the bottom). */
+  /**
+   * Recent messages for one chat, oldest→newest (newest at the bottom).
+   *
+   * `before` and `at` bound the window by timestamp: `before` excludes that
+   * second and everything after it, `at` restricts the read to exactly that
+   * second. A caller paging a merged order that timestamps alone cannot settle
+   * reads the boundary second with `at` and no limit, because a cap applied
+   * inside a second drops whichever of its messages the cap did not reach.
+   */
   async getMessages(
     chatJid: string,
-    opts: { limit?: number; before?: number } = {},
+    opts: { limit?: number | null; before?: number; at?: number } = {},
   ): Promise<WhatsAppMessageRow[]> {
-    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
+    const limitClause =
+      opts.limit === null ? sql`` : sql`LIMIT ${Math.min(Math.max(opts.limit ?? 50, 1), 500)}`;
     const beforeClause = opts.before != null ? sql`AND timestamp < ${opts.before}` : sql``;
+    const atClause = opts.at != null ? sql`AND timestamp = ${opts.at}` : sql``;
     const rows = (await this.db.all(sql`
       SELECT m.id AS id, m.sender_jid AS senderJid,
         coalesce(sc.name, sc.notify, sc.verified_name) AS senderName,
@@ -351,9 +361,9 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
         reacts_to_id AS reactsToId
       FROM wa_messages m
       LEFT JOIN wa_contacts sc ON sc.jid = m.sender_jid
-      WHERE m.chat_jid = ${chatJid} ${beforeClause}
+      WHERE m.chat_jid = ${chatJid} ${beforeClause} ${atClause}
       ORDER BY m.timestamp DESC, m.rowid DESC
-      LIMIT ${limit}
+      ${limitClause}
     `)) as Array<Record<string, unknown>>;
 
     return rows

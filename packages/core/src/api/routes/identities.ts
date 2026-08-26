@@ -4,26 +4,37 @@ import {
   channelIdentityId,
   compareCodePoints,
   compareIdentityRows,
+  compareTimelineEntries,
   identityMatchesQuery,
+  isAfterTimelineCursor,
   normalizeBondLevel,
   parseIdentityCursor,
   parseIdentityFilterLevel,
+  parseIdentityId,
+  parseTimelineCursor,
   personIdentityId,
   sliceIdentityPage,
+  timelineCursor,
   whatsAppDisplayName,
+  TIMELINE_PAGE_DEFAULT_LIMIT,
+  TIMELINE_PAGE_MAX_LIMIT,
   type IdentityChannel,
   type IdentityDynamic,
   type IdentityRow,
+  type TimelineEntry,
+  type TimelinePage,
 } from "@rome/api-types/identities";
 import { linkedInMemberId } from "../../channels/linkedin-sync.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import type { ApiDeps } from "../deps.js";
 
-// The People page's one read: a union of curated persons, unmapped senders from
-// the sentinel log, and the mirrored address books nobody has placed yet —
-// WhatsApp contacts and LinkedIn participants — every row in the shared
-// `IdentityRow` shape and carrying its newest dynamic. A read — no person row is
-// materialized here, ever; writes stay on the `/persons/*` mutation routes.
+// The People page's two reads. `/identities` is a union of curated persons,
+// unmapped senders from the sentinel log, and the mirrored address books
+// nobody has placed yet — WhatsApp contacts and LinkedIn participants — every
+// row in the shared `IdentityRow` shape and carrying its newest dynamic.
+// `/identities/:id/timeline` merges one identity's dynamics across its
+// channels. Both are reads — no person row is materialized here, ever; writes
+// stay on the `/persons/*` mutation routes.
 
 interface SentinelActivity {
   channel: string;
@@ -117,7 +128,212 @@ export function identitiesRoutes(deps: ApiDeps): Hono {
     );
   });
 
+  // One identity's dynamics, merged across its channels, newest first. Entries
+  // are generic: a producer fills `{source, timestamp, body, direction, ref}`,
+  // so a Rome App that starts contributing history needs no shape change here.
+  app.get("/identities/:id/timeline", async (c) => {
+    const parsed = parseIdentityId(c.req.param("id"));
+    if (!parsed) return c.json({ error: "id must be a person: or channel: identity id" }, 400);
+
+    const channels =
+      parsed.kind === "channel"
+        ? [{ channel: parsed.channel, channelUserId: parsed.channelUserId }]
+        : ((await deps.personMappingRepo.findById(parsed.personId))?.channelMappings ?? null);
+    if (channels === null) return c.json({ error: "Unknown person" }, 404);
+
+    const limit = Math.min(
+      Math.max(parsePositiveInt(c.req.query("limit")) ?? TIMELINE_PAGE_DEFAULT_LIMIT, 1),
+      TIMELINE_PAGE_MAX_LIMIT,
+    );
+    const rawCursor = c.req.query("cursor");
+    const cursor = parseTimelineCursor(rawCursor);
+    if (rawCursor != null && rawCursor !== "" && cursor === null) {
+      return c.json({ error: "cursor is not a timeline cursor" }, 400);
+    }
+
+    // WhatsApp addresses one person by two jids (a phone one and a `@lid`
+    // one), and history can sit under either. Resolving the mapping to every
+    // alias is what keeps a person mapped to the phone jid from showing an
+    // empty timeline while their thread hangs off the lid.
+    const aliases = channels.some((mapping) => mapping.channel === "whatsapp")
+      ? await whatsAppAliases(deps)
+      : new Map<string, string[]>();
+
+    // Deduplicated, because one person can hold two aliases of one contact as
+    // two mappings — the unique index is per identifier, not per identity —
+    // and reading a thread twice would put every one of its entries on the
+    // timeline twice.
+    const targets = new Map<string, { channel: string; channelUserId: string }>();
+    for (const mapping of channels) {
+      const ids =
+        mapping.channel === "whatsapp"
+          ? (aliases.get(mapping.channelUserId) ?? [mapping.channelUserId])
+          : [mapping.channelUserId];
+      for (const channelUserId of ids) {
+        targets.set(activityKey(mapping.channel, channelUserId), {
+          channel: mapping.channel,
+          channelUserId,
+        });
+      }
+    }
+
+    const reads = await Promise.all(
+      [...targets.values()].map((target) => readChannelTimeline(deps, target, { limit, cursor })),
+    );
+
+    // Every producer answers with its own newest `limit + 1`, so the merged
+    // page is the newest of the union and one producer alone can prove more
+    // exists. `saturated` is that proof: without it, a single-channel identity
+    // — the common case — could never report a next page, because its own
+    // answer is capped at the page size and nothing would ever exceed it.
+    const entries = reads.flatMap((read) => read.entries).sort(compareTimelineEntries);
+    const saturated = reads.some((read) => read.saturated);
+    const page = entries.slice(0, limit);
+    const oldest = page.at(-1);
+    const body: TimelinePage = {
+      entries: page,
+      nextCursor:
+        (entries.length > page.length || saturated) && oldest ? timelineCursor(oldest) : null,
+    };
+    return c.json(body);
+  });
+
   return app;
+}
+
+/**
+ * Every dynamic one channel identity has, newest first, from whichever store
+ * holds that channel's history.
+ *
+ * The WhatsApp mirror holds full threads; the sentinel log holds one row per
+ * exchange another channel saw — what arrived, and Rome's reply when it made
+ * one. A mirrored channel reads its mirror and not the sentinel log, because
+ * the sentinel row and the mirrored message are the same message seen twice.
+ * Adding a producer is adding a branch here: the entries it returns are already
+ * in the generic shape.
+ *
+ * Reads one row past the page so the caller can tell "this is everything" from
+ * "this is a page", and answers `saturated` when it hit that cap.
+ *
+ * Reads in whole seconds, never part of one. The merged order settles a second
+ * on `(direction, source, ref)`, which is not an order any producer can page by
+ * in SQL, so a second the cap cuts through leaves entries that no later page
+ * can reach: the next read returns the same rows the cap reached, the cursor
+ * filter drops every one as already sent, and the timeline ends early. So the
+ * cursor's own second is re-read whole and filtered to what follows the cursor,
+ * and the oldest second a capped read touched is completed before it is used.
+ */
+async function readChannelTimeline(
+  deps: ApiDeps,
+  mapping: { channel: string; channelUserId: string },
+  opts: { limit: number; cursor: TimelineEntry | null },
+): Promise<{ entries: TimelineEntry[]; saturated: boolean }> {
+  const fetchLimit = opts.limit + 1;
+  const cursor = opts.cursor;
+  const read = (window: { limit: number | null; before?: number; at?: number }) =>
+    readChannelWindow(deps, mapping, window);
+
+  const [boundary, capped] = await Promise.all([
+    cursor ? read({ limit: null, at: cursor.timestamp }) : null,
+    read({ limit: fetchLimit, before: cursor?.timestamp }),
+  ]);
+
+  const saturated = capped.rows >= fetchLimit;
+  let older = capped.entries;
+  if (saturated && older.length > 0) {
+    const oldestSecond = Math.min(...older.map((entry) => entry.timestamp));
+    const whole = await read({ limit: null, at: oldestSecond });
+    older = [...older.filter((entry) => entry.timestamp !== oldestSecond), ...whole.entries];
+  }
+
+  const resumed =
+    boundary && cursor
+      ? boundary.entries.filter((entry) => isAfterTimelineCursor(entry, cursor))
+      : [];
+  return { entries: [...resumed, ...older], saturated };
+}
+
+/** One producer's rows for a timestamp window, projected onto timeline entries.
+ *  `rows` counts what the store returned, which is what a cap is measured
+ *  against — a sentinel row can carry two entries. */
+async function readChannelWindow(
+  deps: ApiDeps,
+  mapping: { channel: string; channelUserId: string },
+  window: { limit: number | null; before?: number; at?: number },
+): Promise<{ entries: TimelineEntry[]; rows: number }> {
+  if (mapping.channel === "whatsapp") {
+    const messages = await deps.whatsAppStoreRepo.getMessages(mapping.channelUserId, window);
+    return {
+      entries: messages.map((message) => ({
+        source: "whatsapp",
+        timestamp: message.timestamp,
+        body: message.text,
+        direction: message.fromMe ? ("outbound" as const) : ("inbound" as const),
+        ref: message.id,
+      })),
+      rows: messages.length,
+    };
+  }
+
+  const beforeClause = window.before != null ? sql`AND created_at < ${window.before}` : sql``;
+  const atClause = window.at != null ? sql`AND created_at = ${window.at}` : sql``;
+  const limitClause = window.limit == null ? sql`` : sql`LIMIT ${window.limit}`;
+  const rows = (await deps.db.all(sql`
+    SELECT id, text, response, action, created_at AS createdAt
+    FROM sentinel_log
+    WHERE channel = ${mapping.channel} AND channel_user_id = ${mapping.channelUserId}
+      ${beforeClause} ${atClause}
+    ORDER BY created_at DESC
+    ${limitClause}
+  `)) as Array<{
+    id: number | string;
+    text: string | null;
+    response: string | null;
+    action: string | null;
+    createdAt: number | null;
+  }>;
+
+  const entries: TimelineEntry[] = [];
+  for (const row of rows) {
+    const timestamp = Number(row.createdAt ?? 0);
+    entries.push({
+      source: mapping.channel,
+      timestamp,
+      body: row.text,
+      direction: "inbound",
+      ref: `sentinel:${row.id}`,
+    });
+    // A replied row carries what Rome said back. Without it the dossier reads
+    // as one side of a conversation Rome was half of.
+    if (row.action === "replied" && row.response) {
+      entries.push({
+        source: mapping.channel,
+        timestamp,
+        body: row.response,
+        direction: "outbound",
+        ref: `sentinel:${row.id}:reply`,
+      });
+    }
+  }
+
+  return { entries, rows: rows.length };
+}
+
+/**
+ * Every jid one WhatsApp identity answers to, keyed by each of them.
+ *
+ * The address book consolidates a person's phone jid and `@lid` jid into one
+ * contact, but a mapping may name either. Reading history for all of them is
+ * what keeps the choice of alias out of what the guardian sees.
+ */
+async function whatsAppAliases(deps: ApiDeps): Promise<Map<string, string[]>> {
+  const contacts = await deps.whatsAppStoreRepo.listContacts({ limit: null });
+  const byJid = new Map<string, string[]>();
+  for (const contact of contacts) {
+    const aliases = contact.aliases.length > 0 ? contact.aliases : [contact.jid];
+    for (const alias of aliases) byJid.set(alias, aliases);
+  }
+  return byJid;
 }
 
 /**
