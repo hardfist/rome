@@ -110,11 +110,14 @@ export function setupsRoutes(deps: ApiDeps): Hono {
   // the higher setup layer through it would invert the layering — the primitive
   // reaching up into the layer above it.
   //
-  // `matched:false` signals no setup owns this state (unknown/expired/already-
-  // consumed, or a sign-in that never started a setup) — the caller falls
-  // through to the sign-in redeem, which shares the same OAuth primitive. A
-  // cancelled setup deliberately remains a match with `accepted:false`, so its
-  // late callback cannot be mistaken for sign-in and import the credential.
+  // `matched:false` signals no setup owns this state (unknown/expired, or a
+  // sign-in that never started a setup) — the caller falls through to the
+  // sign-in redeem, which shares the same OAuth primitive. A setup that has
+  // already taken a leg, or was cancelled holding one, deliberately stays a
+  // match with `accepted:false`: the callback page persists in the system
+  // browser now, so a reload replays the state, and reading that as sign-in
+  // would import the credential by a second path — racing the redemption in
+  // flight, or contradicting an explicit cancel.
   app.post("/setups/return", async (c) => {
     const blocked = crossOriginBlocked(c);
     if (blocked) return blocked;
