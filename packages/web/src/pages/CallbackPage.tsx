@@ -40,7 +40,14 @@ type ReturnOutcome =
   | { redirect: string }
   | { error: string }
   | { delivered: true }
-  | { cancelled: true };
+  | { cancelled: true }
+  /** A setup this browser owns came back failed, and the browser has no
+   *  dashboard session — the desktop shell's system browser. The generic error
+   *  view offers "Return to login", which is the wrong instruction for someone
+   *  who was connecting an account, not signing in. Scoped to a MATCHED setup:
+   *  an ambiguous return still cannot tell a connect from a sign-in, so it keeps
+   *  the existing handling rather than guessing. */
+  | { connectionFailed: string };
 
 /**
  * Whether this browser holds a dashboard session.
@@ -120,7 +127,9 @@ function handleOAuthReturnOnce(
       // after the guardian explicitly cancelled the connection in Rome.
       if (returned.state?.status === "cancelled") return { cancelled: true };
       if (returned.state?.status === "failed") {
-        return { error: returned.state.reason || fallbackError };
+        const reason = returned.state.reason || fallbackError;
+        if (!(await hasDashboardSession())) return { connectionFailed: reason };
+        return { error: reason };
       }
       // Only a MATCHED setup asks. The sign-in leg below must not probe
       // identity: it runs before its own session exists, so the answer would be
@@ -196,6 +205,9 @@ export default function CallbackPage() {
   const providerError = searchParams.get("error");
   const [error, setError] = useState<string | null>(providerError);
   const [setupCancelled, setSetupCancelled] = useState(false);
+  // A failed connection reported to a browser with no dashboard session: the
+  // reason to show, with no login link under it.
+  const [connectionFailed, setConnectionFailed] = useState<string | null>(null);
   // The leg reached its setup from a browser with no dashboard session — the
   // system browser the desktop shell handed off to. There is nowhere to
   // navigate it, so the page has to be the ending.
@@ -243,6 +255,10 @@ export default function CallbackPage() {
           setSetupCancelled(true);
           return;
         }
+        if ("connectionFailed" in outcome) {
+          setConnectionFailed(outcome.connectionFailed);
+          return;
+        }
         navigate(outcome.redirect, { replace: true });
       } catch (returnError) {
         if (cancelled) return;
@@ -259,20 +275,35 @@ export default function CallbackPage() {
 
   // An up-to-date broker attaches a readable error_description that core
   // relays as-is; a bare RFC 6749 code (deploy skew, older broker) would
-  // otherwise surface verbatim — translate the one users actually hit.
-  const displayError = error === "invalid_grant" ? t("callback.errorInvalidGrant") : error;
+  // otherwise surface verbatim — translate the one users actually hit. A setup
+  // failure can relay the same code, so both readings go through it.
+  const readable = (reason: string | null) =>
+    reason === "invalid_grant" ? t("callback.errorInvalidGrant") : reason;
+  const displayError = readable(error);
+  const displayConnectionFailure = readable(connectionFailed);
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-surface-muted px-4 pb-safe pt-safe">
       <div className="w-full max-w-md rounded-12 border border-border bg-surface p-6 shadow-1">
         <h1 className="text-title text-foreground">
-          {setupCancelled
-            ? t("callback.cancelledTitle")
-            : delivered
-              ? t("callback.deliveredTitle")
-              : t("callback.title")}
+          {displayConnectionFailure
+            ? t("callback.connectionFailedTitle")
+            : setupCancelled
+              ? t("callback.cancelledTitle")
+              : delivered
+                ? t("callback.deliveredTitle")
+                : t("callback.title")}
         </h1>
-        {displayError ? (
+        {displayConnectionFailure ? (
+          // No login link: this browser was connecting an account, not signing
+          // in, and it has no session to return to anyway.
+          <>
+            <p className="mt-3 text-ui text-destructive-fg">{displayConnectionFailure}</p>
+            <p className="mt-3 text-body text-muted-foreground">
+              {t("callback.connectionFailedBody")}
+            </p>
+          </>
+        ) : displayError ? (
           <>
             <p className="mt-3 text-ui text-destructive-fg">{displayError}</p>
             <a

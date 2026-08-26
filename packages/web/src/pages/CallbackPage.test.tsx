@@ -322,6 +322,40 @@ describe("CallbackPage identity routing", () => {
     expect(landed.textContent).toBe("/settings/connections/github");
   });
 
+  const failedGithubSetup = () =>
+    new Response(
+      JSON.stringify({
+        matched: true,
+        cid: "setup-gh",
+        service: "github",
+        accepted: true,
+        state: { status: "failed", reason: "Authorization was declined." },
+      }),
+      { status: 200 },
+    );
+
+  it("tells a sessionless browser the CONNECTION failed, with no login link", async () => {
+    stubFetch({ setupReturn: failedGithubSetup, identity: identity("anonymous") });
+    renderCallbackAndTrackLanding("?handoff=h-denied&state=s-denied-ext");
+
+    // The generic error view offers "Return to login" — the wrong instruction
+    // for someone who was connecting an account, in a browser that has no
+    // session to return to.
+    expect(await screen.findByText("Connection failed")).toBeTruthy();
+    expect(screen.getByText(/Authorization was declined/i)).toBeTruthy();
+    expect(screen.queryByText("Return to login")).toBeNull();
+    expect(screen.queryByTestId("landed-on")).toBeNull();
+  });
+
+  it("keeps the existing error view for a browser that does have a session", async () => {
+    stubFetch({ setupReturn: failedGithubSetup, identity: identity("guardian") });
+    renderCallbackAndTrackLanding("?handoff=h-denied&state=s-denied-web");
+
+    expect(await screen.findByText(/Authorization was declined/i)).toBeTruthy();
+    expect(screen.getByText("Return to login")).toBeTruthy();
+    expect(screen.queryByText("Connection failed")).toBeNull();
+  });
+
   it("never probes identity on the sign-in leg", async () => {
     // Sign-in runs BEFORE its own cookie exists, so the probe would answer
     // "anonymous" for someone who is about to be signed in. It is also why this
