@@ -34,6 +34,7 @@ import { personsRoutes } from "./routes/persons.js";
 import { linkedinThreadsRoutes } from "./routes/linkedin-threads.js";
 import { identitiesRoutes } from "./routes/identities.js";
 import { accountsRoutes } from "./routes/accounts.js";
+import { accountDecisionRoutes } from "./routes/account-decisions.js";
 import { peopleRoutes } from "./routes/people.js";
 import { whatsappContactsRoutes } from "./routes/whatsapp-contacts.js";
 import { sentinelLogRoutes } from "./routes/sentinel-log.js";
@@ -152,6 +153,7 @@ export function buildApp(
   api.route("/", identitiesRoutes(deps));
   api.route("/", peopleRoutes(deps));
   api.route("/", accountsRoutes(deps));
+  api.route("/", accountDecisionRoutes(deps));
   api.route("/", whatsappContactsRoutes(deps));
   api.route("/", linkedinThreadsRoutes(deps));
   api.route("/", sentinelLogRoutes(deps));

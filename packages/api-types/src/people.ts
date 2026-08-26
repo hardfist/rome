@@ -5,6 +5,8 @@
 //   GET /api/people/:id          -> PersonResource
 //   GET /api/people/:id/messages -> TimelinePage
 //   GET /api/accounts            -> AccountDirectory
+//   POST /api/accounts/:channel/:channelUserId/dismiss  -> AccountDecision
+//   POST /api/accounts/:channel/:channelUserId/restore  -> AccountDecision
 //
 // The vocabulary is docs/concepts/identity.md's. Rome never mints an account:
 // an account is platform-owned, named by the pair (channel, channelUserId),
@@ -353,6 +355,64 @@ export function sliceAccountDirectory(
     remaining.length > accounts.length && last ? encodeAccountCursor(accountCursorOf(last)) : null;
 
   return { accounts, nextCursor, counts, silentTotal };
+}
+
+/**
+ * What a dismiss or a restore answers: the account it decided, and how that
+ * account reads now.
+ *
+ * The account's own identity rather than the caller's: a channel that reaches
+ * one account several ways folds the addressing the caller named onto the
+ * account's own, and a client that kept the addressing it sent would key the
+ * decided row under an account the directory does not list.
+ *
+ * The state is an {@link AccountPresentation}, so the answer to a write is read
+ * through the same seam as a row of the directory, and a dismissal answers
+ * "dismissed" and no person on both.
+ */
+export interface AccountDecision extends AccountPresentation {
+  channel: string;
+  channelUserId: string;
+}
+
+/** The tag a {@link LinkConflict} carries, so a client can tell a refusal it
+ *  can offer a way out of from any other 409. */
+export const LINK_CONFLICT = "LinkConflict";
+
+/**
+ * A write refused because the account it names belongs to someone.
+ *
+ * It names the owner, because the way out of the refusal is a decision about
+ * that person — unlink them, or transfer the account to whoever the guardian
+ * meant — and a client that only knew "conflict" could offer neither.
+ */
+export interface LinkConflict {
+  error: typeof LINK_CONFLICT;
+  message: string;
+  ownerPersonId: string;
+  ownerPersonName: string;
+}
+
+/**
+ * The refusal an account's own presentation implies, or null when the account
+ * is nobody's and a write may proceed.
+ *
+ * Derived from the presentation rather than from the stored link, so the owner
+ * a refusal names is a person the guardian placed and can never be the stranger
+ * sentinel: a dismissed account presents as "dismissed" with no person, which
+ * conflicts with nothing — a dismissal is what dismiss and restore are for.
+ */
+export function linkConflict(
+  account: AccountPresentation & { channel: string; channelUserId: string },
+): LinkConflict | null {
+  if (account.state !== "linked" || account.personId == null) return null;
+  const owner = account.personName ?? account.personId;
+  return {
+    error: LINK_CONFLICT,
+    message: `${accountRef(account)} belongs to ${owner}`,
+    ownerPersonId: account.personId,
+    ownerPersonName: owner,
+  };
 }
 
 /**

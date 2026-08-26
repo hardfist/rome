@@ -15,8 +15,8 @@ import type { ApiDeps } from "../deps.js";
 // This route is the join between a query string and those two, and holds no
 // rule of its own.
 //
-// A read. Placing, dismissing and restoring an account are writes on their own
-// routes.
+// A read. Placing an account is a write on the person's own route; dismissing
+// and restoring one are `./account-decisions.ts`.
 
 export function accountsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();

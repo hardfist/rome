@@ -377,16 +377,41 @@ export class PersonMappingRepository {
    *  leaving it in place lets the unique index turn an attempt to take it into
    *  a rollback rather than a silent theft. */
   writeReleaseStrangerClaim(exec: SqliteExec, channel: string, channelUserId: string): void {
-    exec
+    this.writeReleaseStrangerClaims(exec, channel, [channelUserId]);
+  }
+
+  /**
+   * {@link writeReleaseStrangerClaim} over every addressing of one account, as
+   * a single statement.
+   *
+   * One statement rather than one per address because they are one decision: a
+   * channel can reach an account several ways, a dismissal is stored against
+   * whichever one the guardian dismissed it by, and an undo that committed
+   * some of them would leave the account still dismissed by the addressing it
+   * missed.
+   */
+  writeReleaseStrangerClaims(
+    exec: SqliteExec,
+    channel: string,
+    channelUserIds: readonly string[],
+  ): number {
+    if (channelUserIds.length === 0) return 0;
+    return exec
       .delete(channelMappings)
       .where(
         and(
           eq(channelMappings.channel, channel),
-          eq(channelMappings.channelUserId, channelUserId),
+          inArray(channelMappings.channelUserId, [...channelUserIds]),
           eq(channelMappings.personId, STRANGER_PERSON_ID),
         ),
       )
-      .run();
+      .run().changes;
+  }
+
+  /** {@link writeReleaseStrangerClaims}, standalone. How a restore undoes a
+   *  dismissal: the sentinel's claim goes, and the account is nobody's again. */
+  async releaseStrangerClaims(channel: string, channelUserIds: readonly string[]): Promise<number> {
+    return this.writeReleaseStrangerClaims(this.db, channel, channelUserIds);
   }
 
   async addChannelMapping(
