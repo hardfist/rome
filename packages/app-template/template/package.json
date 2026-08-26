@@ -13,7 +13,7 @@
   "dependencies": {
     "@rome-os/app-runtime": "^0.5.10",
     "@rome-os/app-web-sdk": "^0.2.14",
-    "@rome-os/ui": "^0.1.3",
+    "@rome-os/ui": "^0.2.2",
     "drizzle-orm": "^0.45.1",
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",
