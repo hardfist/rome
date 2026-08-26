@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, Zap } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,13 +39,12 @@ export function ModelSelectorMenu({
         <Button
           type="button"
           variant="ghost"
-          size="md"
+          size="sm"
           disabled={disabled}
           aria-label={t("modelSelector.label")}
           title={t("modelSelector.label")}
           className="touch-target"
         >
-          <Zap aria-hidden />
           <span className="truncate">{t(selected.labelKey)}</span>
           <ChevronDown data-icon="inline-end" aria-hidden="true" />
         </Button>

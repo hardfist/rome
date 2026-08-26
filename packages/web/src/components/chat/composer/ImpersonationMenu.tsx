@@ -45,7 +45,7 @@ export function ImpersonationMenu({
           // the trigger is a bare icon until someone is picked, and the name
           // appearing is the whole signal. A project and a model always have a
           // value, which is why those two always show one.
-          size={selectedPerson ? "md" : "icon-md"}
+          size={selectedPerson ? "sm" : "icon-sm"}
           aria-label={t("impersonation.buttonLabel")}
           title={selectedPersonLabel}
           className="touch-target"

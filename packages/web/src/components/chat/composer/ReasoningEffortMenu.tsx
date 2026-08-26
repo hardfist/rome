@@ -37,6 +37,7 @@ export function ReasoningEffortMenu({
         <Button
           type="button"
           variant="ghost"
+          size="sm"
           disabled={disabled}
           className="touch-target"
           aria-label={t("reasoningEffort.label")}

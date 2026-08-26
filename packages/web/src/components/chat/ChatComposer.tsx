@@ -1006,7 +1006,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           <Button
             type="button"
             variant="ghost"
-            size="icon-md"
+            size="icon-sm"
             onClick={() => fileInputRef.current?.click()}
             disabled={isComposerBusy}
             aria-label={t("composer.uploadFiles")}
@@ -1037,13 +1037,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               <Button
                 type="button"
                 variant="outline"
-                size="md"
+                size="sm"
                 onClick={onStop}
                 // Square below `sm`, icon + label above it. `md` sets height,
                 // gap and padding but no width, so the narrow case only has to
                 // add one and zero the other — no collision with `size-*`, and
                 // nothing to force.
-                className="touch-target max-sm:w-[var(--control-h-md)] max-sm:px-0"
+                className="touch-target max-sm:w-[var(--control-h-sm)] max-sm:px-0"
                 title={t("composer.stopGenerating")}
                 aria-label={t("composer.stopGenerating")}
               >
@@ -1057,7 +1057,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                   ? "secondary"
                   : "default"
               }
-              size="icon-md"
+              size="icon-sm"
               onClick={() => void runSend()}
               disabled={
                 isComposerBusy || (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
