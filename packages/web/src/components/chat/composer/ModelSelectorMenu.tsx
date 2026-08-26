@@ -6,10 +6,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { IconButton } from "@/components/ui/icon-button";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DEFAULT_LARGE_MODEL_SELECTION, LARGE_MODEL_OPTIONS } from "@/lib/chat-constants";
-import { CONTROL_TONE_ACTIVE, CONTROL_TONE_REST } from "./control-tone";
 
 export interface ModelSelectorMenuProps {
   open: boolean;
@@ -33,12 +32,24 @@ export function ModelSelectorMenu({
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
-        <IconButton
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-md"
           disabled={disabled}
-          label={t("modelSelector.label")}
-          icon={<Zap aria-hidden />}
-          className={cn("touch-target", customSelected ? CONTROL_TONE_ACTIVE : CONTROL_TONE_REST)}
-        />
+          aria-label={t("modelSelector.label")}
+          title={t("modelSelector.label")}
+          // `relative` anchors the dot. Ghost has one appearance, so "this menu
+          // holds a non-default value" cannot ride the variant — it is the same
+          // dot the impersonation menu uses, so both answer that question the
+          // same way.
+          className="relative touch-target"
+        >
+          <Zap aria-hidden />
+          {customSelected && (
+            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-info" />
+          )}
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56 rounded-12 p-2">
         <div className="px-2 pb-2 pt-1">

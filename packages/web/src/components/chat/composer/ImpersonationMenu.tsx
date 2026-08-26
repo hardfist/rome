@@ -7,10 +7,9 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { IconButton } from "@/components/ui/icon-button";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Person } from "@/lib/chat-types";
-import { CONTROL_TONE_ACTIVE, CONTROL_TONE_REST } from "./control-tone";
 
 export interface ImpersonationMenuProps {
   open: boolean;
@@ -38,22 +37,21 @@ export function ImpersonationMenu({
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
-        <IconButton
-          label={t("impersonation.buttonLabel")}
-          icon={
-            <>
-              <Users aria-hidden />
-              {selectedPerson && (
-                <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-info" />
-              )}
-            </>
-          }
-          className={cn(
-            // `relative` anchors the dot the icon renders when a person is picked.
-            "relative touch-target",
-            selectedPerson ? CONTROL_TONE_ACTIVE : CONTROL_TONE_REST,
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-md"
+          aria-label={t("impersonation.buttonLabel")}
+          title={t("impersonation.buttonLabel")}
+          // `relative` anchors the dot, which is now the ONLY signal that the
+          // guardian is speaking as someone else.
+          className="relative touch-target"
+        >
+          <Users aria-hidden />
+          {selectedPerson && (
+            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-info" />
           )}
-        />
+        </Button>
       </DropdownMenuTrigger>
 
       <DropdownMenuContent side="top" align="start" className="w-64 p-0">

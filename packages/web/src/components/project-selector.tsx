@@ -131,17 +131,9 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
         <PopoverTrigger asChild>
           <Button
             type="button"
-            // The fill is the variant's job: transparent while the default
-            // project is in play, filled once a real one is, and `ghost` and
-            // `secondary` each carry their own open-state fill through
-            // `aria-expanded`. Nothing about the colour is decided here.
-            variant={isDefault ? "ghost" : "secondary"}
+            variant="ghost"
             size="md"
-            // `ghost` sets no resting text colour, so the label would inherit
-            // full foreground and read as the loudest thing in a row of muted
-            // chrome. `secondary` carries its own, and a picked project has
-            // earned the weight.
-            className={cn("max-w-[200px] touch-target", isDefault && "text-muted-foreground")}
+            className="max-w-[200px] touch-target"
             title={isDefault ? t("project.buttonLabel") : draftProjectLabel}
             aria-label={t("project.buttonLabel")}
           >

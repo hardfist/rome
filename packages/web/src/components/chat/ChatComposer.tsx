@@ -51,7 +51,6 @@ import { PendingUploadsList } from "./composer/PendingUploadsList";
 import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
-import { CONTROL_TONE_REST } from "./composer/control-tone";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
 
 export interface ChatComposerSnapshot {
@@ -1004,13 +1003,18 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               guardianLabel={guardianLabel}
             />
           )}
-          <IconButton
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-md"
             onClick={() => fileInputRef.current?.click()}
             disabled={isComposerBusy}
-            label={t("composer.uploadFiles")}
-            icon={<Paperclip aria-hidden />}
-            className={cn("touch-target", CONTROL_TONE_REST)}
-          />
+            aria-label={t("composer.uploadFiles")}
+            title={t("composer.uploadFiles")}
+            className="touch-target"
+          >
+            <Paperclip aria-hidden />
+          </Button>
           {showModelSelector && modelSelectorEnabled && (
             <ModelSelectorMenu
               open={modelMenuOpen}
