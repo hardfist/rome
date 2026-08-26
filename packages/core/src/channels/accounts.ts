@@ -45,6 +45,11 @@ export interface TalkAccounts {
    * One page of the channel's accounts, in a stable order. `query` matches the
    * label and the identifier values. `cursor` is opaque and comes from a prior
    * page. A missing `nextCursor` means the listing is exhausted.
+   *
+   * The order is stable, the listing underneath it is not. A channel may order
+   * by activity, so an account can move between two pages and be skipped or
+   * repeated. A caller that needs every account exactly once asks for one page
+   * large enough to hold the listing.
    */
   listAccounts(input: {
     query?: string;

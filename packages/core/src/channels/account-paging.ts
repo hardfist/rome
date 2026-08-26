@@ -15,10 +15,21 @@ function matches(account: Account, needle: string): boolean {
   return false;
 }
 
+// Page size used when a caller passes a limit that is not a number at all. A
+// route that builds one from a query string can produce NaN, and answering that
+// with an empty page would be indistinguishable from an exhausted listing.
+const FALLBACK_LIMIT = 50;
+
 /**
  * One page of an already-ordered account list. The cursor is an offset into the
  * filtered list — opaque to the caller, and rejected back to the first page
  * when it does not parse, so a corrupt value cannot walk off the end silently.
+ *
+ * Offset paging assumes the listing holds still. It does not: a WhatsApp
+ * account moves to the front when a message arrives, so an inbound message
+ * between two pages shifts every later account down and one of them is skipped
+ * or repeated. A caller that needs every account exactly once reads the whole
+ * listing in one page rather than walking cursors across a live mirror.
  */
 export function pageAccounts(
   accounts: Account[],
@@ -29,7 +40,9 @@ export function pageAccounts(
 
   const parsed = input.cursor == null ? 0 : Number(input.cursor);
   const start = Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
-  const limit = Math.max(1, Math.floor(input.limit));
+  const limit = Number.isFinite(input.limit)
+    ? Math.max(1, Math.floor(input.limit))
+    : FALLBACK_LIMIT;
   const end = start + limit;
 
   return {

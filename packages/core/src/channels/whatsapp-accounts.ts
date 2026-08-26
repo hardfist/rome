@@ -53,9 +53,16 @@ function firstNonEmpty(...values: Array<string | null>): string | null {
  *
  * Group chats (`@g.us`) are not accounts.
  *
- * One clause of I2 stays open here: an account that changes its phone number
- * gets a new id, because the mirror stores no key that outlives the digits.
- * Closing it needs a durable stored account key, not a different addressing.
+ * Two gaps stay open, both because the mirror stores no key that outlives the
+ * digits an id is built from. Closing either needs a durable stored account
+ * key, not a different choice of addressing, and code that persists an
+ * `AccountId` has to survive both:
+ *
+ * - An account that changes its phone number gets a new id (I2).
+ * - A named LID row carrying no phone number addresses itself. Its id moves to
+ *   the phone-number form once the mirror learns the number (I2), and until
+ *   then a phone-number row for the same person is a second `Account` (I1).
+ *   Nothing links the two but the name, and names are not identity.
  */
 export class WhatsAppAccounts implements TalkAccounts {
   constructor(private readonly store: WhatsAppStoreRepository) {}
@@ -85,6 +92,12 @@ export class WhatsAppAccounts implements TalkAccounts {
    * phone number a row carries, so a row that has not learned its number yet
    * stays separate. Re-keying on the canonical id here collapses those too —
    * one `Account` per account, whatever the mirror's row shape (I1).
+   *
+   * Every call reads the whole address book and rebuilds the index, so walking
+   * pages costs one full read per page and `resolve` costs one per identifier.
+   * That is bounded by address-book size and holds no stale rows. A caller that
+   * resolves per message wants a cache, and the cache belongs behind this port,
+   * where it can be invalidated on a sync rather than guessed at by the caller.
    */
   private async load(): Promise<{ accounts: Account[]; byKey: Map<string, Account> }> {
     const rows = (await this.store.listContacts({ limit: null })).filter(

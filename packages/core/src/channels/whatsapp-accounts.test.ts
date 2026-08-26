@@ -103,6 +103,27 @@ describe("WhatsAppAccounts", () => {
     expect(await accounts.resolve("")).toBeNull();
   });
 
+  it("answers a limit that is not a number with a page, not a false exhaustion", async () => {
+    await repo.upsertContacts([
+      { jid: "15550000001@s.whatsapp.net", phoneNumber: "15550000001", name: "Ada" },
+      { jid: "15550000002@s.whatsapp.net", phoneNumber: "15550000002", name: "Bea" },
+    ]);
+
+    const page = await accounts.listAccounts({ limit: Number.NaN });
+    expect(page.accounts.map((a) => a.label)).toEqual(["Ada", "Bea"]);
+    expect(page.nextCursor).toBeUndefined();
+  });
+
+  it("moves a named LID row onto the phone form once the mirror learns the number", async () => {
+    // A documented open gap, pinned so the follow-up sees it move rather than
+    // trusting an `AccountId` persisted before the number arrived.
+    await repo.upsertContacts([{ jid: "named-lid@lid", name: "Lia" }]);
+    expect((await accounts.resolve("named-lid@lid"))!.id).toBe("named-lid@lid");
+
+    await repo.upsertContacts([{ jid: "named-lid@lid", phoneNumber: "15551234567" }]);
+    expect((await accounts.resolve("named-lid@lid"))!.id).toBe("15551234567@s.whatsapp.net");
+  });
+
   it("pages and filters by query", async () => {
     await repo.upsertContacts([
       { jid: "15550000001@s.whatsapp.net", phoneNumber: "15550000001", name: "Ada" },
