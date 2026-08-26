@@ -10,6 +10,7 @@
   "dependencies": {
     "@rome-os/app-runtime": "latest",
     "@rome-os/app-web-sdk": "^0.2.0",
+    "@rome-os/ui": "^0.2.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

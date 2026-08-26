@@ -232,13 +232,13 @@ describe("scaffoldDevApp", () => {
       expect(appEntry).toContain(`from "@rome-os/ui/${subpath}"`);
     }
 
-    // The kit install that supplies the components must also supply their
-    // `@source` scan. The SDK sheet imports the canon through the SDK's own
-    // copy of the kit, so an app that upgrades across a 0.x minor would
-    // otherwise compile CSS from the version it no longer bundles.
+    // One import. `@rome-os/ui` is an optional peer of the SDK, so the kit the
+    // app declares above is the only copy in the tree, and the canon reaches the
+    // bundle through the SDK sheet. Importing the canon here as well resolves to
+    // that same copy and adds nothing.
     const appStyles = readFileSync(join(templateRoot, "src", "web", "styles.css"), "utf-8");
     expect(appStyles).toContain('@import "@rome-os/app-web-sdk/styles"');
-    expect(appStyles).toContain('@import "@rome-os/ui/styles.css"');
+    expect(appStyles).not.toContain('@import "@rome-os/ui/styles.css"');
   });
 
   it("depends on every published Rome package through a concrete semver range", () => {

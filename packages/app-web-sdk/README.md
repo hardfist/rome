@@ -37,27 +37,26 @@ figure-ground split, the status `-bg`/`-fg`/`-border` triads). Anything
 not registered there — raw shades (`bg-gray-100`), raw scrims (`bg-black/40`),
 arbitrary colors — is a regression.
 
-Your app's `src/web/styles.css` should be a single import of this layer, plus
-any app-specific rules below it:
+Your app's `src/web/styles.css` is one import of this layer, plus any
+app-specific rules below it:
 
 ```css
 @import "@rome-os/app-web-sdk/styles";
-@import "@rome-os/ui/styles.css";
 
 /* app-specific rules here; override a host token with a `:root` block */
 ```
 
-The first line pulls in Tailwind and the full token vocabulary — don't copy the
-`@theme inline` block into your app (it drifts the moment a token changes here).
+That line pulls in Tailwind and the full token vocabulary — do not copy the
+`@theme inline` block into your app, since it drifts the moment a token changes
+here.
 
-The second line is **not** redundant. This sheet imports the canon through the
-SDK's own copy of `@rome-os/ui`, while `@rome-os/ui/button` in your components
-resolves *your* copy. Upgrade the kit across a `0.x` minor and those become two
-installs — Tailwind then scans the old copy's `@source` files while the bundle
-ships the new components, so their classes silently disappear from the CSS and
-the build still passes. Importing the canon from the app keeps the version that
-supplies the components as the one that supplies their styles; when both resolve
-to the same install it costs nothing.
+Declare `@rome-os/ui` in your app as well. This package takes the kit as an
+optional peer dependency, so your app supplies it and the whole tree holds one
+copy. That is what keeps a kit component and the stylesheet that dresses it on
+the same version: two copies would let a component read a token its own
+stylesheet no longer emits, and the build would still pass. Import kit
+components from `@rome-os/ui/<component>` as usual — no second stylesheet
+import is needed.
 
 Token families, at a glance:
 
