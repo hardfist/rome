@@ -246,14 +246,14 @@ export function usePerson(id: string | undefined) {
  * would have to re-derive the ordering the cursor is written against — and
  * would disagree with it at every page boundary.
  *
- * No interval. A dossier is a page for reading someone's history, and nothing
- * on it writes: the composer that would need its own line to converge is
- * rome-os/rome#67, and when it lands it can invalidate this query at the moment
- * of the send. What is left for a poll to catch is a message arriving while the
- * page sits open, which the client's `refetchOnWindowFocus` already catches at
- * the moment the reader looks back at it — and a refetch here re-reads every
- * page the reader has opened, so an interval charges the deepest reader the
- * most for the least.
+ * No interval. The dossier's writes converge on their own: `./use-writes.ts`
+ * invalidates this key the moment one lands, so a merge or a link shows its new
+ * history without waiting for a tick. The composer is the one write still to
+ * come, and it settles the same way. What is left for a poll to catch is a
+ * message arriving while the page sits open, which the client's
+ * `refetchOnWindowFocus` already catches at the moment the reader looks back at
+ * it — and a refetch here re-reads every page the reader has opened, so an
+ * interval charges the deepest reader the most for the least.
  */
 export function usePersonTimeline(id: string | undefined) {
   const { t } = useTranslation("people");
