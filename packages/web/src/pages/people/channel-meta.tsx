@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 /**
@@ -103,11 +104,19 @@ export function channelLabel(t: TFunction<"people">, channel: string): string {
 
 export function ChannelGlyph({ channel, className }: { channel: string; className?: string }) {
   const { Glyph } = CHANNEL_META[channel] ?? { Glyph: GenericChannelGlyph };
-  return <Glyph className={cn("h-3.5 w-3.5 shrink-0", className)} />;
+  return <Glyph className={cn("size-4 shrink-0", className)} />;
 }
 
-/** Glyph plus channel name, for the places that name the channel outright: an
- *  unknown sender's row, a linked account, a timeline entry. */
+/**
+ * Glyph plus channel name, for the places that name the channel outright: an
+ * unplaced account's row, a linked account, a timeline entry.
+ *
+ * The kit's `Badge`, not a pill written here — the design note's specimens are
+ * drawn with the primitives the page ships with, so a hand-rolled pill beside
+ * them is a second answer to what a badge looks like. The glyph goes in bare:
+ * `Badge` sizes an `<svg>` that carries no `size-*` of its own, and a size
+ * written here would opt out of that rule.
+ */
 export function ChannelPill({
   channel,
   children,
@@ -118,10 +127,11 @@ export function ChannelPill({
   children?: React.ReactNode;
   t: TFunction<"people">;
 }) {
+  const { Glyph } = CHANNEL_META[channel] ?? { Glyph: GenericChannelGlyph };
   return (
-    <span className="inline-flex shrink-0 items-center gap-2 rounded-full bg-surface-muted px-2 py-1 text-badge text-muted-foreground ring-1 ring-inset ring-border-strong">
-      <ChannelGlyph channel={channel} />
+    <Badge variant="outline" className="shrink-0 text-muted-foreground">
+      <Glyph />
       {children ?? channelLabel(t, channel)}
-    </span>
+    </Badge>
   );
 }
