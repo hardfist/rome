@@ -8,7 +8,30 @@ import { ConnectionSlotCard } from "@/components/connection-slot-card";
 import { SetupRenderer } from "@/components/setup/setup-renderer";
 import { useSetup } from "@/components/setup/use-setup";
 import { revokeConnectionGrant } from "@/lib/connections-api";
+import { isElectronShell } from "@/lib/electron-shell";
 import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
+
+/**
+ * Hand the guardian to the broker.
+ *
+ * In the desktop shell that has to be the SYSTEM browser. The Electron window
+ * is a fresh session with no keychain and no platform authenticator, so an
+ * account whose second factor is a passkey or Touch ID cannot finish signing in
+ * inside the app at all. `window.open` reaches the shell's
+ * `setWindowOpenHandler`, which forwards the URL to the system browser and
+ * denies the Electron window — no preload bridge needed.
+ *
+ * Everywhere else this stays a same-window navigation: a browser dashboard has
+ * the user's own session and extensions already, and a new tab would be a
+ * gratuitous change to a flow that works.
+ */
+function openAuthorizeUrl(url: string): void {
+  if (isElectronShell()) {
+    window.open(url);
+    return;
+  }
+  window.location.assign(url);
+}
 
 /**
  * OAuth (Rome Cloud-brokered) connection slot as a full slot card — the
@@ -76,7 +99,7 @@ export function OAuthConnectionSection({
   useEffect(() => {
     if (redirectUrl && initiatedRef.current) {
       initiatedRef.current = false;
-      window.location.assign(redirectUrl);
+      openAuthorizeUrl(redirectUrl);
     }
   }, [redirectUrl]);
 
@@ -104,6 +127,25 @@ export function OAuthConnectionSection({
     }
     setDisconnecting(false);
   }
+
+  // Shown wherever a setup is parked at `awaiting-redirect` — the unconnected
+  // card AND the connected one, because Reconnect parks there too and the
+  // desktop shell no longer navigates the window away.
+  const pendingRedirectControls = redirectUrl ? (
+    <div className="space-y-2">
+      <p className="text-body text-muted-foreground">
+        {t("connections.oauth.resumePending", { label })}
+      </p>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={() => openAuthorizeUrl(redirectUrl)}>
+          {t("common.connect")}
+        </Button>
+        <Button variant="ghost" size="sm" disabled={setup.busy} onClick={setup.cancel}>
+          {t("common.cancel")}
+        </Button>
+      </div>
+    </div>
+  ) : null;
 
   // Unavailable on this host — render the unconnected card with a disabled
   // control and the reason.
@@ -137,23 +179,13 @@ export function OAuthConnectionSection({
         icon={<ConnectionBrandBadge connection={card.service} />}
       >
         {redirectUrl ? (
-          // A setup parked at the broker hand-off. A freshly-initiated redirect
-          // has already navigated away (the effect above); reaching here is a
-          // passive reattach, so offer manual resume + cancel rather than a
-          // silent bounce.
-          <div className="space-y-2">
-            <p className="text-body text-muted-foreground">
-              {t("connections.oauth.resumePending", { label })}
-            </p>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => window.location.assign(redirectUrl)}>
-                {t("common.connect")}
-              </Button>
-              <Button variant="ghost" size="sm" disabled={setup.busy} onClick={setup.cancel}>
-                {t("common.cancel")}
-              </Button>
-            </div>
-          </div>
+          // A setup parked at the broker hand-off. In a browser a
+          // freshly-initiated redirect has already navigated away, so reaching
+          // here is a passive reattach; in the desktop shell the hand-off went
+          // to the system browser and this window stays put, so this is also
+          // what the guardian looks at while they finish over there. Either way
+          // the affordance is the same: reopen, or cancel and escape the flow.
+          pendingRedirectControls
         ) : setup.state && setup.state.status !== "cancelled" ? (
           <SetupRenderer
             service={card.service}
@@ -229,16 +261,18 @@ export function OAuthConnectionSection({
         {expired && (
           <p className="text-ui text-warning-fg">{t("connections.oauth.accessExpired")}</p>
         )}
-        <Button
-          variant={expired ? "default" : "outline"}
-          size="sm"
-          disabled={setup.busy}
-          aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
-          onClick={() => beginConnect(true)}
-        >
-          {setup.busy && <Spinner size="sm" label={t("connections.oauth.reconnecting")} />}
-          {t("connections.oauth.reconnect")}
-        </Button>
+        {pendingRedirectControls ?? (
+          <Button
+            variant={expired ? "default" : "outline"}
+            size="sm"
+            disabled={setup.busy}
+            aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
+            onClick={() => beginConnect(true)}
+          >
+            {setup.busy && <Spinner size="sm" label={t("connections.oauth.reconnecting")} />}
+            {t("connections.oauth.reconnect")}
+          </Button>
+        )}
       </div>
     </ConnectionSlotCard>
   );

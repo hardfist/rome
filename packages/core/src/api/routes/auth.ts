@@ -52,6 +52,14 @@ const PUBLIC_API_PATHS = [
   "/api/onboard/*",
   "/api/instance/enroll/*",
   "/api/oauth/*",
+  // The connect return leg. The desktop shell hands provider sign-in to the
+  // system browser (the Electron window has no platform authenticator, so a
+  // passkey second factor cannot complete there), and that browser carries no
+  // guardian cookie. Exact path, not a prefix: the rest of /api/setups/* stays
+  // private. `state` only correlates the leg back to a setup still parked at
+  // `awaiting-redirect` — the credential exchange itself needs the handoff, the
+  // PKCE verifier and the instance token, none of which cross this boundary.
+  "/api/setups/return",
   // Share Chat — login-free public read of a frozen chat snapshot. The
   // token in the path is the credential; management stays under /api/chat/*.
   "/api/share/*",

@@ -8,6 +8,17 @@
 //   POST /api/accounts/:channel/:channelUserId/dismiss  -> AccountDecision
 //   POST /api/accounts/:channel/:channelUserId/restore  -> AccountDecision
 //
+// The write half. `POST /api/people` is served. The rest are request types
+// that lead, with the backend following (issues #63–#65):
+//
+//   POST   /api/people               -> PersonResource (201) | LinkConflict (409)
+//   PATCH  /api/people/:id           -> PersonResource
+//   POST   /api/people/:id/accounts  -> PersonResource | LinkConflict (409)
+//   DELETE /api/people/:id/accounts/:channel/:channelUserId -> PersonResource
+//   POST   /api/people/:id/merge     -> PersonResource
+//   POST   /api/accounts/:channel/:channelUserId/dismiss  -> DirectoryAccount
+//   POST   /api/accounts/:channel/:channelUserId/restore  -> DirectoryAccount
+//
 // The vocabulary is docs/concepts/identity.md's. Rome never mints an account:
 // an account is platform-owned, named by the pair (channel, channelUserId),
 // and the only identity fact Rome contributes is which person it belongs to.
@@ -20,9 +31,11 @@
 // disagree about.
 
 import {
+  ASSIGNABLE_BOND_LEVELS,
   compareIdentityCursors,
   encodeIdentityCursor,
   identityCursorOf,
+  isAssignableBondLevel,
   isChannelIdentifier,
   matchesQuery,
   normalizeBondLevel,
@@ -30,6 +43,7 @@ import {
   parseIdentityCursor,
   TIMELINE_PAGE_DEFAULT_LIMIT,
   TIMELINE_PAGE_MAX_LIMIT,
+  type AssignableBondLevel,
   type IdentityCursor,
   type IdentityDynamic,
   type PlacedBondLevel,
@@ -48,6 +62,11 @@ export {
   // column is free text — older rows carry levels off today's ladder — so
   // every reader has to bucket them the same way.
   normalizeBondLevel,
+  // The levels a guardian may place a person at. Guardian is not one of them:
+  // the instance serves exactly one, and the ladder's other two positions —
+  // unknown and stranger — are read off the links rather than stored.
+  ASSIGNABLE_BOND_LEVELS,
+  type AssignableBondLevel,
   type IdentityDynamic,
   type TimelineEntry,
   type TimelinePage,
@@ -555,4 +574,121 @@ export function personMatchesQuery(person: PersonResource, query: string): boole
  */
 export function comparePeople(a: PersonResource, b: PersonResource): number {
   return compareIdentityCursors(identityCursorOf(a), identityCursorOf(b));
+}
+
+/**
+ * `POST /api/people` — create, with optional atomic linking.
+ *
+ * Atomic means both-or-neither: if any named account is linked to a real
+ * person, the whole request refuses with a {@link LinkConflict} and no person
+ * is created. Accounts the dismissal machinery holds link silently, same as
+ * {@link LinkAccountRequest}.
+ */
+export interface CreatePersonRequest {
+  displayName: string;
+  /** Defaults to "other". */
+  bondLevel?: AssignableBondLevel;
+  accounts?: { channel: string; channelUserId: string }[];
+}
+
+/** A create request with its defaults applied: what the write is given. */
+export type NewPerson = Required<CreatePersonRequest>;
+
+/**
+ * Read a request body as a {@link NewPerson}, or say what is wrong with it.
+ *
+ * The rule rather than any one route's rule, so the backend and the dashboard's
+ * mock refuse the same bodies with the same words — the page renders the
+ * `error` string, so the wording is part of what a client is written against.
+ *
+ * A name is trimmed before it is judged, and whitespace alone is no name: it
+ * slugs to nothing, so accepting it would mint a person whose id is a uuid the
+ * guardian never sees a reason for.
+ */
+export function parseCreatePersonRequest(body: unknown): { person: NewPerson } | { error: string } {
+  if (typeof body !== "object" || body === null) return { error: "displayName is required" };
+  const raw = body as Record<string, unknown>;
+
+  const displayName = typeof raw.displayName === "string" ? raw.displayName.trim() : "";
+  if (!displayName) return { error: "displayName is required" };
+
+  if (raw.bondLevel !== undefined && !isAssignableBondLevel(raw.bondLevel)) {
+    return { error: `bondLevel must be one of ${ASSIGNABLE_BOND_LEVELS.join(", ")}` };
+  }
+
+  if (raw.accounts !== undefined && !Array.isArray(raw.accounts)) {
+    return { error: "accounts must be an array of { channel, channelUserId }" };
+  }
+  // Keyed rather than pushed: naming one account twice asks for the state
+  // naming it once produces, and the link table holds one row per account, so
+  // the repeat would abort the write over a request that was never ambiguous.
+  const accounts = new Map<string, NewPerson["accounts"][number]>();
+  for (const entry of (raw.accounts ?? []) as unknown[]) {
+    const account = entry as Partial<NewPerson["accounts"][number]> | null;
+    if (!account?.channel || !account.channelUserId) {
+      return { error: "each account needs a channel and a channelUserId" };
+    }
+    const ref = { channel: account.channel, channelUserId: account.channelUserId };
+    accounts.set(`${ref.channel}\n${ref.channelUserId}`, ref);
+  }
+
+  return {
+    person: { displayName, bondLevel: raw.bondLevel ?? "other", accounts: [...accounts.values()] },
+  };
+}
+
+/** `PATCH /api/people/:id`. The guardian's bond level refuses to change. */
+export interface UpdatePersonRequest {
+  displayName?: string;
+  bondLevel?: AssignableBondLevel;
+}
+
+/**
+ * `POST /api/people/:id/accounts` — the link verb.
+ *
+ * Compare-and-swap on the account's current owner: linking an unlinked or
+ * dismissed account needs no `transferFrom`, re-linking to the same person is
+ * an idempotent no-op, and taking an account from another person requires
+ * `transferFrom` naming that person exactly. Anything else answers 409 with a
+ * {@link LinkConflict}. The explicitness is the point — a transfer
+ * re-attributes the account's whole message history, so it never happens as
+ * the side effect of an optimistic retry.
+ */
+export interface LinkAccountRequest {
+  channel: string;
+  channelUserId: string;
+  transferFrom?: string;
+}
+
+/** The 409 body for a refused link or dismissal: names the current owner so
+ *  the caller can render the conflict and offer an explicit transfer. Never
+ *  the stranger sentinel — a dismissal-held account never conflicts. */
+export interface LinkConflict {
+  error: string;
+  channel: string;
+  channelUserId: string;
+  linkedPersonId: string;
+  linkedPersonName: string;
+}
+
+/** Phrase a {@link LinkConflict}, wording included, so every route and the
+ *  mock refuse in the same words. */
+export function linkConflict(
+  account: { channel: string; channelUserId: string },
+  holder: { id: string; displayName: string },
+): LinkConflict {
+  return {
+    error: `${account.channel}:${account.channelUserId} is already linked to ${holder.displayName}`,
+    channel: account.channel,
+    channelUserId: account.channelUserId,
+    linkedPersonId: holder.id,
+    linkedPersonName: holder.displayName,
+  };
+}
+
+/** `POST /api/people/:id/merge` — :id absorbs `from`: every link transfers
+ *  atomically, then `from` is deleted. First-class rather than N transfers
+ *  and a delete, because history re-attribution must not half-happen. */
+export interface MergeRequest {
+  from: string;
 }

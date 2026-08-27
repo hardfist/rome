@@ -4,7 +4,7 @@ This is the concepts index — the single source of truth for entity definitions
 
 Browse by domain:
 
-- [`identity.md`](identity.md) — Guardian, Visitor, Persons, Bond levels. *Who Rome serves and who it interacts with.*
+- [`identity.md`](identity.md) — Guardian, Visitor, Persons, Accounts, Links, Bond levels. *Who Rome serves and who it interacts with.*
 - [`deployment.md`](deployment.md) — Profiles, Instances. *How a deployment names itself for data isolation and for telemetry.*
 - [`rome-cloud.md`](rome-cloud.md) — Rome Cloud, Instance sign-in, OAuth handoff. *The operator-run service in front of all instances.*
 - [`agents.md`](agents.md) — Agents (incl. the agent hierarchy). *The LLM-backed runtime entities.*

@@ -86,6 +86,14 @@ interface Managed {
   target: SetupTarget;
   grant: string;
   session: SetupSession;
+  /** A redirect state this setup owned, kept past the moment the session stops
+   *  advertising it — cancellation erases the URL, and an accepted leg moves the
+   *  session off `awaiting-redirect`. Either way the correlation is the only
+   *  route back to THIS setup, and without it a repeat delivery reads as a flow
+   *  that never started a setup: the caller then falls through to the sign-in
+   *  redeem, which shares the OAuth primitive and would race the redemption
+   *  already in flight. */
+  ownedRedirectState?: string;
 }
 
 /** The active-setup key: the addressed connection id, or the service name for a
@@ -142,7 +150,7 @@ export class SetupManager {
     const existing = this.#byKey.get(key);
     if (existing && !existing.session.isTerminal) {
       if (opts.force) {
-        await existing.session.cancel();
+        await this.#cancelManaged(existing);
         // Leave it reachable by cid for a final poll; it is no longer active.
       } else {
         return { cid: existing.cid, state: existing.session.state, reattached: true };
@@ -207,36 +215,77 @@ export class SetupManager {
    * opaque codes, so a match is unambiguous). Because it resolves ONLY a session
    * still parked at `awaiting-redirect`, the idempotency guarantees fall out for
    * free: once a return leg has resumed a coroutine it is no longer awaiting a
-   * redirect, so a double/late delivery — or a delivery after cancel — finds no
-   * match (`null`), and a delivery to a session that already advanced is rejected
-   * by the session's own pending-kind guard. Nothing corrupts the setup state.
+   * redirect, so a double/late delivery finds no live match, and a delivery to a
+   * session that already advanced is rejected by the session's own pending-kind
+   * guard.
    *
-   * Returns `{ cid, service, outcome }` for the matched setup, or `null` when no
-   * live setup is awaiting this `state` (unknown/expired/cancelled/already-
-   * consumed). `service` names the connection the leg belongs to, so the browser
-   * can return to that connection's own page rather than a fixed destination.
+   * A setup keeps its state after that, so the repeat still matches — with
+   * `accepted:false` and the setup's current state. Not keeping it would report
+   * "no setup owns this", and the callback page treats that as sign-in and
+   * redeems the handoff itself. That page now stays put in the system browser,
+   * so a plain reload is enough to hit it: mid-redemption the two paths race,
+   * and the guardian can be shown a failure while the credential lands.
+   *
+   * Returns `{ cid, service, outcome }` for the setup that owns the state (live,
+   * finished, or cancelled), or `null` when none does (unknown/expired, or a
+   * flow that never started a setup). `service` names the connection the leg
+   * belongs to, so the browser can return to that connection's own page rather
+   * than a fixed destination.
    */
   provideReturnByState(
     state: string,
     payload: Record<string, string>,
   ): { cid: string; service: string; outcome: Promise<SetupInputOutcome> } | null {
+    let owner: Managed | null = null;
     for (const managed of this.#byCid.values()) {
       const current = managed.session.state;
       if (current.status === "awaiting-redirect" && redirectStateOf(current.url) === state) {
+        // Claim the correlation before resuming: the session is about to leave
+        // `awaiting-redirect`, and from then on this retained value is the only
+        // thing that can still identify the leg as belonging here.
+        managed.ownedRedirectState = state;
         return {
           cid: managed.cid,
           service: managed.target.service,
           outcome: managed.session.provideReturn(payload),
         };
       }
+      if (managed.ownedRedirectState === state) owner = managed;
+    }
+    if (owner) {
+      const current = owner.session.state;
+      return {
+        cid: owner.cid,
+        service: owner.target.service,
+        outcome: Promise.resolve({
+          accepted: false,
+          reason:
+            current.status === "cancelled"
+              ? "Setup was cancelled."
+              : "This return leg was already delivered.",
+          state: current,
+        }),
+      };
     }
     return null;
   }
 
   /** Cancel a setup by id. Returns its terminal state, or null when unknown. */
   cancel(cid: string): Promise<SetupState> | null {
-    const session = this.#byCid.get(cid)?.session;
-    return session ? session.cancel() : null;
+    const managed = this.#byCid.get(cid);
+    return managed ? this.#cancelManaged(managed) : null;
+  }
+
+  /** Preserve ownership of a parked redirect before cancellation erases the URL
+   *  from the session's public state. Deliberately in-memory, matching the
+   *  lifetime of setup sessions themselves. */
+  #cancelManaged(managed: Managed): Promise<SetupState> {
+    const current = managed.session.state;
+    if (current.status === "awaiting-redirect") {
+      const state = redirectStateOf(current.url);
+      if (state) managed.ownedRedirectState = state;
+    }
+    return managed.session.cancel();
   }
 
   /** The terminal write: hand the conferral to `registry.confer`, which mints

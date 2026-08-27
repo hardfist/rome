@@ -601,7 +601,7 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
     expect(grant?.profile).toEqual({ login: "octocat" });
   });
 
-  it("rejects a duplicate return leg after the setup is done (AC2)", async () => {
+  it("keeps ownership of a delivered return leg so a reload cannot reach sign-in (AC2)", async () => {
     let redeemCount = 0;
     const { app, registry } = oauthHarness({
       redeem: async (handoff) => {
@@ -617,16 +617,22 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
     expect(first.status).toBe(200);
     await pollDone(app, json.cid);
 
-    // A late/duplicate return leg finds no suspended setup → not matched, no
-    // second confer.
+    // A duplicate leg — the callback page is now one that stays put in the
+    // system browser, so a plain reload sends the same state again. The setup
+    // still owns it, so this resolves HERE rather than reading as a flow that
+    // never started a setup and falling through to the sign-in redeem.
     const dup = await deliverReturn(app, { state: "st-oauth-1", handoff: "h1" });
-    expect(dup.status).toBe(404);
-    expect((await dup.json()) as { matched: boolean }).toMatchObject({ matched: false });
+    expect(dup.status).toBe(409);
+    expect(await dup.json()).toMatchObject({
+      matched: true,
+      accepted: false,
+      state: { status: "done" },
+    });
     expect(redeemCount).toBe(1);
     expect(registry.find("github")).toHaveLength(1);
   });
 
-  it("rejects a return leg delivered mid-redeem without corrupting state (AC2)", async () => {
+  it("keeps ownership mid-redeem so a reload cannot race the redemption (AC2)", async () => {
     let resolveRedeem!: (v: { credential: Credential; profile?: ProfileRecord }) => void;
     let redeemCount = 0;
     const { app, registry } = oauthHarness({
@@ -646,10 +652,18 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
       state: { status: "presenting" },
     });
 
-    // A second leg arriving while the coroutine is past awaiting-redirect finds
-    // no suspended setup — rejected, not double-redeemed.
+    // A second leg arriving while the coroutine is past awaiting-redirect —
+    // a reload of the callback page mid-redemption. Still owned, so it is
+    // reported as already-delivered rather than as an unmatched state: the
+    // caller must not fall through to the sign-in redeem and race the redeem
+    // that is in flight right here.
     const second = await deliverReturn(app, { state: "st-oauth-1", handoff: "h2" });
-    expect(second.status).toBe(404);
+    expect(second.status).toBe(409);
+    expect(await second.json()).toMatchObject({
+      matched: true,
+      accepted: false,
+      state: { status: "presenting" },
+    });
     expect(redeemCount).toBe(1);
 
     resolveRedeem({
@@ -660,8 +674,12 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
     expect(registry.find("github")).toHaveLength(1);
   });
 
-  it("rejects a return leg after cancel and leaves zero durable state", async () => {
-    const { app, registry } = oauthHarness();
+  it("keeps a cancelled redirect state owned and leaves zero durable state", async () => {
+    const redeem = vi.fn(async (handoff: string) => ({
+      credential: { material: { accessToken: `tok-${handoff}` }, expiresAt: "never" as const },
+      profile: { login: "octocat" },
+    }));
+    const { app, registry } = oauthHarness({ redeem });
     const { json } = await startOAuth(app);
     const cancel = await app.request(`/setups/${json.cid}/cancel`, {
       method: "POST",
@@ -671,7 +689,13 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
     expect(cancel.status).toBe(200);
 
     const ret = await deliverReturn(app, { state: "st-oauth-1", handoff: "h1" });
-    expect(ret.status).toBe(404);
+    expect(ret.status).toBe(409);
+    expect(await ret.json()).toMatchObject({
+      matched: true,
+      accepted: false,
+      state: { status: "cancelled" },
+    });
+    expect(redeem).not.toHaveBeenCalled();
     expect(registry.find("github")).toHaveLength(0);
   });
 
