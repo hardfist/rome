@@ -556,6 +556,9 @@ export async function buildTestDeps(
     settingsRepo,
     appKeysRepo,
     appKeyInjector,
+    // Production's refresh also salts the module cache and reloads hook
+    // chains; the deps bag has neither, so mirror the worker-pool slice.
+    refreshAppRuntime: () => actionEngine.restartWorkerWarmPool(),
     appRuntimeRepositories,
     policiesRepo,
     webchatRepo,

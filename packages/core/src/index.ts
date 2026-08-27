@@ -76,6 +76,7 @@ import {
 } from "./actions/global-actions.js";
 import { ActionLoader } from "./actions/loader.js";
 import { ActionEngine } from "./actions/engine.js";
+import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
 import { ActionWorkerCoordinator } from "./actions/action-subprocess.js";
 import { WorkerRpcServer } from "./actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
@@ -853,8 +854,9 @@ async function main() {
     }
   }
   // App hooks discovered from the catalog share one load+report+subscribe
-  // ritual: (re)load on startup and on every catalog change (install/uninstall),
-  // clear this kind's prior failures, surface new ones as runtime status, and
+  // ritual: (re)load on startup, on every catalog change (install/uninstall),
+  // and on an app-keys change (the reload picks up the new environment), clear
+  // this kind's prior failures, surface new ones as runtime status, and
   // persist status on change. Each kind differs only in its loader and the
   // failure-source key it stamps. An empty chain is a pure passthrough.
   const registerCatalogHookLoad = async <F extends { appId: string; error: string }>(opts: {
@@ -862,8 +864,8 @@ async function main() {
     warnMessage: string;
     load: () => Promise<F[]>;
     failureSource: (failure: F) => string;
-  }): Promise<void> => {
-    const run = async (source: "startup" | "catalog-change") => {
+  }): Promise<(source: "catalog-change" | "app-keys-change") => Promise<void>> => {
+    const run = async (source: "startup" | "catalog-change" | "app-keys-change") => {
       const failures = await opts.load();
       runtimeStatusFailures.clearSources((failureSource) =>
         failureSource.startsWith(`${opts.sourcePrefix}:`),
@@ -874,7 +876,7 @@ async function main() {
           markAppFailed(opts.failureSource(failure), failure.appId, failure.error);
         }
       }
-      if (source === "catalog-change") {
+      if (source !== "startup") {
         try {
           await writeAppRuntimeStatus(refreshRuntimeAppStatus());
         } catch (err) {
@@ -890,9 +892,10 @@ async function main() {
     };
     Object.defineProperty(subscriber, "name", { value: `${opts.sourcePrefix}HookSubscriber` });
     appCatalog.subscribe(subscriber);
+    return run;
   };
 
-  await registerCatalogHookLoad({
+  const reloadLifecycleHooks = await registerCatalogHookLoad({
     sourcePrefix: "lifecycle",
     warnMessage: "some agent lifecycle hooks failed to initialize",
     load: () => lifecycleDispatcher.loadFromCatalog(appCatalog),
@@ -900,7 +903,7 @@ async function main() {
   });
 
   // Turn-middleware artifacts load alongside the lifecycle hooks.
-  await registerCatalogHookLoad({
+  const reloadTurnMiddlewareHooks = await registerCatalogHookLoad({
     sourcePrefix: "turn-middleware",
     warnMessage: "some turn-middleware hooks failed to initialize",
     load: () => turnMiddlewareChain.loadFromCatalog(appCatalog),
@@ -1101,6 +1104,19 @@ async function main() {
   appCatalog.subscribe(async function actionWorkerWarmPoolInvalidator() {
     await actionEngine.restartWorkerWarmPool();
   });
+  // An app-keys change edits process.env after app code may have captured it:
+  // warm workers hold a fork-time env snapshot, and main-process app modules
+  // (API handlers via AppApiDispatcher, hook chains) can read env at module
+  // scope and stay cached — the import cache key is file identity, which an
+  // env change never touches. Salt the cache (so every later import
+  // re-evaluates), recycle the workers, and reload the hook chains, in that
+  // order — a reload before the bump would reinstall the stale modules.
+  const refreshAppRuntimeEnv = async (): Promise<void> => {
+    bumpModuleEnvEpoch();
+    await actionEngine.restartWorkerWarmPool();
+    await reloadLifecycleHooks("app-keys-change");
+    await reloadTurnMiddlewareHooks("app-keys-change");
+  };
   const publicAccessState = new PublicAccessState();
   try {
     await publicAccessState.load(db);
@@ -1189,6 +1205,7 @@ async function main() {
       settingsRepo,
       appKeysRepo,
       appKeyInjector,
+      refreshAppRuntime: refreshAppRuntimeEnv,
       appRuntimeRepositories,
       sentinelLogRepo,
       actionExecutionsRepo,

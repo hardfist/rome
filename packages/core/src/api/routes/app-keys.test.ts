@@ -128,6 +128,7 @@ describe("appKeysRoutes", () => {
       },
     );
     deps.actionEngine = engine;
+    deps.refreshAppRuntime = () => engine.restartWorkerWarmPool();
     // The engine snapshots the real process.env at fork time, so the injector
     // must write there for the test to observe propagation.
     deps.appKeyInjector = new AppKeyInjector();
@@ -155,20 +156,28 @@ describe("appKeysRoutes", () => {
     }
   });
 
-  it("does not recycle workers for a rejected or shadowed save", async () => {
-    const restart = vi.spyOn(deps.actionEngine, "restartWorkerWarmPool");
+  it("refreshes the app runtime only when the environment changed", async () => {
+    const refresh = vi.spyOn(deps, "refreshAppRuntime");
 
     const rejected = await put("lowercase", { value: "v" });
     expect(rejected.status).toBe(400);
-    expect(restart).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
 
-    // A shadowed save changes nothing in the environment, so no recycle.
+    const saved = await put("MY_KEY", { value: "v1" });
+    expect(saved.status).toBe(200);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    const removed = await app.request("/app-keys/MY_KEY", { method: "DELETE" });
+    expect(removed.status).toBe(200);
+    expect(refresh).toHaveBeenCalledTimes(2);
+
+    // A shadowed save changes nothing in the environment, so no refresh.
     const env: NodeJS.ProcessEnv = { TAKEN_KEY: "from-operator" };
     deps.appKeyInjector = new AppKeyInjector(env);
     app = new Hono().route("/", appKeysRoutes(deps));
     const shadowed = await put("TAKEN_KEY", { value: "from-dashboard" });
     expect(await shadowed.json()).toEqual({ ok: true, overridden: true });
-    expect(restart).not.toHaveBeenCalled();
+    expect(refresh).toHaveBeenCalledTimes(2);
   });
 
   it("deletes a key and 404s on an unknown one", async () => {

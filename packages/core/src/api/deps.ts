@@ -120,6 +120,10 @@ export interface ApiDeps {
   settingsRepo: SettingsRepository;
   appKeysRepo: AppKeysRepository;
   appKeyInjector: AppKeyInjector;
+  /** Makes an app-keys environment change reach already-running app code:
+   * salts the module-import cache, recycles warm action workers, and reloads
+   * the hook chains. See `refreshAppRuntimeEnv` in `src/index.ts`. */
+  refreshAppRuntime: () => Promise<void>;
   appRuntimeRepositories: AppRuntimeRepositories;
   sentinelLogRepo: SentinelLogRepository;
   actionExecutionsRepo: ActionExecutionsRepository;

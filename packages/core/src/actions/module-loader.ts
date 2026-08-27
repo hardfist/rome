@@ -58,9 +58,21 @@ export async function resolveModuleEntryPath(baseDir: string, entry?: string): P
   return result.path;
 }
 
+// App modules can read process.env at module scope, and the file-identity
+// buster below cannot see an environment change. Bumping this epoch salts the
+// cache key so every subsequent import re-evaluates module scope against the
+// current environment (app keys do this on save/delete). Each bump strands the
+// previously imported instances in the ESM cache — the same cost as an app
+// upgrade changing mtime — bounded by how often a guardian edits keys.
+let envEpoch = 0;
+
+export function bumpModuleEnvEpoch(): void {
+  envEpoch++;
+}
+
 export async function importModuleWithCacheBuster(path: string): Promise<Record<string, unknown>> {
   const fileStat = await stat(path);
-  const cacheBuster = `${Math.trunc(fileStat.mtimeMs)}-${fileStat.size}`;
+  const cacheBuster = `${Math.trunc(fileStat.mtimeMs)}-${fileStat.size}-e${envEpoch}`;
   const url = `${pathToFileURL(path).href}?v=${cacheBuster}`;
   return await import(url);
 }

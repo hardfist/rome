@@ -21,6 +21,7 @@ import {
   getCurrentActionContext,
 } from "@rome-os/app-runtime";
 import { registerAppActions, registerLazyAppActions } from "../actions/app-actions-wiring.js";
+import { bumpModuleEnvEpoch } from "../actions/module-loader.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { FavorActionRequestView, FavorService } from "../favors/types.js";
@@ -173,6 +174,51 @@ export function createApiHandler(ctx) {
       { surface: "action", appId: "shared-context-app", repositories },
       { surface: "api", appId: "shared-context-app", repositories },
     ]);
+  });
+
+  it("re-evaluates module-scope env reads after an app-keys refresh", async () => {
+    // An API module that captures env at module scope stays cached across
+    // dispatches — the import cache key is file identity, so an env change
+    // alone never reaches it. The app-keys refresh bumps the module env epoch;
+    // this pins both halves: stale without the bump, fresh after it.
+    const TEST_KEY = "APP_KEYS_MODULE_SCOPE_PROBE";
+    const apiEntryPath = join(await tempDir(), "index.js");
+    await writeFile(
+      apiEntryPath,
+      `
+const CAPTURED = process.env.${TEST_KEY} ?? "unset";
+export function createApiHandler() {
+  return { handle: async () => new Response(CAPTURED) };
+}
+`,
+      "utf-8",
+    );
+
+    const app = resolvedApp("env-probe-app", { apiEntryPath });
+    const dispatcher = new AppApiDispatcher(catalogFor(app), {
+      db: {} as RomeAppRuntimeServices["db"],
+      actionEngine: {} as ActionEngine,
+      repositories: createRepositories(),
+    });
+    const request = {
+      method: "GET",
+      path: ["probe"],
+      headers: {},
+      query: new URLSearchParams(),
+      caller: { kind: "anonymous" } as const,
+    };
+
+    try {
+      expect(await (await dispatcher.dispatch(app.appId, request)).text()).toBe("unset");
+
+      process.env[TEST_KEY] = "v1";
+      expect(await (await dispatcher.dispatch(app.appId, request)).text()).toBe("unset");
+
+      bumpModuleEnvEpoch();
+      expect(await (await dispatcher.dispatch(app.appId, request)).text()).toBe("v1");
+    } finally {
+      delete process.env[TEST_KEY];
+    }
   });
 
   it("can register app action stubs without importing the implementation until execution", async () => {
