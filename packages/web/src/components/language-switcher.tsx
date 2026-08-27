@@ -28,7 +28,7 @@ export function LanguageSwitcher({ className = "" }: { className?: string }) {
           }
         }}
       >
-        <SelectTrigger size="sm" aria-label={t("language.label")} className="text-aux">
+        <SelectTrigger size="sm" aria-label={t("language.label")}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
