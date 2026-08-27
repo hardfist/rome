@@ -1,6 +1,6 @@
 import { forwardRef, useMemo, useRef, type Ref } from "react";
 import type { TFunction } from "i18next";
-import { Check, ChevronDown, Folder, FolderPlus, X } from "lucide-react";
+import { Check, ChevronDown, FolderPlus, X } from "lucide-react";
 import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import {
   Command,

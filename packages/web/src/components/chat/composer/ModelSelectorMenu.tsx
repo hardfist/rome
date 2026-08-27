@@ -45,7 +45,7 @@ export function ModelSelectorMenu({
           title={t("modelSelector.label")}
           className="touch-target"
         >
-          <span className="truncate">{t(selected.labelKey)}</span>
+          <span>{t(selected.labelKey)}</span>
           <ChevronDown data-icon="inline-end" aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
