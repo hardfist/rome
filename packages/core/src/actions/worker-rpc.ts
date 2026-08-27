@@ -25,6 +25,7 @@ import type { AppStoreReader } from "../apps/store-service.js";
 import type { SystemUpgradeChecker } from "../system-upgrade/service.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
+import { AppRemixSourceSchema } from "@rome/api-types/apps";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("worker-rpc");
@@ -84,7 +85,7 @@ const AppsCreateParams = z.union([
     .object({
       appId: AppIdSchema,
       name: z.string().min(1),
-      from: z.object({ appId: AppIdSchema }).strict(),
+      from: AppRemixSourceSchema,
     })
     .strict(),
 ]);
@@ -341,8 +342,8 @@ export class WorkerRpcServer {
   }
 
   private async handleAppsInstall(params: unknown): Promise<unknown> {
-    const { source, enabled } = parseParams("apps.install", AppsInstallParams, params);
-    return await this.services.appLifecycle.install({ source, enabled });
+    const installParams = parseParams("apps.install", AppsInstallParams, params);
+    return await this.services.appLifecycle.install(installParams);
   }
 
   private async handleAppsUninstall(params: unknown): Promise<unknown> {

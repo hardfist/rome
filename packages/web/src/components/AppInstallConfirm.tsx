@@ -28,6 +28,7 @@ export interface VersionRow {
   sizeBytes: number;
   state: "live" | "revoked";
   publishedAt: string;
+  sourceAvailable?: boolean;
 }
 
 export interface ListingDetailPayload {

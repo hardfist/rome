@@ -12,6 +12,7 @@
     "./app-manager-errors": "./src/app-manager-errors.ts",
     "./approvals": "./src/approvals.ts",
     "./apps": "./src/apps.ts",
+    "./app-listing-id": "./src/app-listing-id.ts",
     "./projects": "./src/projects.ts",
     "./sessions": "./src/sessions.ts",
     "./anthropic-compatible-providers": "./src/anthropic-compatible-providers.ts",

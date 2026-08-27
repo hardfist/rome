@@ -1,5 +1,10 @@
 import { existsSync } from "node:fs";
 import {
+  AppRemixSourceSchema,
+  type AppRemixSource,
+  type AppRemixStorePin,
+} from "@rome/api-types/apps";
+import {
   cp,
   lstat,
   mkdir,
@@ -11,7 +16,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { extract as tarExtract, list as tarList } from "tar";
@@ -34,6 +39,8 @@ import {
   resolvePathWithinBase,
 } from "./packaging/index.js";
 import { normalizeListingId } from "./rome-cloud-urls.js";
+import { isBlockedSourceFile, isExcludedSourceEntry } from "./packaging/pack.js";
+import type { AppEntry } from "./lockfile.js";
 import { fetchVerifiedStoreBundle, type BundleFetcher } from "./store-bundle.js";
 
 const MAX_ARCHIVE_ENTRIES = 20_000;
@@ -49,7 +56,7 @@ const SAFE_TAR_ENTRY_TYPES = new Set([
 export interface RemixAppParams {
   appId: string;
   name: string;
-  from: { appId: string };
+  from: AppRemixSource;
 }
 
 export interface RemixAppResult {
@@ -59,7 +66,7 @@ export interface RemixAppResult {
 }
 
 export interface RemixAppDeps {
-  appManager: AppManager;
+  appManager: Pick<AppManager, "readLockfileEntry">;
   appCatalog: AppCatalog;
   bundleFetcher: BundleFetcher;
   installedRoot?: string;
@@ -71,10 +78,11 @@ function isPathInside(base: string, candidate: string): boolean {
   return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
 }
 
-async function readInstalledManifest(
+async function readInstalledSource(
   appId: string,
   installedRoot: string,
-): Promise<ReturnType<typeof parseAppManifest>> {
+  installedHash: string | null,
+): Promise<{ rootPath: string; manifest: AppManifestData }> {
   const resolvedInstalledRoot = await realpath(installedRoot);
   const appRoot = await realpath(join(resolvedInstalledRoot, appIdToPathSegment(appId)));
   if (!isPathInside(resolvedInstalledRoot, appRoot)) {
@@ -84,12 +92,15 @@ async function readInstalledManifest(
   if (!isPathInside(appRoot, activeRoot)) {
     throw new Error(`Installed app "${appId}" has an active bundle outside its install root.`);
   }
+  if (installedHash !== null && basename(activeRoot) !== installedHash) {
+    throw new Error("Installed source changed before copying. Retry the remix.");
+  }
   const manifestPath = join(activeRoot, "app.yaml");
   const manifest = parseAppManifest(await parseManifestObject(manifestPath), manifestPath);
   if (manifest.id !== appId) {
     throw new Error(`Installed manifest id "${manifest.id}" does not match source app "${appId}".`);
   }
-  return manifest;
+  return { rootPath: activeRoot, manifest };
 }
 
 function validateArchivePath(entryPath: string): string[] {
@@ -164,7 +175,11 @@ async function extractBundle(bytes: Buffer, destination: string): Promise<void> 
   await assertSafeExtractedTree(destination);
 }
 
-async function copyRoot(sourceRoot: string, destinationRoot: string): Promise<void> {
+async function copyRoot(
+  sourceRoot: string,
+  destinationRoot: string,
+  installed = false,
+): Promise<void> {
   const entries = await readdir(sourceRoot);
   for (const entry of entries) {
     await cp(join(sourceRoot, entry), join(destinationRoot, entry), {
@@ -172,6 +187,17 @@ async function copyRoot(sourceRoot: string, destinationRoot: string): Promise<vo
       dereference: false,
       errorOnExist: true,
       force: false,
+      filter: installed
+        ? async (path) => {
+            const name = basename(path);
+            if (isExcludedSourceEntry(name) || isBlockedSourceFile(name)) return false;
+            const stats = await lstat(path);
+            if (stats.isSymbolicLink() || (!stats.isDirectory() && !stats.isFile())) {
+              throw new Error(`Remix source contains an unsupported filesystem entry: ${path}`);
+            }
+            return true;
+          }
+        : undefined,
     });
   }
 }
@@ -503,13 +529,26 @@ async function rewriteRemixManifest(
   await rm(join(rootPath, PACKED_ARTIFACT_SENTINEL), { force: true });
 }
 
-export async function remixInstalledApp(
+function matchesStorePin(entry: AppEntry | null, pin: AppRemixStorePin): boolean {
+  return (
+    entry?.state === "installed" &&
+    entry.source.mode === "appstore" &&
+    normalizeListingId(entry.source.listingId)?.id === pin.listingId &&
+    entry.installedVersion === pin.version &&
+    entry.installedHash?.toLowerCase() === pin.contentHash &&
+    (entry.source.contentHash ?? entry.installedHash)?.toLowerCase() === pin.contentHash
+  );
+}
+
+export async function remixApp(
   params: RemixAppParams,
   deps: RemixAppDeps,
 ): Promise<RemixAppResult> {
   assertValidAppId(params.appId);
-  assertValidAppId(params.from.appId);
-  if (params.appId === params.from.appId) {
+  const from = AppRemixSourceSchema.parse(params.from);
+  const sourceAppId = "appId" in from ? from.appId : from.listingId;
+  assertValidAppId(sourceAppId);
+  if (params.appId === sourceAppId) {
     throw new Error("A remix must use a new app id.");
   }
   const name = params.name.trim();
@@ -526,37 +565,6 @@ export async function remixInstalledApp(
     throw new Error(`App "${params.appId}" is already installed.`);
   }
 
-  const entry = await deps.appManager.readLockfileEntry(params.from.appId);
-  if (entry == null || entry.state !== "installed") {
-    throw new Error(`Source app "${params.from.appId}" is not installed.`);
-  }
-  if (entry.source.mode !== "appstore") {
-    throw new Error(`Source app "${params.from.appId}" was not installed from the App Store.`);
-  }
-
-  const installedManifest = await readInstalledManifest(
-    params.from.appId,
-    deps.installedRoot ?? getProfileInstalledAppsDir(),
-  );
-  if (installedManifest.includeSource !== true) {
-    throw new Error(`Source app "${params.from.appId}" does not enable includeSource in app.yaml.`);
-  }
-
-  const listing = normalizeListingId(entry.source.listingId)?.id;
-  if (!listing) throw new Error(`Source app has an invalid listing id: ${entry.source.listingId}`);
-  const version = entry.installedVersion ?? entry.source.version;
-  const expectedHash = entry.source.contentHash ?? entry.installedHash;
-  if (!version || !expectedHash) {
-    throw new Error(`Source app "${params.from.appId}" has no pinned version or content hash.`);
-  }
-  const source = { ...entry.source, listingId: listing, version, contentHash: expectedHash };
-  const bytes = await fetchVerifiedStoreBundle(
-    params.from.appId,
-    source,
-    expectedHash,
-    deps.bundleFetcher,
-  );
-
   const authoringRoot = deps.authoringRoot ?? getCustomAppAuthoringRoot();
   const destinationRoot = getCustomAppAuthoringPath(params.appId, authoringRoot);
   if (existsSync(destinationRoot)) {
@@ -564,28 +572,68 @@ export async function remixInstalledApp(
   }
 
   await mkdir(authoringRoot, { recursive: true });
-  const extractedRoot = await mkdtemp(join(tmpdir(), "rome-remix-extract-"));
   const stagingRoot = await mkdtemp(join(authoringRoot, `.remix-${params.appId}-`));
+  let extractedRoot: string | undefined;
   let committed = false;
   let destinationCreated = false;
   try {
-    await extractBundle(bytes, extractedRoot);
-    const downloadedManifestPath = join(extractedRoot, "app.yaml");
-    const downloadedManifest = parseAppManifest(
-      await parseManifestObject(downloadedManifestPath),
-      downloadedManifestPath,
-    );
-    if (
-      downloadedManifest.id !== params.from.appId ||
-      downloadedManifest.version !== version ||
-      downloadedManifest.includeSource !== true
-    ) {
-      throw new Error(
-        `Downloaded bundle identity does not match installed app ${params.from.appId}@${version}.`,
+    const entry = await deps.appManager.readLockfileEntry(sourceAppId);
+    const useInstalled = "appId" in from || matchesStorePin(entry, from);
+    let listing: string;
+    let version: string;
+    if (useInstalled) {
+      if (entry?.state !== "installed") {
+        throw new Error(`Source app "${sourceAppId}" is not installed.`);
+      }
+      if (entry.source.mode !== "appstore") {
+        throw new Error(`Source app "${sourceAppId}" was not installed from the App Store.`);
+      }
+      listing = normalizeListingId(entry.source.listingId)?.id ?? "";
+      version = entry.installedVersion ?? entry.source.version;
+      if (!listing || !version) throw new Error("Source app has no valid listing or version.");
+      if ("appId" in from && from.expectedSource && !matchesStorePin(entry, from.expectedSource)) {
+        throw new Error(
+          "Remix source changed since confirmation. Confirm the intended Store version again.",
+        );
+      }
+      const installed = await readInstalledSource(
+        sourceAppId,
+        deps.installedRoot ?? getProfileInstalledAppsDir(),
+        entry.installedHash,
       );
+      if (installed.manifest.includeSource !== true) {
+        throw new Error(`Source app "${sourceAppId}" does not enable includeSource in app.yaml.`);
+      }
+      if (installed.manifest.version !== version) {
+        throw new Error("Installed source version changed before copying. Retry the remix.");
+      }
+      // Resolve active once; a concurrent upgrade must not mix files from two bundles.
+      await copyRoot(installed.rootPath, stagingRoot, true);
+    } else {
+      if ("appId" in from) throw new Error("Expected a pinned Store source.");
+      listing = from.listingId;
+      version = from.version;
+      const bytes = await fetchVerifiedStoreBundle(
+        sourceAppId,
+        { mode: "appstore", ...from },
+        from.contentHash,
+        deps.bundleFetcher,
+      );
+      extractedRoot = await mkdtemp(join(tmpdir(), "rome-remix-extract-"));
+      await extractBundle(bytes, extractedRoot);
+      const manifestPath = join(extractedRoot, "app.yaml");
+      const manifest = parseAppManifest(await parseManifestObject(manifestPath), manifestPath);
+      if (
+        manifest.id !== sourceAppId ||
+        manifest.version !== version ||
+        manifest.includeSource !== true
+      ) {
+        throw new Error(
+          `Downloaded bundle identity does not match remix source ${sourceAppId}@${version}, or includeSource is not enabled.`,
+        );
+      }
+      await copyRoot(extractedRoot, stagingRoot);
     }
-
-    await copyRoot(extractedRoot, stagingRoot);
     await rewriteRemixManifest(stagingRoot, {
       appId: params.appId,
       name,
@@ -601,7 +649,7 @@ export async function remixInstalledApp(
     committed = true;
     return { appId: params.appId, created: true, rootPath: destinationRoot };
   } finally {
-    await rm(extractedRoot, { recursive: true, force: true }).catch(() => {});
+    if (extractedRoot) await rm(extractedRoot, { recursive: true, force: true }).catch(() => {});
     await rm(stagingRoot, { recursive: true, force: true }).catch(() => {});
     if (!committed && destinationCreated) {
       await rm(destinationRoot, { recursive: true, force: true }).catch(() => {});

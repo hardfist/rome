@@ -415,7 +415,7 @@ async function copyPublishedSource(
 async function validatePublishedSourceTree(sourceRoot: string, currentDir: string): Promise<void> {
   const entries = await readdir(currentDir, { withFileTypes: true });
   for (const entry of entries) {
-    if (SOURCE_EXCLUDED_SEGMENTS.has(entry.name) || entry.name === ".DS_Store") continue;
+    if (isExcludedSourceEntry(entry.name)) continue;
 
     const absolutePath = join(currentDir, entry.name);
     const relativePath = relative(sourceRoot, absolutePath);
@@ -452,7 +452,11 @@ function makeSourceFilter(sourceRoot: string): (sourcePath: string) => boolean {
   };
 }
 
-function isBlockedSourceFile(fileName: string): boolean {
+export function isExcludedSourceEntry(name: string): boolean {
+  return SOURCE_EXCLUDED_SEGMENTS.has(name) || name === ".DS_Store";
+}
+
+export function isBlockedSourceFile(fileName: string): boolean {
   const normalizedFileName = fileName.toLowerCase();
   if (normalizedFileName === ".env") return true;
   if (

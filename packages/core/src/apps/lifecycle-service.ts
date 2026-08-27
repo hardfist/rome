@@ -6,7 +6,7 @@ import { SpecSourceSchema } from "./lockfile.js";
 import { scaffoldDevApp } from "./scaffold.js";
 import { purgeAppUserData, resolveTablePrefixForPurge } from "./user-data-purge.js";
 import { createBundleFetcher } from "./bundle-fetcher.js";
-import { remixInstalledApp } from "./remix.js";
+import { remixApp } from "./remix.js";
 import type { BundleFetcher } from "./store-bundle.js";
 
 export interface AppLifecycleServiceOptions {
@@ -34,7 +34,7 @@ export class AppLifecycleService implements AppLifecycle {
 
   async create(params: AppLifecycleCreateParams) {
     if (params.from) {
-      return await remixInstalledApp(params, {
+      return await remixApp(params, {
         appManager: this.manager,
         appCatalog: this.catalog,
         bundleFetcher: this.options.bundleFetcher ?? createBundleFetcher(),

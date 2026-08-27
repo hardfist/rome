@@ -26,7 +26,7 @@ export async function fetchVerifiedStoreBundle(
     throw new Error(
       `App-store bundle hash mismatch for "${appId}": ` +
         `expected ${expectedHash.toLowerCase()}, computed ${computed}. ` +
-        `Refusing to use bundle bytes that do not match the installed contentHash.`,
+        `Refusing to use bundle bytes that do not match the expected contentHash.`,
     );
   }
   return bytes;

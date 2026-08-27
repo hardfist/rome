@@ -5,9 +5,11 @@ import { AppCatalog } from "./catalog.js";
 import { AppInstaller } from "./installer.js";
 import { AppManager } from "./manager.js";
 import type { CatalogEvent, SubscriberHandler, Unsubscribe } from "./state.js";
+import type { BundleFetcher } from "./store-bundle.js";
 
 export interface CreateTestAppsOpts {
   profileRoot?: string;
+  bundleFetcher?: BundleFetcher;
 }
 
 export interface SubscriberRecorder {
@@ -36,7 +38,7 @@ export async function createTestApps(opts: CreateTestAppsOpts = {}): Promise<Tes
   const installedRoot = join(profileRoot, "apps", "installed");
   const lockfilePath = join(profileRoot, "apps.lock.json");
 
-  const installer = new AppInstaller({ installedRoot });
+  const installer = new AppInstaller({ installedRoot, bundleFetcher: opts.bundleFetcher });
   const appManager = new AppManager({ lockfilePath, installer });
   const catalog = new AppCatalog({
     installer,

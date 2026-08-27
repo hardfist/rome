@@ -167,14 +167,14 @@ Listings give an app its durable name. Versions give a specific bundle its addre
 
 ## Remix
 
-A remix is a new local app created from the complete published bundle of an installed App Store app.
+A remix is a new project directory populated with code from an App Store app, whether installed or not.
 
 **Contracts:**
 
-- The Apps page derives remixability only from the installed bundle's local `app.yaml#includeSource` field. Store API metadata does not grant remixability.
+- The Apps page derives remixability from the installed `app.yaml#includeSource` field. The Store entry checks `sourceAvailable`; Core still requires `includeSource` in the downloaded bundle.
 - A remix always receives a new app id and a new authoring directory. It never updates or overwrites the installed source app.
 - A scoped remix name maps to a path-safe local app id. For example, `@ray/calendar` maps to `ray-calendar`.
-- Core fetches the installed listing's pinned version and content hash, verifies the bundle, and copies the complete tar root. It does not assume a `src/` layout.
+- Core copies installed code locally. For a Store pin not installed locally, it downloads, verifies, and extracts the bundle without installing the source. Both paths copy the complete code root without assuming a `src/` layout. Creation does not install the new app either.
 - The derived `app.yaml#remix` block records the source listing and version. The lockfile and Rome Cloud do not store a second lineage record.
 - Declared action, agent, and skill names are qualified with the derived app id before installation.
   Structured references follow the same mapping.

@@ -5,6 +5,7 @@ import { SlotProvider } from "./components/slot";
 import { AuthGate } from "./shell/AuthGate";
 import { RomeShellLayout } from "./shell/RomeShellLayout";
 import { useHostNavigation } from "./hooks/use-host-navigation";
+import { useAppRemixResume } from "./hooks/use-app-remix-resume";
 import FreePage from "./pages/free/FreePage";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
 
@@ -28,6 +29,7 @@ const AppsIndexPage = lazy(() => import("./pages/AppsIndexPage"));
 const AppDetailPage = lazy(() => import("./pages/AppDetailPage"));
 const InboxPage = lazy(() => import("./pages/InboxPage"));
 const AppInstallConfirmPage = lazy(() => import("./pages/AppInstallConfirmPage"));
+const AppRemixConfirmPage = lazy(() => import("./pages/AppRemixConfirmPage"));
 const AppEmbeddedPage = lazy(() => import("./pages/AppEmbeddedPage"));
 const AppFullPage = lazy(() => import("./pages/AppFullPage"));
 const DesktopPage = lazy(() => import("./pages/DesktopPage"));
@@ -48,6 +50,9 @@ export default function App() {
   // One root-level bridge turns SDK `navigateRome`/`startChat` events into
   // react-router navigations for every surface (shell, full-mode apps, auth).
   useHostNavigation();
+  const resumeRemix = useAppRemixResume();
+  // Resume before mounting AuthGate so its login-to-home redirect cannot race us.
+  if (resumeRemix) return <Navigate to={resumeRemix} replace />;
 
   return (
     <SlotProvider>
@@ -137,6 +142,7 @@ export default function App() {
             <Route path="/apps" element={<AppsIndexPage />} />
             <Route path="/install-app/:handle" element={<AppInstallConfirmPage />} />
             <Route path="/install-app/:handle/:slug" element={<AppInstallConfirmPage />} />
+            <Route path="/remix-app" element={<AppRemixConfirmPage />} />
             {/* Static routes win over the dynamic /apps/:appId embed route in
                 react-router's ranking, so inbox links open this host page
                 instead of the (non-existent) embedded app frontend. Deep links

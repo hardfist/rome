@@ -62,7 +62,7 @@ function makeServer(
     routinesRepo?: unknown;
     eventBus?: EventBus;
     eventCatalog?: EventCatalog;
-    appManager?: { setEnabled: ReturnType<typeof vi.fn> };
+    appManager?: { setEnabled: ReturnType<typeof vi.fn>; install?: ReturnType<typeof vi.fn> };
     appStore?: {
       listListings: ReturnType<typeof vi.fn>;
       getListing: ReturnType<typeof vi.fn>;
@@ -114,6 +114,58 @@ function makeServer(
 }
 
 describe("WorkerRpcServer param validation", () => {
+  it("forwards a pinned Store source to create without an install call", async () => {
+    const install = vi.fn();
+    const { server, services } = makeServer({ appManager: { setEnabled: vi.fn(), install } });
+    const create = vi.spyOn(services.appLifecycle, "create").mockResolvedValue({} as never);
+    const fake = makeFakeWorker();
+    server.attach(fake.worker);
+    const params = {
+      appId: "ray-calendar",
+      name: "@ray/calendar",
+      from: { listingId: "@alice/calendar", version: "1.0.0", contentHash: "a".repeat(64) },
+    };
+    expect((await rpc(fake, "apps.create", params)).error).toBeUndefined();
+    expect(create).toHaveBeenCalledWith(params);
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { appId: "calendar", listingId: "calendar", version: "1.0.0", contentHash: "a".repeat(64) },
+    { listingId: "calendar", version: "1.0.0" },
+    { listingId: "calendar", version: "latest", contentHash: "a".repeat(64) },
+  ])("rejects a mixed or unpinned Remix source %#", async (from) => {
+    const { server, services } = makeServer();
+    const create = vi.spyOn(services.appLifecycle, "create");
+    const fake = makeFakeWorker();
+    server.attach(fake.worker);
+    expect(
+      (await rpc(fake, "apps.create", { appId: "ray-calendar", name: "@ray/calendar", from }))
+        .error,
+    ).toMatch(/invalid params/);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("preserves a canonical Remix source and expected pin across RPC", async () => {
+    const { server, services } = makeServer();
+    const create = vi.spyOn(services.appLifecycle, "create").mockResolvedValue({} as never);
+    const fake = makeFakeWorker();
+    server.attach(fake.worker);
+    const params = {
+      appId: "ray-calendar",
+      name: "@ray/calendar",
+      from: {
+        appId: "@alice/calendar",
+        expectedSource: {
+          listingId: "@alice/calendar",
+          version: "1.0.0",
+          contentHash: "a".repeat(64),
+        },
+      },
+    };
+    expect((await rpc(fake, "apps.create", params)).error).toBeUndefined();
+    expect(create).toHaveBeenCalledWith(params);
+  });
   it("rejects a mixed template/remix create shape at the RPC boundary", async () => {
     const { server } = makeServer({});
     const fake = makeFakeWorker();

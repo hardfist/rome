@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseListingId } from "./app-listing-id.js";
 
 // Shared app lifecycle wire contracts. App lifecycle: docs/architecture/app-lifecycle.md.
 
@@ -41,6 +42,32 @@ export type SourceDirSource = z.infer<typeof SourceDirSourceSchema>;
 export type BundleSource = z.infer<typeof BundleSourceSchema>;
 export type AppstoreSource = z.infer<typeof AppstoreSourceSchema>;
 export type SpecSource = z.infer<typeof SpecSourceSchema>;
+
+/** A Store intent identifies an exact version, never a moving latest release. */
+export const AppRemixStoreIntentSchema = z
+  .object({
+    listingId: z.string().refine((id) => parseListingId(id) !== null, "Invalid listing id"),
+    version: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/),
+  })
+  .strict();
+
+export const AppRemixStorePinSchema = AppRemixStoreIntentSchema.extend({
+  contentHash: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/i)
+    .transform((hash) => hash.toLowerCase()),
+});
+
+export const AppRemixSourceSchema = z.union([
+  z
+    .object({ appId: z.string().min(1), expectedSource: AppRemixStorePinSchema.optional() })
+    .strict(),
+  AppRemixStorePinSchema,
+]);
+
+export type AppRemixStoreIntent = z.infer<typeof AppRemixStoreIntentSchema>;
+export type AppRemixStorePin = z.infer<typeof AppRemixStorePinSchema>;
+export type AppRemixSource = z.infer<typeof AppRemixSourceSchema>;
 
 export const PERSISTED_APP_STATES = ["installed", "failed", "broken"] as const;
 export type PersistedAppState = (typeof PERSISTED_APP_STATES)[number];

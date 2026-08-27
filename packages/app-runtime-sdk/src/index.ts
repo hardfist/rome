@@ -2270,7 +2270,14 @@ export type AppLifecycleCreateParams =
   | {
       appId: string;
       name: string;
-      from: { appId: string };
+      /** Copies local installed code or downloads a pinned Store bundle; never installs the source. */
+      from:
+        | {
+            appId: string;
+            /** Reject a source changed since the user confirmed this Store version. */
+            expectedSource?: { listingId: string; version: string; contentHash: string };
+          }
+        | { listingId: string; version: string; contentHash: string };
       rootPath?: never;
       template?: never;
     };

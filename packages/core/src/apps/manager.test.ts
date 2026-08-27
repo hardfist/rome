@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppManagerError } from "./manager.js";
-import { PACKED_ARTIFACT_SENTINEL, packArtifact } from "./packaging/index.js";
+import { PACKED_ARTIFACT_SENTINEL, packArtifact, packBundle } from "./packaging/index.js";
+import { remixApp } from "./remix.js";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";
 import { AppLockfileSchema, APPS_LOCKFILE_SCHEMA_VERSION, type SpecSource } from "./lockfile.js";
 
@@ -47,15 +49,87 @@ describe("AppManager", () => {
   let harness: TestAppsHarness;
   let workspaceRoot: string;
   let packedRoot: string;
+  const bundleFetcher = vi.fn<import("./store-bundle.js").BundleFetcher>();
 
   beforeEach(async () => {
-    harness = await createTestApps();
+    bundleFetcher.mockReset();
+    harness = await createTestApps({ bundleFetcher });
     workspaceRoot = await makeWorkspace(join(harness.profileRoot, "fixture-app"));
     packedRoot = await packWorkspace(workspaceRoot);
   });
 
   afterEach(async () => {
     await harness.cleanup();
+  });
+
+  async function storeSource(version = "0.0.1") {
+    const listingId = "@alice/calendar";
+    const root = await makeWorkspace(
+      join(harness.profileRoot, `store-${version}`),
+      SAMPLE_MANIFEST.replace("id: testapp", `id: "${listingId}"`).replace(
+        "version: 0.0.1",
+        `version: ${version}`,
+      ) + "includeSource: true\n",
+    );
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "src", "main.txt"), "Published source\n");
+    const bytes = await packBundle(await packWorkspace(root));
+    bundleFetcher.mockResolvedValue(bytes);
+    return {
+      mode: "appstore" as const,
+      listingId,
+      version,
+      contentHash: createHash("sha256").update(bytes).digest("hex"),
+    };
+  }
+
+  it.each([
+    "absent",
+    "matching",
+    "different",
+  ] as const)("remixes a Store source with a %s installation without changing installed apps", async (state) => {
+    const source = await storeSource();
+    if (state !== "absent") await harness.appManager.install({ source, enabled: false });
+    const requested = state === "different" ? await storeSource("2.0.0") : source;
+    const before = existsSync(harness.lockfilePath)
+      ? await readFile(harness.lockfilePath, "utf8")
+      : null;
+    const install = vi.spyOn(harness.appManager, "install");
+    const uninstall = vi.spyOn(harness.appManager, "uninstall");
+    bundleFetcher.mockClear();
+    const result = await remixApp(
+      {
+        appId: "ray-calendar",
+        name: "@ray/calendar",
+        from: {
+          listingId: requested.listingId,
+          version: requested.version,
+          contentHash: requested.contentHash,
+        },
+      },
+      {
+        appManager: harness.appManager,
+        appCatalog: harness.catalog,
+        bundleFetcher,
+        installedRoot: harness.installedRoot,
+        authoringRoot: join(harness.profileRoot, "authoring"),
+      },
+    );
+    expect(await readFile(join(result.rootPath, "src", "main.txt"), "utf8")).toBe(
+      "Published source\n",
+    );
+    expect(await readFile(join(result.rootPath, "app.yaml"), "utf8")).toContain(
+      `version: ${requested.version}`,
+    );
+    expect(
+      existsSync(harness.lockfilePath) ? await readFile(harness.lockfilePath, "utf8") : null,
+    ).toBe(before);
+    expect(install).not.toHaveBeenCalled();
+    expect(uninstall).not.toHaveBeenCalled();
+    expect(harness.catalog.get("ray-calendar")).toBeNull();
+    expect(bundleFetcher).toHaveBeenCalledTimes(state === "matching" ? 0 : 1);
+    if (state === "absent")
+      expect(await harness.appManager.readLockfileEntry(source.listingId)).toBeNull();
   });
 
   it("install + re-install of the same source is a cache hit on the same hash", async () => {

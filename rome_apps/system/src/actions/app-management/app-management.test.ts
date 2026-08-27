@@ -74,6 +74,43 @@ function makeAppManager(installResult: unknown = null): AppLifecycle {
 }
 
 describe("appManagement", () => {
+  it("forwards a Store pin directly to create without installing or changing the source", async () => {
+    const appManager = makeAppManager();
+    const from = { listingId: "calendar", version: "1.0.0", contentHash: HASH_1 };
+    await appManagement(
+      { op: "create", appId: "ray-calendar", name: "@ray/calendar", from },
+      { appManager, appStore: makeStore() },
+    );
+    expect(appManager.create).toHaveBeenCalledWith({
+      appId: "ray-calendar",
+      name: "@ray/calendar",
+      from,
+    });
+    expect(appManager.install).not.toHaveBeenCalled();
+    expect(appManager.uninstall).not.toHaveBeenCalled();
+    expect(appManager.setEnabled).not.toHaveBeenCalled();
+  });
+
+  it("forwards the expected source pin and canonical source id to copy", async () => {
+    const appManager = makeAppManager();
+    const from = {
+      appId: "@alice/calendar",
+      expectedSource: {
+        listingId: "@alice/calendar",
+        version: "1.0.0",
+        contentHash: HASH_1,
+      },
+    };
+    await appManagement(
+      { op: "create", appId: "ray-calendar", name: "@ray/calendar", from },
+      { appManager, appStore: makeStore() },
+    );
+    expect(appManager.create).toHaveBeenCalledWith({
+      appId: "ray-calendar",
+      name: "@ray/calendar",
+      from,
+    });
+  });
   it("forwards a remix create as the distinct create-from shape", async () => {
     const appManager = makeAppManager();
     vi.mocked(appManager.create).mockResolvedValue({

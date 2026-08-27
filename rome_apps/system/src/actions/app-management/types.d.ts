@@ -108,8 +108,7 @@ export interface AppManagementRemixCreateInput {
   appId: string;
   /** User-facing scoped remix name, for example `@ray/calendar`. */
   name: string;
-  /** Installed App Store app whose pinned bundle becomes the new source tree. */
-  from: { appId: string };
+  from: Extract<import("@rome-os/app-runtime").AppLifecycleCreateParams, { name: string }>["from"];
 }
 
 export type AppManagementCreateInput =
