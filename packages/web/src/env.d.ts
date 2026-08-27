@@ -14,15 +14,3 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
-
-// MDX design docs, compiled by @mdx-js/loader (see rsbuild.config.ts). The
-// default export is a React component; `components` overrides which element
-// each Markdown construct renders as.
-declare module "*.mdx" {
-  import type { ComponentType, ReactNode } from "react";
-  const MDXComponent: ComponentType<{
-    components?: Record<string, ComponentType<Record<string, unknown>>>;
-    children?: ReactNode;
-  }>;
-  export default MDXComponent;
-}

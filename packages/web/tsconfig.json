@@ -14,7 +14,7 @@
     "jsx": "react-jsx",
     "incremental": true,
     "useDefineForClassFields": true,
-    "types": ["@rsbuild/core/types"],
+    "types": ["@rsbuild/core/types", "mdx"],
     "paths": {
       "@/*": ["./src/*"]
     }

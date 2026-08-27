@@ -1,4 +1,5 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+import type { MDXProps } from "mdx/types";
 
 // The MDX design docs, and the only place a new one is registered.
 //
@@ -16,7 +17,7 @@ export type MdxDoc = {
   title: string;
   /** One line shown in the doc list. */
   summary: string;
-  Doc: LazyExoticComponent<ComponentType<{ components?: Record<string, unknown> }>>;
+  Doc: LazyExoticComponent<ComponentType<MDXProps>>;
 };
 
 export const MDX_DOCS: MdxDoc[] = [
@@ -25,6 +26,6 @@ export const MDX_DOCS: MdxDoc[] = [
     title: "People page",
     summary:
       "The stream / directory / person-page rebuild: row shapes, the bond ladder, and channels as glyphs.",
-    Doc: lazy(() => import("./docs/people-page.mdx")) as MdxDoc["Doc"],
+    Doc: lazy(() => import("./docs/people-page.mdx")),
   },
 ];
