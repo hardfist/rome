@@ -15,10 +15,6 @@ overrides:
 importers:
 
   .:
-    dependencies:
-      '@rome-os/libs':
-        specifier: workspace:*
-        version: link:packages/lib
     devDependencies:
       '@biomejs/biome':
         specifier: 2.3.6
@@ -757,9 +753,6 @@ importers:
       '@radix-ui/react-slot':
         specifier: ^1.2.4
         version: 1.2.5(@types/react@19.2.15)(react@19.2.6)
-      '@rome-os/libs':
-        specifier: workspace:*
-        version: link:../lib
       '@rome-os/rome-web-components':
         specifier: workspace:*
         version: link:../web-content

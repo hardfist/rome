@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseListingId } from "./app-listing-id.js";
+import { parseListingId } from "./listing-id.js";
 
 describe("parseListingId", () => {
   it("parses an unscoped name", () => {

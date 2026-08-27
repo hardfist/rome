@@ -6,10 +6,6 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    "./app-listing-id": {
-      "types": "./dist/app-listing-id.d.ts",
-      "default": "./dist/app-listing-id.js"
-    },
     "./net": {
       "types": "./dist/net/index.d.ts",
       "default": "./dist/net/index.js"

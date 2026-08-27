@@ -34,7 +34,6 @@ export const AREA_PATHS = {
     "packages/ui/",
     "packages/web-content/",
     "packages/api-types/",
-    "packages/lib/",
     "packages/app-runtime-sdk/",
     // Every package launches its suite through this wrapper, so a change to it
     // changes how the web suites run even though nothing else in scripts/ does.

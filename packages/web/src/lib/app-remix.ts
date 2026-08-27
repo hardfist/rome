@@ -1,5 +1,5 @@
 import type { AppRemixStoreIntent, AppRemixStorePin } from "@rome/api-types/apps";
-import { parseListingId } from "@rome-os/libs/app-listing-id";
+import { parseListingId } from "./app-listing-id";
 import type { TFunction } from "i18next";
 
 export const APP_REMIX_SKILL = "coding:app_remix";

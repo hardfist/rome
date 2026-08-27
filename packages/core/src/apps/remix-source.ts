@@ -1,5 +1,5 @@
 import type { AppRemixSource, AppRemixStorePin } from "@rome/api-types/apps";
-import { parseListingId } from "@rome-os/libs/app-listing-id";
+import { parseListingId } from "./packaging/listing-id.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

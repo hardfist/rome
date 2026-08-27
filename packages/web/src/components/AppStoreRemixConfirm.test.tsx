@@ -189,6 +189,44 @@ describe("Store Remix confirmation", () => {
 
 describe("Remix intent validation", () => {
   it.each([
+    "calendar",
+    "@alice/notes",
+    "@alice/2048_game",
+    "ab",
+    "a".repeat(32),
+    `@alice/${"a".repeat(64)}`,
+  ])("preserves the valid listing id %s in iframe and URL requests", (listingId) => {
+    const source = { ...intent, listingId };
+    expect(parseRemixRequest({ type: "rome:remix-request", ...source })).toEqual(source);
+    expect(parseRemixSearch(new URLSearchParams(source))).toEqual(source);
+  });
+
+  it.each([
+    "",
+    "x",
+    "Calendar",
+    "-abc",
+    "abc-",
+    "my_app",
+    "alice/notes",
+    "@alice",
+    "@/notes",
+    "@alice/",
+    "@alice/alice",
+    "@my_handle/notes",
+    `@${"a".repeat(33)}/notes`,
+    `@alice/${"a".repeat(65)}`,
+    "@alice/notes/extra",
+    "javascript://not-a-bundle-path",
+    "https://rome-cloud.example.com/api/store/listings/calendar",
+    "@alice/a space",
+  ])("rejects the invalid listing id %s in iframe and URL requests", (listingId) => {
+    const source = { ...intent, listingId };
+    expect(parseRemixRequest({ type: "rome:remix-request", ...source })).toBeNull();
+    expect(parseRemixSearch(new URLSearchParams(source))).toBeNull();
+  });
+
+  it.each([
     null,
     [],
     "calendar",

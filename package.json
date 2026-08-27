@@ -68,9 +68,6 @@
     "check:ui:tailwind": "scripts/test-env.sh node scripts/check-tailwind-policy.mjs",
     "gc:worktrees": "tsx scripts/gc-worktrees.ts"
   },
-  "dependencies": {
-    "@rome-os/libs": "workspace:*"
-  },
   "devDependencies": {
     "@biomejs/biome": "2.3.6",
     "@inquirer/prompts": "^8.4.2",

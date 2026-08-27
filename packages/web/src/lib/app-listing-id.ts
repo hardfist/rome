@@ -1,5 +1,6 @@
 /**
- * Shared runtime grammar for Core and Web App Store listing ids.
+ * Web copy of the App Store listing-id grammar. Keep in sync with
+ * packages/core/src/apps/packaging/listing-id.ts.
  *
  * A listing id names a listing in the Rome Cloud App Store. Two shapes:
  *
@@ -26,7 +27,7 @@
  * MIRROR: Rome Cloud owns the authoritative copy of these rules server-side in
  * the Rome Cloud store implementation. Rome Cloud deploys independently
  * and shares no workspace packages with core, so the grammar is mirrored
- * here rather than imported — any change must update both files.
+ * here rather than imported — any grammar change must update all copies.
  */
 
 export const LISTING_HANDLE_PATTERN = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/;
