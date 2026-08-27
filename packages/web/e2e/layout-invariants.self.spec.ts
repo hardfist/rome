@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { collectButtonViolations, collectRowHeightViolations } from "./layout-invariants.js";
+import {
+  collectButtonViolations,
+  collectInlineTintViolations,
+  collectRowHeightViolations,
+} from "./layout-invariants.js";
 
 /**
  * Fixture tests for the `row-height-uniformity` and `sibling-uniformity`
@@ -161,6 +165,68 @@ for (const { name, html, flagged } of SIBLING_CASES) {
 
     const all = await page.evaluate(collectButtonViolations);
     const violations = all.filter((v) => v.invariant === "sibling-uniformity");
+    const report = violations.map((v) => `  [${v.invariant}] ${v.element}\n    ${v.detail}`);
+
+    expect(violations.length, `expected ${flagged ? 1 : 0} violation:\n${report.join("\n")}`).toBe(
+      flagged ? 1 : 0,
+    );
+  });
+}
+
+/**
+ * Fixtures for the `inline-tint-fits-line-box` collector.
+ *
+ * Geometry is declared in px and the tint is a plain fill, so no case depends
+ * on a webfont or a design token — the only thing under test is whether the
+ * collector reads the relationship between a painted inline box and the line
+ * rhythm around it.
+ */
+const prose = (line: number, chip: string) =>
+  `<p style="margin:0;font-size:16px;line-height:${line}px">Backoff doubles per attempt, capped at ${chip}.</p>`;
+
+const tint = (style: string) =>
+  `<code style="background:#eee;font-size:14px;${style}">t_max</code>`;
+
+const TINT_CASES: { name: string; html: string; flagged: boolean }[] = [
+  {
+    name: "an inline chip whose vertical padding outgrows the line",
+    html: prose(20, tint("padding:4px 8px")),
+    flagged: true,
+  },
+  {
+    name: "an inline chip inside the line",
+    html: prose(20, tint("padding:0 8px")),
+    flagged: false,
+  },
+  {
+    // Padding on an inline-block does grow the line box, so the box the
+    // collector would flag is one the line has already made room for.
+    name: "an inline-block chip with the same padding",
+    html: prose(20, tint("display:inline-block;padding:4px 8px")),
+    flagged: false,
+  },
+  {
+    // A block that leaves line-height `normal` states no rhythm, so there is
+    // nothing to hold the tint to.
+    name: "a chip in a block with no declared rhythm",
+    html: `<p style="margin:0;font-size:16px;line-height:normal">capped at ${tint("padding:4px 8px")}.</p>`,
+    flagged: false,
+  },
+  {
+    // The tint is the trigger, not the padding: an unfilled inline box paints
+    // nothing to spill.
+    name: "a padded inline box with no fill",
+    html: prose(20, `<code style="font-size:14px;padding:4px 8px">t_max</code>`),
+    flagged: false,
+  },
+];
+
+for (const { name, html, flagged } of TINT_CASES) {
+  test(`inline-tint-fits-line-box ${flagged ? "flags" : "ignores"}: ${name}`, async ({ page }) => {
+    await page.setContent(`<body style="margin:0">${html}</body>`);
+    await page.evaluate(() => document.fonts.ready);
+
+    const violations = await page.evaluate(collectInlineTintViolations);
     const report = violations.map((v) => `  [${v.invariant}] ${v.element}\n    ${v.detail}`);
 
     expect(violations.length, `expected ${flagged ? 1 : 0} violation:\n${report.join("\n")}`).toBe(

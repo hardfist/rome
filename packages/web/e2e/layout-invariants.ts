@@ -267,3 +267,79 @@ export function collectRowHeightViolations(): Violation[] {
 
   return violations;
 }
+
+/**
+ * Serialized into the page. Sweeps every visible inline element that paints a
+ * background — an inline code chip, a `<mark>`, a `<kbd>` beside body text —
+ * and applies:
+ *
+ * - `inline-tint-fits-line-box`: the painted box is no taller than the line
+ *   rhythm of the block it sits in.
+ *
+ * Padding on an inline box paints outside the line box without growing it, so
+ * a tint taller than the rhythm has nowhere to go but over the lines above and
+ * below. On a wrapped paragraph it laps its neighbours; on a single line it
+ * bulges past the words beside it. Neither is visible to a test that reads the
+ * declaration — the overflow only exists once the font's own metrics land
+ * inside a concrete line box, which is to say only in a browser.
+ *
+ * The reference is the block's own computed line-height rather than any pixel
+ * value, so retuning a prose scale moves both sides together. A block that
+ * leaves line-height `normal` declares no rhythm to measure against and is
+ * skipped.
+ *
+ * Inline-block and inline-flex are out of scope on purpose: their padding does
+ * grow the line box, so the same geometry is no defect there.
+ */
+export function collectInlineTintViolations(): Violation[] {
+  const violations: Violation[] = [];
+
+  const describe = (el: Element): string => {
+    const hook = el.getAttribute("data-streamdown");
+    const text = (el.textContent ?? "").trim().slice(0, 40);
+    return `${el.tagName.toLowerCase()}${hook ? `[data-streamdown=${hook}]` : ""} "${text}"`;
+  };
+
+  const paintsBackground = (cs: CSSStyleDeclaration): boolean => {
+    const bg = cs.backgroundColor;
+    if (!bg || bg === "transparent") return false;
+    // rgba(...) with a zero alpha is the computed form of no fill.
+    const alpha = bg.match(/^rgba?\([^)]*,\s*([\d.]+)\)$/);
+    return alpha ? Number.parseFloat(alpha[1]) > 0 : true;
+  };
+
+  for (const el of document.body.querySelectorAll("*")) {
+    const cs = getComputedStyle(el);
+    if (cs.display !== "inline") continue;
+    if (!paintsBackground(cs)) continue;
+
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
+    if (cs.visibility === "hidden") continue;
+
+    // The block that owns the rhythm: the nearest ancestor laying out lines.
+    let block = el.parentElement;
+    while (block && getComputedStyle(block).display === "inline") {
+      block = block.parentElement;
+    }
+    if (!block) continue;
+
+    const rhythm = Number.parseFloat(getComputedStyle(block).lineHeight);
+    if (!Number.isFinite(rhythm)) continue;
+
+    // Half a pixel of slack: a line-height carried as a ratio lands on a
+    // fraction, and the painted box is snapped to device pixels.
+    if (rect.height > rhythm + 0.5) {
+      violations.push({
+        invariant: "inline-tint-fits-line-box",
+        element: describe(el),
+        detail:
+          `painted box is ${rect.height.toFixed(1)}px tall in a ${rhythm.toFixed(1)}px line ` +
+          `(padding ${cs.paddingTop} / ${cs.paddingBottom}); the overflow paints over the ` +
+          `lines above and below`,
+      });
+    }
+  }
+
+  return violations;
+}
