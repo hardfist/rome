@@ -1,0 +1,165 @@
+import {
+  ChannelGlyphSet,
+  DirectoryDemo,
+  PersonPageDemo,
+  StreamDemo,
+  UnknownDemo,
+  ViewSwitcherDemo,
+} from "./people-demo";
+
+# People, rebuilt
+
+The People page read three endpoints and rendered three sections — curated persons,
+unmapped senders, the WhatsApp address book. The same human could sit in more than
+one, each with its own row shape and its own controls, and no section could say
+where a person stood relative to another.
+
+Even flattened into one list, a roster answers the wrong question. People open this
+page to find out **who has something new**, and a roster shows everyone at once with
+management controls on every row.
+
+This note is the design in three surfaces: a stream, a directory, and a person page.
+Every specimen below is live — the same primitives, tokens, and focus rules the page
+ships with, so switching the theme re-renders the design rather than a picture of it.
+
+> Source of truth for the visual design: PR
+> [#2393](https://github.com/amantru/rome-internal/pull/2393) and its interactive
+> mockup, version `monochrome-channel-glyphs`.
+
+---
+
+## Two views, one control set
+
+**Latest** is the default. **Directory** is the management view. They are a
+`SegmentedControl`, and the bond filter below it is a `FilterChipGroup` — both the
+kit's radiogroups, because Radix supplies the roving focus and arrow-key movement
+that `role="radio"` on a plain button promises and does not have.
+
+<Specimen title="View switcher + filter chips">
+  <ViewSwitcherDemo />
+</Specimen>
+
+`All` means the **placed** people: it holds back both unplaced ends of the ladder, so
+Unknown and Stranger are each entered on purpose. The Unknown chip carries a count
+when senders are waiting.
+
+<Invariant>
+  Every number on screen is the server's. Chips read `counts`, directory headings read
+  `totals`, and neither is derived from the rows that happened to load — the union is
+  paged, so a count taken over page one would report no waiting senders whenever
+  placed people fill it. The two numbers answer different questions and are meant to
+  disagree.
+</Invariant>
+
+---
+
+## Latest — the stream
+
+One row per identity, newest first, carrying only what routing needs: neutral avatar,
+name, monochrome source glyph, one line of preview, relative time.
+
+<Specimen title="Stream rows">
+  <StreamDemo />
+</Specimen>
+
+No management controls on a stream row. Bond and linked accounts live on the person
+page. A row here exists to get you to a conversation.
+
+---
+
+## Unknown — the placement view
+
+The Unknown chip keeps dense rows: channel pill, number or handle, message count,
+preview, and the `⋯` menu. The placement decision runs on that evidence, so all of it
+is on the row rather than a click away. A move updates the row in place and decrements
+the chip's count.
+
+<Specimen title="Unknown rows">
+  <UnknownDemo />
+</Specimen>
+
+<Invariant>
+  Unknown and Stranger are positions on one ladder. Placing a sender, promoting a
+  friend and dismissing spam are the same gesture — a **move** — so the row's `⋯` menu
+  is generated from its current level rather than written per group.
+  `moveTargetsFor(row)` is the only place that enumerates targets, and the row menu,
+  the bulk bar and the dossier select all read it.
+</Invariant>
+
+---
+
+## Directory — the roster
+
+Everyone grouped by bond with live counts, three columns (avatar, name plus
+identifier, `⋯`), no channel badges. Click a row to open the person, and click the
+avatar to select. A selection raises the bulk bar, whose choices are the **intersection**
+across the selection, since one choice applies to every row in it.
+
+<Specimen title="Directory groups, selection, bulk bar">
+  <DirectoryDemo />
+</Specimen>
+
+The guardian row is fixed: not moved, not merged, not selected. Never-messaged
+contacts sit behind a toggle in the Unknown group — which is why the Unknown heading
+survives an empty group, since an address book with no waiting senders in front of it
+would otherwise have no way back on screen.
+
+---
+
+## The person page
+
+`/people/:identityId` is the dossier: identity card with bond select, linked accounts
+as neutral glyph + id pills, `Link account…` and `Merge into…`. The merged timeline
+grouped by day sits below it, and a sticky composer sits at the bottom.
+
+<Specimen title="Dossier">
+  <PersonPageDemo />
+</Specimen>
+
+Day grouping is a calendar comparison, not an elapsed-time one — the day either side
+of a DST change is 23 or 25 hours long, so "yesterday" is a calendar step. The year
+appears in a label only once it disambiguates.
+
+---
+
+## Channels are glyphs, never colors
+
+`CHANNEL_META` ships an icon per channel, drawn in `currentColor` at muted foreground.
+
+<Specimen title="Channel glyphs">
+  <ChannelGlyphSet />
+</Specimen>
+
+<Invariant>
+  Status hues stay reserved for status semantics, and there are more channels than a
+  palette has room for. A channel contributed by a Rome App gets the generic glyph
+  rather than an undefined color.
+</Invariant>
+
+Avatars are neutral everywhere for the same reason — tinting an avatar by channel
+would be a second, contradictory color vocabulary on the same row.
+
+---
+
+## Writes
+
+| Rule | Why |
+| --- | --- |
+| Settle by invalidation, never by patching cached rows | Where a row lands is the server's answer, and a hand-merged level disagrees the moment a move implies anything else |
+| A write holds its identities until the cache catches up | `planMove` reads a row's current id shape, so a second write against an identity the first is still reshaping plans from a shape that has already changed |
+| Placing or dismissing fans out over every channel the row stands for | A consolidated WhatsApp contact is one row under both its phone jid and its `@lid` jid, so acting on one would leave the rest to resurface as their own Unknown rows |
+
+The fan-out is best-effort past the first call: the first call **is** the move and has
+already committed, so a failed follow-up must not report a saved change as a failed
+one.
+
+---
+
+## Open questions
+
+- Directory filters apply after pagination, so a level with a nonzero total can render
+  short. The real fix is paging each group independently.
+- The chip rail stays lit while a search is active, though the search has taken over
+  from it.
+- Only WhatsApp can send. Other channels appear in the composer's select, disabled,
+  until a send path exists.
