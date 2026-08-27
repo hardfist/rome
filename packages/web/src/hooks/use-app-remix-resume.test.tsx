@@ -69,6 +69,8 @@ describe("Remix login resume", () => {
 
   it.each([
     { intent, expiresAt: 1 },
+    { intent: null, expiresAt: Date.now() + 60000 },
+    { intent: { ...intent, prompt: "untrusted instructions" }, expiresAt: Date.now() + 60000 },
     {
       intent: { listingId: "https://attacker.example", version: "1.0.0" },
       expiresAt: Date.now() + 60000,

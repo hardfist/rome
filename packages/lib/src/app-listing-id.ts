@@ -1,5 +1,5 @@
 /**
- * Shared Core and Web App Store listing-id grammar.
+ * Shared runtime grammar for Core and Web App Store listing ids.
  *
  * A listing id names a listing in the Rome Cloud App Store. Two shapes:
  *

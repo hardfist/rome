@@ -89,6 +89,21 @@ async function replaceBundle(f: Awaited<ReturnType<typeof fixture>>, bytes: Buff
 }
 
 describe("remixApp", () => {
+  it.each([
+    null,
+    { appId: "calendar", listingId: "calendar" },
+    { listingId: "calendar", version: "latest", contentHash: "a".repeat(64) },
+    { appId: "calendar", expectedSource: { listingId: "calendar", version: "1.2.3" } },
+  ])("rejects an invalid direct source before accessing apps or creating a project: %j", async (from) => {
+    const f = await fixture();
+    await expect(
+      remixApp({ appId: "ray-calendar", name: "@ray/calendar", from: from as never }, f),
+    ).rejects.toThrow("Invalid Remix source");
+    expect(f.appManager.readLockfileEntry).not.toHaveBeenCalled();
+    expect(f.bundleFetcher).not.toHaveBeenCalled();
+    await expect(readdir(f.authoringRoot)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("excludes installed dependencies, caches, and local secrets while preserving source", async () => {
     const f = await fixture();
     await mkdir(join(f.installedBundleRoot, "node_modules"));

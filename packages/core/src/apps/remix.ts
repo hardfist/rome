@@ -1,9 +1,5 @@
 import { existsSync } from "node:fs";
-import {
-  AppRemixSourceSchema,
-  type AppRemixSource,
-  type AppRemixStorePin,
-} from "@rome/api-types/apps";
+import type { AppRemixSource, AppRemixStorePin } from "@rome/api-types/apps";
 import {
   cp,
   lstat,
@@ -42,6 +38,7 @@ import { normalizeListingId } from "./rome-cloud-urls.js";
 import { isBlockedSourceFile, isExcludedSourceEntry } from "./packaging/pack.js";
 import type { AppEntry } from "./lockfile.js";
 import { fetchVerifiedStoreBundle, type BundleFetcher } from "./store-bundle.js";
+import { parseRemixSource } from "./remix-source.js";
 
 const MAX_ARCHIVE_ENTRIES = 20_000;
 const MAX_UNPACKED_BYTES = 250 * 1024 * 1024;
@@ -545,7 +542,9 @@ export async function remixApp(
   deps: RemixAppDeps,
 ): Promise<RemixAppResult> {
   assertValidAppId(params.appId);
-  const from = AppRemixSourceSchema.parse(params.from);
+  const from = parseRemixSource(params.from);
+  if (!from)
+    throw new Error("Invalid Remix source: expected an installed app or a pinned Store version.");
   const sourceAppId = "appId" in from ? from.appId : from.listingId;
   assertValidAppId(sourceAppId);
   if (params.appId === sourceAppId) {

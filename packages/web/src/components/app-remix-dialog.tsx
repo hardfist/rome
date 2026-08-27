@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import type { TFunction } from "i18next";
 import type { InstalledAppCard } from "@rome/api-types/apps";
-import { LISTING_HANDLE_PATTERN, parseListingId } from "@rome/api-types/app-listing-id";
+import { LISTING_HANDLE_PATTERN, parseListingId } from "@rome-os/libs/app-listing-id";
 import { RomeInputDialog } from "@/components/rome-input-dialog";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { APP_REMIX_SKILL } from "@/lib/app-remix";

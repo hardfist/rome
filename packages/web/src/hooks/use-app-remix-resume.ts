@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { AppRemixStoreIntentSchema, type AppRemixStoreIntent } from "@rome/api-types/apps";
+import type { AppRemixStoreIntent } from "@rome/api-types/apps";
 import { useAuthStateSnapshot } from "@/lib/auth-state";
-import { parseRemixSearch } from "@/lib/app-remix";
+import { parseRemixIntent, parseRemixSearch } from "@/lib/app-remix";
 
 const STORAGE_KEY = "rome:pending-app-remix";
 const INTENT_LIFETIME_MS = 15 * 60 * 1000;
@@ -24,8 +24,8 @@ function readPending(): PendingIntent | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? "null");
     if (!value || typeof value.expiresAt !== "number" || value.expiresAt <= Date.now()) return null;
-    const parsed = AppRemixStoreIntentSchema.safeParse(value.intent);
-    return parsed.success ? { intent: parsed.data, expiresAt: value.expiresAt } : null;
+    const intent = parseRemixIntent(value.intent);
+    return intent ? { intent, expiresAt: value.expiresAt } : null;
   } catch {
     return null;
   }

@@ -3,4 +3,4 @@ export {
   LISTING_SLUG_PATTERN,
   parseListingId,
   type ParsedListingId,
-} from "@rome/api-types/app-listing-id";
+} from "@rome-os/libs/app-listing-id";

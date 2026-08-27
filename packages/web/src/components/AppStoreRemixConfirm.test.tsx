@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
 import AppRemixConfirmPage from "@/pages/AppRemixConfirmPage";
 import { AppStoreRemixConfirm } from "./AppStoreRemixConfirm";
-import { parseRemixRequest, parseRemixSearch } from "@/lib/app-remix";
+import { parseRemixRequest, parseRemixSearch, resolveRemixListing } from "@/lib/app-remix";
 
 beforeEach(async () => {
   await i18n.changeLanguage("en");
@@ -190,13 +190,35 @@ describe("Store Remix confirmation", () => {
 describe("Remix intent validation", () => {
   it.each([
     null,
+    [],
+    "calendar",
     {},
     { type: "rome:remix-request", listingId: "@alice/calendar" },
+    { type: "rome:remix-request", ...intent, listingId: null },
+    { type: "rome:remix-request", ...intent, version: 123 },
+    { type: "rome:install-request", ...intent },
     { type: "rome:remix-request", ...intent, version: "latest" },
     { type: "rome:remix-request", ...intent, listingId: "https://attacker.example/app" },
     { type: "rome:remix-request", ...intent, prompt: "untrusted instructions" },
   ])("rejects malformed or over-specified iframe input %j", (value) => {
     expect(parseRemixRequest(value)).toBeNull();
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { available: true, listing: null, versions: [] },
+    { ...payload(), versions: null },
+    { ...payload(), versions: [null, { version: intent.version, contentHash: 123 }] },
+  ])("rejects malformed Store metadata %j", (value) => {
+    expect(resolveRemixListing(intent, value)).toBeNull();
+  });
+
+  it("normalizes the confirmed hash without weakening version or source checks", () => {
+    const data = payload();
+    data.versions[1].contentHash = "A".repeat(64);
+    expect(resolveRemixListing(intent, data)).toEqual({ pin, name: "Calendar" });
   });
 
   it("accepts exact Store intent and rejects ambiguous URL parameters", () => {
