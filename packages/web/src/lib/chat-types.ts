@@ -273,12 +273,6 @@ export interface ChatMessage {
   traceSummary?: TraceSummary | null;
 }
 
-export interface Person {
-  id: string;
-  displayName: string;
-  bondLevel: string;
-}
-
 export interface ProjectOption {
   displayName?: string;
   name: string;

@@ -9,15 +9,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
-import type { Person } from "@/lib/chat-types";
+import type { PersonResource } from "@rome/api-types/people";
 
 export interface ImpersonationMenuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   selectedPersonId: string;
   onSelectPersonId: (id: string) => void;
-  options: Person[];
-  selectedPerson: Person | null;
+  options: PersonResource[];
+  selectedPerson: PersonResource | null;
   selectedPersonLabel: string;
   guardianLabel: string;
 }
