@@ -18,20 +18,18 @@
 
 import {
   accountPresentation,
+  accountRef,
   linkConflict,
   type DirectoryAccount,
   type LinkConflict,
 } from "@rome/api-types/people";
 import { STRANGER_PERSON_DISPLAY_NAME, STRANGER_PERSON_ID } from "../constants.js";
 import { readAccountDirectory, type AccountDirectoryDeps } from "./account-directory.js";
-import {
-  AccountHeldError,
-  type PersonMappingRepository,
-} from "../db/repositories/person-mapping.js";
+import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 
 export interface AccountDecisionDeps extends AccountDirectoryDeps {
   personMappingRepo: AccountDirectoryDeps["personMappingRepo"] &
-    Pick<PersonMappingRepository, "claimForStranger" | "releaseStrangerClaims">;
+    Pick<PersonMappingRepository, "linkAccount" | "releaseStrangerClaims">;
 }
 
 /** The account a write names: any address the channel reaches it at. */
@@ -76,24 +74,30 @@ export async function dismissAccount(
 
   if (account.state !== "dismissed") {
     // And what is true at the moment of writing. The read above cannot see a
-    // placement that lands after it, so the claim itself is conditional: it
-    // takes the identity only if nobody holds it, and refuses by naming
-    // whoever kept it. Without that, a link arriving in the gap would be
-    // re-pointed onto the sentinel and lost — the exact harm the refusal above
-    // exists to prevent, reached by a different route.
-    try {
-      await deps.personMappingRepo.claimForStranger(account.channel, account.channelUserId);
-    } catch (err) {
-      if (err instanceof AccountHeldError) {
-        const { holder: winner } = err;
-        return {
-          conflict: linkConflict(account, {
-            id: winner.personId,
-            displayName: winner.personName,
-          }),
-        };
+    // placement that lands after it, so the write is a compare-and-swap rather
+    // than a re-point: a dismissal is a link onto the sentinel, and it is
+    // claimed on the same terms as any other link — declaring no owner to take
+    // it from, which is a claim only an account nobody holds can satisfy.
+    // Without that, a link arriving in the gap would be re-pointed onto the
+    // sentinel and lost, which is the harm the refusal above exists to prevent
+    // reached by a different route.
+    const claim = await deps.personMappingRepo.linkAccount({
+      personId: STRANGER_PERSON_ID,
+      channel: account.channel,
+      channelUserId: account.channelUserId,
+    });
+    if (!claim.linked) {
+      // A claim that names no owner to take the account from is refused only
+      // by someone holding it, so there is always a person to name here.
+      if (!claim.holder) {
+        throw new Error(`dismissing ${accountRef(account)} was refused by nobody`);
       }
-      throw err;
+      return {
+        conflict: linkConflict(account, {
+          id: claim.holder.personId,
+          displayName: claim.holder.personName,
+        }),
+      };
     }
   }
 

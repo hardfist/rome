@@ -274,7 +274,7 @@ describe("Account dismiss and restore", () => {
           });
           return stale;
         },
-        claimForStranger: repo.claimForStranger.bind(repo),
+        linkAccount: repo.linkAccount.bind(repo),
         releaseStrangerClaims: repo.releaseStrangerClaims.bind(repo),
       },
     };
@@ -315,6 +315,14 @@ describe("Account dismiss and restore", () => {
     expect(decided.channelUserId).toBe(urn);
     expect(decided.state).toBe("dismissed");
     expect(mappingRows("linkedin", urn)).toHaveLength(1);
+
+    // And unescaped, which is what the identifier's wildcard segment is for: a
+    // caller that did not escape a "/" is naming an account that exists, and a
+    // plain segment would answer 404 for it.
+    const raw = await app.request(`/accounts/linkedin/${urn}/restore`, { method: "POST" });
+    expect(raw.status).toBe(200);
+    expect(((await raw.json()) as DirectoryAccount).state).toBe("unlinked");
+    expect(mappingRows("linkedin", urn)).toHaveLength(0);
   });
 
   it("answers 404 for a pair nothing has ever observed, rather than minting an account", async () => {

@@ -18,6 +18,13 @@ import type { ApiDeps } from "../deps.js";
 // account's identity rather than an argument of the write, so the same account
 // is addressed the same way by every verb, and a retry of a POST is a retry of
 // the same decision.
+//
+// The identifier takes the rest of the path before the verb, separators
+// included, the way the unlink route takes the rest of its own. A channel mints
+// its own addresses and channels are open — a Rome App brings one — so nothing
+// promises those addresses avoid "/", and a plain segment would answer 404 for
+// an account that exists rather than deciding it. The channel name stays one
+// segment, which `accountRef` already requires of it.
 
 export function accountDecisionRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
@@ -40,8 +47,8 @@ export function accountDecisionRoutes(deps: ApiDeps): Hono {
     return c.json(result.account);
   };
 
-  app.post("/accounts/:channel/:channelUserId/dismiss", (c) => answer(c, dismissAccount));
-  app.post("/accounts/:channel/:channelUserId/restore", (c) => answer(c, restoreAccount));
+  app.post("/accounts/:channel/:channelUserId{.+}/dismiss", (c) => answer(c, dismissAccount));
+  app.post("/accounts/:channel/:channelUserId{.+}/restore", (c) => answer(c, restoreAccount));
 
   return app;
 }
