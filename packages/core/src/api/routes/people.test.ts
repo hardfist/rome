@@ -1157,3 +1157,303 @@ describe("People account links", () => {
     expect((await unlink(alice, NEWCOMER)).status).toBe(404);
   });
 });
+
+// PATCH /people/:id — what the guardian calls a person, and where they sit on
+// the ladder. The one row that refuses the second edit is the guardian's.
+describe("People updates", () => {
+  let testDb: TestDb;
+  let deps: TestDeps;
+  let app: Hono;
+  let baseline: BaselineIds;
+
+  beforeEach(async () => {
+    testDb = createTestDb();
+    baseline = await seedBaseline(testDb.db);
+    deps = await buildTestDeps(testDb.db);
+    app = new Hono().route("/", peopleRoutes(deps));
+  });
+
+  afterEach(() => testDb.close());
+
+  const patch = (id: string, body: unknown) =>
+    app.request(`/people/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  const stored = async (id: string) => await deps.personMappingRepo.findById(id);
+
+  it("moves a person along the ladder and answers with them", async () => {
+    const res = await patch(baseline.persons.otherId, { bondLevel: "inner-circle" });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()) as PersonResource).toMatchObject({
+      id: baseline.persons.otherId,
+      bondLevel: "inner-circle",
+    });
+    expect((await stored(baseline.persons.otherId))?.bondLevel).toBe("inner-circle");
+  });
+
+  it("renames a person without re-minting their id or disturbing their accounts", async () => {
+    const before = (await (
+      await app.request(`/people/${baseline.persons.acquaintanceId}`)
+    ).json()) as PersonResource;
+
+    const res = await patch(baseline.persons.acquaintanceId, { displayName: "  Bobbie  " });
+
+    expect(res.status).toBe(200);
+    const person = (await res.json()) as PersonResource;
+    expect(person).toMatchObject({ id: baseline.persons.acquaintanceId, displayName: "Bobbie" });
+    // Their accounts keep the names their own platforms give them: a rename
+    // here is the guardian's word for the person, not the channel's for the
+    // account.
+    expect(person.accounts).toEqual(before.accounts);
+  });
+
+  it("leaves the field an update does not name alone", async () => {
+    expect((await patch(baseline.persons.otherId, { displayName: "Caro" })).status).toBe(200);
+
+    const person = await stored(baseline.persons.otherId);
+    expect(person).toMatchObject({ displayName: "Caro", bondLevel: "other" });
+  });
+
+  it("answers an update naming no field with the person, unchanged", async () => {
+    const res = await patch(baseline.persons.otherId, {});
+
+    expect(res.status).toBe(200);
+    expect((await res.json()) as PersonResource).toMatchObject({
+      displayName: "Carol Other",
+      bondLevel: "other",
+    });
+  });
+
+  it("refuses to move the guardian off the top of the ladder", async () => {
+    const res = await patch(baseline.persons.guardianId, { bondLevel: "inner-circle" });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toEqual({
+      error: "the guardian's bond level cannot be changed",
+    });
+    expect((await stored(baseline.persons.guardianId))?.bondLevel).toBe("guardian");
+  });
+
+  it("renames the guardian, whose name is theirs like anyone's", async () => {
+    const res = await patch(baseline.persons.guardianId, { displayName: "Ada" });
+
+    expect(res.status).toBe(200);
+    expect((await stored(baseline.persons.guardianId))?.displayName).toBe("Ada");
+  });
+
+  it("refuses a bond level nobody may be assigned, guardian included", async () => {
+    expect((await patch(baseline.persons.otherId, { bondLevel: "guardian" })).status).toBe(400);
+    expect((await patch(baseline.persons.otherId, { bondLevel: "best-friend" })).status).toBe(400);
+    // Refused before the row is read, so an unknown person and an unassignable
+    // level answer the request that is wrong rather than the row that is not
+    // there.
+    expect((await stored(baseline.persons.otherId))?.bondLevel).toBe("other");
+  });
+
+  it("refuses a name that is no name", async () => {
+    expect((await patch(baseline.persons.otherId, { displayName: "   " })).status).toBe(400);
+    expect((await patch(baseline.persons.otherId, { displayName: null })).status).toBe(400);
+    expect((await stored(baseline.persons.otherId))?.displayName).toBe("Carol Other");
+  });
+
+  it("answers 404 for an unknown person and for the stranger sentinel", async () => {
+    expect((await patch("nobody-here", { displayName: "Nobody" })).status).toBe(404);
+    expect((await patch(STRANGER_PERSON_ID, { displayName: "Nobody" })).status).toBe(404);
+    expect((await stored(STRANGER_PERSON_ID))?.displayName).toBe("Stranger");
+  });
+});
+
+// POST /people/:id/merge — one person absorbs another. What these pin is that
+// the links all move together, that the duplicate is gone rather than emptied,
+// and that the two rows which are structure rather than people are not
+// addressable on either side of it.
+describe("People merge", () => {
+  let testDb: TestDb;
+  let deps: TestDeps;
+  let app: Hono;
+  let baseline: BaselineIds;
+  let alice: string;
+  let bob: string;
+  let carol: string;
+
+  beforeEach(async () => {
+    testDb = createTestDb();
+    baseline = await seedBaseline(testDb.db);
+    deps = await buildTestDeps(testDb.db);
+    app = new Hono().route("/", peopleRoutes(deps));
+    alice = baseline.persons.innerCircleId;
+    bob = baseline.persons.acquaintanceId;
+    carol = baseline.persons.otherId;
+  });
+
+  afterEach(() => testDb.close());
+
+  const merge = (into: string, body: unknown) =>
+    app.request(`/people/${into}/merge`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  const refs = (person: PersonResource) =>
+    person.accounts.map((account) => `${account.channel}:${account.channelUserId}`);
+
+  async function holderOf(account: { channel: string; channelUserId: string }) {
+    const person = await deps.personMappingRepo.findByChannelUser(
+      account.channel,
+      account.channelUserId,
+    );
+    return person?.id ?? null;
+  }
+
+  it("moves every account onto the survivor and deletes the duplicate", async () => {
+    // Bob holds a second account, so the merge has more than one link to move.
+    await deps.personMappingRepo.addChannelMapping(bob, "whatsapp", "wa-bob", "Bob");
+
+    const res = await merge(alice, { from: bob });
+
+    expect(res.status).toBe(200);
+    expect(refs((await res.json()) as PersonResource)).toEqual(
+      expect.arrayContaining(["telegram:tg-alice", "telegram:tg-bob", "whatsapp:wa-bob"]),
+    );
+    expect(await holderOf({ channel: "telegram", channelUserId: "tg-bob" })).toBe(alice);
+    expect(await holderOf({ channel: "whatsapp", channelUserId: "wa-bob" })).toBe(alice);
+
+    // Gone rather than emptied: the duplicate is not a person with no accounts.
+    expect((await app.request(`/people/${bob}`)).status).toBe(404);
+    expect(await deps.personMappingRepo.findById(bob)).toBeNull();
+    const list = (await (await app.request("/people")).json()) as PeopleList;
+    expect(list.people.map((person) => person.id)).not.toContain(bob);
+  });
+
+  it("carries the channel's name for a moved account across the merge", async () => {
+    const before = (await (await app.request(`/people/${bob}`)).json()) as PersonResource;
+
+    const res = await merge(alice, { from: bob });
+
+    expect(res.status).toBe(200);
+    // The link moves rather than being rewritten, so the account still answers
+    // to the name its platform gives it rather than to the survivor's.
+    expect(((await res.json()) as PersonResource).accounts).toEqual(
+      expect.arrayContaining(before.accounts),
+    );
+  });
+
+  it("absorbs a duplicate holding no account at all", async () => {
+    const empty = await deps.personMappingRepo.create({
+      displayName: "Alice Again",
+      bondLevel: "other",
+      approved: true,
+    });
+
+    const res = await merge(alice, { from: empty });
+
+    expect(res.status).toBe(200);
+    expect(refs((await res.json()) as PersonResource)).toEqual(["telegram:tg-alice"]);
+    expect(await deps.personMappingRepo.findById(empty)).toBeNull();
+  });
+
+  it("keeps the survivor's own name and bond level", async () => {
+    const res = await merge(alice, { from: bob });
+
+    expect((await res.json()) as PersonResource).toMatchObject({
+      displayName: "Alice Inner",
+      bondLevel: "inner-circle",
+    });
+  });
+
+  it("refuses to merge the guardian away, and moves nothing", async () => {
+    const res = await merge(alice, { from: baseline.persons.guardianId });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toEqual({
+      error: "the guardian cannot be merged away",
+    });
+    expect(await deps.personMappingRepo.findById(baseline.persons.guardianId)).not.toBeNull();
+    expect(await holderOf({ channel: "telegram", channelUserId: "tg-guardian" })).toBe(
+      baseline.persons.guardianId,
+    );
+  });
+
+  it("lets the guardian absorb a duplicate of themselves", async () => {
+    const duplicate = await deps.personMappingRepo.create({
+      displayName: "Me",
+      bondLevel: "other",
+      approved: true,
+      channelMappings: [{ channel: "whatsapp", channelUserId: "wa-me" }],
+    });
+
+    const res = await merge(baseline.persons.guardianId, { from: duplicate });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()) as PersonResource).toMatchObject({ bondLevel: "guardian" });
+    expect(await holderOf({ channel: "whatsapp", channelUserId: "wa-me" })).toBe(
+      baseline.persons.guardianId,
+    );
+  });
+
+  it("lets only one of two merges of the same duplicate land it", async () => {
+    // Both callers read the same page, where Bob is a duplicate, and both ask
+    // to absorb him.
+    const [first, second] = await Promise.all([
+      merge(alice, { from: bob }),
+      merge(carol, { from: bob }),
+    ]);
+
+    expect([first.status, second.status].sort()).toEqual([200, 404]);
+    // Whoever lost absorbed nothing: the account is under one survivor, not
+    // split between them, and Bob is gone exactly once.
+    const holder = await holderOf({ channel: "telegram", channelUserId: "tg-bob" });
+    expect([alice, carol]).toContain(holder);
+    const winner = first.status === 200 ? first : second;
+    expect(refs((await winner.json()) as PersonResource)).toContain("telegram:tg-bob");
+  });
+
+  it("refuses a merge into oneself", async () => {
+    const res = await merge(alice, { from: alice });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toEqual({
+      error: "a person cannot be merged into themselves",
+    });
+    expect(await deps.personMappingRepo.findById(alice)).not.toBeNull();
+  });
+
+  it("refuses a body that names no duplicate", async () => {
+    expect((await merge(alice, {})).status).toBe(400);
+    expect((await merge(alice, { from: "" })).status).toBe(400);
+    expect(
+      (await app.request(`/people/${alice}/merge`, { method: "POST" })).status, // no body at all
+    ).toBe(400);
+  });
+
+  it("does not address the stranger sentinel as either side", async () => {
+    // A dismissal is a link onto the sentinel, so absorbing it would read every
+    // dismissed account as this person's, and merging a person into it would
+    // read their accounts as dismissed.
+    await deps.personMappingRepo.addChannelMapping(
+      STRANGER_PERSON_ID,
+      "telegram",
+      "tg-dismissed",
+      "Dismissed Sender",
+    );
+
+    expect((await merge(alice, { from: STRANGER_PERSON_ID })).status).toBe(404);
+    expect((await merge(STRANGER_PERSON_ID, { from: alice })).status).toBe(404);
+
+    expect(await holderOf({ channel: "telegram", channelUserId: "tg-dismissed" })).toBe(
+      STRANGER_PERSON_ID,
+    );
+    expect(await holderOf({ channel: "telegram", channelUserId: "tg-alice" })).toBe(alice);
+  });
+
+  it("answers 404 for an unknown person on either side", async () => {
+    expect((await merge(alice, { from: "nobody-here" })).status).toBe(404);
+    expect((await merge("nobody-here", { from: alice })).status).toBe(404);
+    expect(await deps.personMappingRepo.findById(alice)).not.toBeNull();
+  });
+});

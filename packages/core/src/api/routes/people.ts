@@ -5,15 +5,19 @@ import {
   linkConflict,
   parseCreatePersonRequest,
   parseLinkAccountRequest,
+  parseMergeRequest,
   parsePersonFilterLevel,
   parseTimelineCursor,
+  parseUpdatePersonRequest,
   personMatchesLevel,
   personMatchesQuery,
   timelinePageLimit,
   type PeopleList,
 } from "@rome/api-types/people";
 import { createPerson } from "../../people/create.js";
+import { mergePeople } from "../../people/merge.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
+import { updatePerson } from "../../people/update.js";
 import { readPersonTimeline } from "../../people/timeline.js";
 import { personTimelineSources, timelineAccounts } from "../../people/timeline-sources.js";
 import type { ApiDeps } from "../deps.js";
@@ -22,7 +26,8 @@ import type { ApiDeps } from "../deps.js";
 // orders and counts, what a valid create is, when a link may be taken and what
 // a refused one answers are the contract's (@rome/api-types/people);
 // serializing a person is `src/people/resource.ts`, creating one is
-// `src/people/create.ts`, and which stores a history is merged from is the rest
+// `src/people/create.ts`, editing one `src/people/update.ts`, absorbing one
+// `src/people/merge.ts`, and which stores a history is merged from is the rest
 // of `src/people/`. The compare-and-swap a link rides on is the person
 // repository's, because only a transaction there can decide it. These handlers
 // read the request and pick a status code, and hold no rule of their own.
@@ -66,6 +71,33 @@ export function peopleRoutes(deps: ApiDeps): Hono {
   app.get("/people/:id", async (c) => {
     const person = await readPerson(deps, c.req.param("id"));
     return person ? c.json(person) : c.json({ error: "Unknown person" }, 404);
+  });
+
+  app.patch("/people/:id", async (c) => {
+    const parsed = parseUpdatePersonRequest(await c.req.json().catch(() => null));
+    if ("error" in parsed) return c.json({ error: parsed.error }, 400);
+
+    const result = await updatePerson(deps, c.req.param("id"), parsed.update);
+    if ("unknown" in result) return c.json({ error: "Unknown person" }, 404);
+    // 400 rather than 403: nothing about the caller could make this edit
+    // land, since the guardian is the only caller there is. The request names
+    // a change the person does not have.
+    if ("refused" in result) return c.json({ error: result.refused }, 400);
+    return c.json(result.person);
+  });
+
+  // The duplicate names itself in the body and the survivor in the path, so a
+  // client that renders the merge reads the survivor back from the response it
+  // already has to handle.
+  app.post("/people/:id/merge", async (c) => {
+    const into = c.req.param("id");
+    const parsed = parseMergeRequest(await c.req.json().catch(() => null), into);
+    if ("error" in parsed) return c.json({ error: parsed.error }, 400);
+
+    const result = await mergePeople(deps, into, parsed.merge.from);
+    if ("unknown" in result) return c.json({ error: "Unknown person" }, 404);
+    if ("refused" in result) return c.json({ error: result.refused }, 400);
+    return c.json(result.person);
   });
 
   app.post("/people/:id/accounts", async (c) => {
