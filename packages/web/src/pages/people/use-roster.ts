@@ -36,25 +36,6 @@ const TIMELINE_KEY = "person-timeline";
 
 const ROSTER_POLL_MS = 30_000;
 
-/**
- * An open dossier's poll — the roster's cadence, not a faster one.
- *
- * A refetch of a paged read refetches *every page it holds*, so the cost of
- * this interval is one request per page the reader has opened: a dossier paged
- * six pages back costs six requests a tick, re-reading history that cannot have
- * changed. At four seconds that is ninety requests a minute to catch a message
- * that has not arrived.
- *
- * Four seconds is what a page with a composer needs, and for a specific reason:
- * a WhatsApp send returns once the adapter accepted the text, not once the echo
- * that stores it lands, so the reader is waiting on a line they just typed.
- * This page has no composer — the writes are rome-os/rome#67 — so nothing here
- * is waiting on a write of its own, and when the composer returns it can
- * invalidate this query at the moment of the send rather than have every reader
- * pay a fast poll for it.
- */
-const TIMELINE_POLL_MS = ROSTER_POLL_MS;
-
 // How long the search box settles before its term reaches the wire. Long enough
 // that a typed word is one request rather than one per letter, short enough
 // that the pause is not read as the page having stopped.
@@ -233,10 +214,14 @@ export function usePerson(id: string | undefined) {
  * would have to re-derive the ordering the cursor is written against — and
  * would disagree with it at every page boundary.
  *
- * The poll is what makes a send appear: the WhatsApp send route returns once
- * the adapter has accepted the text, not once the echo has been mirrored, so a
- * refetch fired at send time almost always reads a timeline that does not have
- * the message yet.
+ * No interval. A dossier is a page for reading someone's history, and nothing
+ * on it writes: the composer that would need its own line to converge is
+ * rome-os/rome#67, and when it lands it can invalidate this query at the moment
+ * of the send. What is left for a poll to catch is a message arriving while the
+ * page sits open, which the client's `refetchOnWindowFocus` already catches at
+ * the moment the reader looks back at it — and a refetch here re-reads every
+ * page the reader has opened, so an interval charges the deepest reader the
+ * most for the least.
  */
 export function usePersonTimeline(id: string | undefined) {
   const { t } = useTranslation("people");
@@ -245,7 +230,6 @@ export function usePersonTimeline(id: string | undefined) {
     enabled: id != null,
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
-    refetchInterval: TIMELINE_POLL_MS,
     queryFn: ({ signal, pageParam }) => {
       // The cursor names an exact entry (time, direction, source, ref), so it
       // carries separators of its own and has to be escaped rather than pasted
