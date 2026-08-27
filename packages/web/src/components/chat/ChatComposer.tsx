@@ -900,7 +900,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             query={slashQuery}
             onSelect={acceptSlashSkill}
             anchor={
-              <div className="min-w-0 flex-1">
+              <div
+                // The row is `items-end` so Send stays on the last line as the
+                // textarea grows. That would bottom-align a one-line input inside
+                // the 28px the control sets, leaving the text half a control off
+                // centre. Only this column opts out: while the input is shorter
+                // than the control it centres, and once it is taller it sets the
+                // row height and the centring stops mattering.
+                className="min-w-0 flex-1 self-center"
+              >
                 <AgentMentionMenu
                   ref={mentionMenuRef}
                   open={mentionMenuOpen && !agentMentionLocked}
