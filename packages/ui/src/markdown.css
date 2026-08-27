@@ -33,7 +33,7 @@
 @source "../../../@streamdown/mermaid/dist/*.js";
 
 /* Dependency sources and authored docs still expose off-roster candidates.
-   Keep them out of host bundles. Restate inline code on Rome's smallest step. */
+   Keep them out of host bundles. Restate inline code on Rome's spacing scale. */
 @source not inline("py-0.5");
 @source not inline("p-1.5");
 @source not inline("px-1.5");
@@ -232,8 +232,13 @@
   @apply rounded-16;
 }
 
+/* Inline padding only. Padding on an inline box paints outside the line box
+   without growing it, and at 14px IBM Plex Mono's 1.3em content box already
+   fills 18.2px of a 20px prose line — a vertical step would spill the tint
+   over the lines above and below. The face carries that breathing room
+   itself: its ascent clears the caps by a third of an em. */
 [data-streamdown="inline-code"] {
-  @apply px-2 py-1;
+  @apply px-2;
 }
 
 [data-streamdown="code-block-actions"],
