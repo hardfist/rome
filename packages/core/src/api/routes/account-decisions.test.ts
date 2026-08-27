@@ -10,6 +10,7 @@ import {
 } from "@rome/api-types/people";
 import { accountDecisionRoutes } from "./account-decisions.js";
 import { accountsRoutes } from "./accounts.js";
+import { dismissAccount, type AccountDecisionDeps } from "../../people/account-decisions.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 import { channelMappings } from "../../db/schema.js";
@@ -247,6 +248,51 @@ describe("Account dismiss and restore", () => {
       expect(body).not.toContain(STRANGER_PERSON_ID);
       expect(body).not.toContain(STRANGER_PERSON_DISPLAY_NAME);
     }
+  });
+
+  it("loses the race rather than stealing a link placed after the read that cleared it", async () => {
+    // The interleaving the refusal has to survive: the directory read that
+    // decides the account answers before a rival's link lands, so the write
+    // runs holding a presentation that says nobody has placed the account when
+    // somebody just has. Checking before writing cannot see this; only the
+    // write itself can refuse it.
+    let rivalId: string | null = null;
+    const repo = deps.personMappingRepo;
+    const racing: AccountDecisionDeps = {
+      ...deps,
+      personMappingRepo: {
+        findAllWithMappings: async () => {
+          const stale = await repo.findAllWithMappings();
+          rivalId ??= await repo.create({
+            displayName: "Rival Claimant",
+            bondLevel: "other",
+            approved: true,
+            channelMappings: [{ channel: "whatsapp", channelUserId: TALKING_JID }],
+          });
+          return stale;
+        },
+        claimForStranger: repo.claimForStranger.bind(repo),
+        releaseStrangerClaims: repo.releaseStrangerClaims.bind(repo),
+      },
+    };
+
+    const result = await dismissAccount(racing, {
+      channel: "whatsapp",
+      channelUserId: TALKING_JID,
+    });
+
+    // The rival won, and is named — the same refusal the guardian would have
+    // been given had their page been one read newer.
+    expect(result.outcome).toBe("conflict");
+    if (result.outcome !== "conflict") throw new Error("expected a conflict");
+    expect(result.conflict.ownerPersonId).toBe(rivalId);
+    expect(result.conflict.ownerPersonName).toBe("Rival Claimant");
+
+    // And the placement is still theirs: a dismissal that displaced it would
+    // have lost work the guardian did, silently.
+    const rows = mappingRows("whatsapp", TALKING_JID);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].personId).toBe(rivalId);
   });
 
   it("answers 404 for a pair nothing has ever observed, rather than minting an account", async () => {

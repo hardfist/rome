@@ -20,6 +20,7 @@ import {
   accountPresentation,
   linkConflict,
   type AccountDecision,
+  type AccountPresentation,
   type DirectoryAccount,
   type LinkConflict,
 } from "@rome/api-types/people";
@@ -29,7 +30,7 @@ import type { PersonMappingRepository } from "../db/repositories/person-mapping.
 
 export interface AccountDecisionDeps extends AccountDirectoryDeps {
   personMappingRepo: AccountDirectoryDeps["personMappingRepo"] &
-    Pick<PersonMappingRepository, "addChannelMapping" | "releaseStrangerClaims">;
+    Pick<PersonMappingRepository, "claimForStranger" | "releaseStrangerClaims">;
 }
 
 /** The account a write names: any address the channel reaches it at. */
@@ -64,18 +65,25 @@ export async function dismissAccount(
   const account = await locate(deps, ref);
   if (account == null) return { outcome: "unknown" };
 
+  // What the guardian was looking at. It refuses the account they can see is
+  // placed — including one placed on an addressing other than the one they
+  // named, which only the fold knows is the same account.
   const conflict = linkConflict(account);
   if (conflict) return { outcome: "conflict", conflict };
 
   if (account.state !== "dismissed") {
-    // The name stays the channel's. This write records a decision, not news
-    // about what the platform calls the account, and the naming seam
-    // (`AccountNames`) answers that question for every reader anyway.
-    await deps.personMappingRepo.addChannelMapping(
-      STRANGER_PERSON_ID,
+    // And what is true at the moment of writing. The read above cannot see a
+    // placement that lands after it, so the claim itself is conditional: it
+    // takes the identity only if nobody holds it, and reports whoever kept it.
+    // Without that, a link arriving in the gap would be re-pointed onto the
+    // sentinel and lost — the exact harm the refusal above exists to prevent,
+    // reached by a different route.
+    const blocked = await deps.personMappingRepo.claimForStranger(
       account.channel,
       account.channelUserId,
     );
+    const lost = blocked && linkConflict(presentationOf(account, blocked));
+    if (lost) return { outcome: "conflict", conflict: lost };
   }
 
   return decided(account, {
@@ -133,6 +141,19 @@ async function locate(
           account.addresses.includes(ref.channelUserId)),
     ) ?? null
   );
+}
+
+/** An account as it reads under a link, for the one caller that learns of a
+ *  link the directory read did not carry: the loser of a race. */
+function presentationOf(
+  account: DirectoryAccount,
+  owner: { id: string; displayName: string },
+): AccountPresentation & { channel: string; channelUserId: string } {
+  return {
+    channel: account.channel,
+    channelUserId: account.channelUserId,
+    ...accountPresentation({ personId: owner.id, displayName: owner.displayName }),
+  };
 }
 
 /** The answer a landed write gives, read through the same presentation seam a
