@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { Avatar } from "./avatar";
+import { Avatar, AVATAR_TONE, GUARDIAN_TONE } from "./avatar";
 import { ChannelGlyph, ChannelPill } from "./channel-meta";
 import { timeAgo } from "./format";
 import { isRowFixed, rowHandle, type PeopleRow, type RowLevel } from "./people-model";
@@ -9,9 +9,6 @@ import { isRowFixed, rowHandle, type PeopleRow, type RowLevel } from "./people-m
 // routing to whoever has something new (stream), deciding where an unplaced
 // account belongs (unknown), or reading the roster (directory). Avatars are
 // neutral everywhere — a channel is a glyph on this page, never a color.
-
-const AVATAR_TONE = "bg-surface-muted text-muted-foreground";
-const GUARDIAN_TONE = "bg-foreground text-background";
 
 const LEVEL_LABEL_KEY: Record<RowLevel, string> = {
   unknown: "levels.unknown",
@@ -26,7 +23,7 @@ export function levelLabelKey(level: RowLevel): string {
   return LEVEL_LABEL_KEY[level];
 }
 
-const ROW_BASE =
+export const ROW_BASE =
   "grid w-full items-center gap-3 border-b border-border-subtle px-2 py-2 text-left last:border-b-0";
 
 /**
@@ -41,7 +38,7 @@ export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void
   const { t } = useTranslation("people");
   const body = (
     <>
-      <Avatar name={row.displayName} tone={AVATAR_TONE} size="sm" />
+      <Avatar name={row.displayName} />
       <span className="grid min-w-0 gap-1 sm:grid-cols-[minmax(7rem,1fr)_minmax(0,1.8fr)] sm:items-center sm:gap-3">
         <span className="truncate text-ui text-foreground">{row.displayName}</span>
         <span className="flex min-w-0 items-center gap-2 text-aux text-muted-foreground">
@@ -65,7 +62,7 @@ export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void
     </>
   );
 
-  const className = cn(ROW_BASE, "grid-cols-[2.25rem_minmax(0,1fr)_auto]");
+  const className = cn(ROW_BASE, "grid-cols-[2rem_minmax(0,1fr)_auto]");
   if (!onOpen) return <div className={className}>{body}</div>;
   return (
     <button type="button" onClick={onOpen} className={cn(className, "hover:bg-surface")}>
@@ -91,14 +88,14 @@ export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.R
     <div
       className={cn(
         ROW_BASE,
-        "grid-cols-[2.25rem_minmax(0,1fr)_auto] sm:grid-cols-[2.25rem_minmax(10rem,1.1fr)_minmax(0,1.6fr)_auto]",
+        "grid-cols-[2rem_minmax(0,1fr)_auto] sm:grid-cols-[2rem_minmax(10rem,1.1fr)_minmax(0,1.6fr)_auto]",
       )}
     >
-      <Avatar name={row.displayName} tone={AVATAR_TONE} size="sm" />
+      <Avatar name={row.displayName} />
       <span className="min-w-0 text-left">
         <span className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="truncate text-ui text-foreground">{row.displayName}</span>
-          {channel && <ChannelPill channel={channel} t={t} />}
+          {channel && <ChannelPill channel={channel} />}
         </span>
         <span className="block truncate text-aux text-muted-foreground">
           {handle && <span className="font-mono tabular-nums">{handle}</span>}
@@ -130,11 +127,19 @@ export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.R
  */
 export function DirectoryRow({
   row,
+  selected,
   onOpen,
+  onToggleSelect,
   actions,
 }: {
   row: PeopleRow;
+  /** Whether this row is in the selection a bulk gesture would apply to. */
+  selected?: boolean;
   onOpen?: () => void;
+  /** Given, the avatar becomes the selection control. Omitted — as the page
+   *  leaves it until the bulk bar lands (rome-os/rome#67) — the avatar is an
+   *  ornament and the row carries no selection state. */
+  onToggleSelect?: () => void;
   actions?: React.ReactNode;
 }) {
   const { t } = useTranslation("people");
@@ -160,11 +165,27 @@ export function DirectoryRow({
     <div
       className={cn(
         ROW_BASE,
-        "grid-cols-[2.25rem_minmax(0,1fr)_auto]",
+        "grid-cols-[2rem_minmax(0,1fr)_auto]",
         fixed ? "cursor-default" : "hover:bg-surface",
+        selected && "bg-primary/10 hover:bg-primary/15",
       )}
     >
-      <Avatar name={row.displayName} tone={fixed ? GUARDIAN_TONE : AVATAR_TONE} size="sm" />
+      {fixed || !onToggleSelect ? (
+        <Avatar name={row.displayName} tone={fixed ? GUARDIAN_TONE : AVATAR_TONE} />
+      ) : (
+        // Selecting is what the avatar does in the roster — the design's way
+        // into the bulk bar, and the reason this column is a control rather
+        // than an ornament.
+        <button
+          type="button"
+          onClick={onToggleSelect}
+          aria-pressed={selected}
+          aria-label={t("actions.select", { name: row.displayName })}
+          className="rounded-full outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <Avatar name={row.displayName} />
+        </button>
+      )}
       {onOpen && !fixed ? (
         <button type="button" onClick={onOpen} className="min-w-0 text-left">
           {identity}

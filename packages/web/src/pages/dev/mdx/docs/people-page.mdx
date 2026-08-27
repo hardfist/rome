@@ -26,11 +26,17 @@ ships with, so switching the theme re-renders the design rather than a picture o
 > [#2393](https://github.com/amantru/rome-internal/pull/2393) and its interactive
 > mockup, version `monochrome-channel-glyphs`.
 
-The specimens stand in for #2393's row components, which this repo does not carry
-yet. They hold the row shapes and the glyph set against literal fixtures. In one
-place they diverge from what ships: an avatar here is the kit's `Avatar` with a
-fallback child, where #2393 rolls its own. Both draw the same initials on the same
-neutral tone, and the kit's adds a hairline ring.
+Every specimen renders the page's own components against literal fixtures — the
+same `StreamRow`, `UnknownRow`, `DirectoryRow`, avatar and glyph set the roster
+draws with, wired to nothing. A specimen that drew its own rows would go on
+looking right after the page stopped, which is the one thing a live note exists
+to prevent.
+
+Two pieces below are still written in the note rather than imported: the row's
+`⋯` menu and the bulk bar. Every item in them is a write, and the writes move
+onto the /people contract in
+[#67](https://github.com/rome-os/rome/issues/67) — when they land, both come out
+of the specimen and the note renders what ships.
 
 ---
 
@@ -51,10 +57,12 @@ when senders are waiting.
 
 <Invariant>
   Every number on screen is the server's. Chips read `counts`, directory headings read
-  `totals`, and neither is derived from the rows that happened to load — the union is
-  paged, so a count taken over page one would report no waiting senders whenever
+  `totals`, and neither is derived from the rows that happened to load — the directory
+  is paged, so a count taken over page one would report no waiting senders whenever
   placed people fill it. The two numbers answer different questions and are meant to
-  disagree.
+  disagree: a chip counts what is waiting on a decision, so a contact the address book
+  synced and nobody has ever heard from is not in it, while the heading counts everyone
+  in the group as the roster stands.
 </Invariant>
 
 ---
@@ -114,7 +122,7 @@ would otherwise have no way back on screen.
 
 ## The person page
 
-`/people/:identityId` is the dossier: identity card with bond select, linked accounts
+`/people/:personId` is the dossier: identity card with bond select, linked accounts
 as neutral glyph + id pills, `Link account…` and `Merge into…`. The merged timeline
 grouped by day sits below it, and a sticky composer sits at the bottom.
 

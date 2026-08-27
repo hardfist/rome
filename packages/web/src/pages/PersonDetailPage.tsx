@@ -123,7 +123,6 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
                   <ChannelPill
                     key={`${account.channel}:${account.channelUserId}`}
                     channel={account.channel}
-                    t={t}
                   >
                     <span className="font-mono tabular-nums">
                       {account.channel === "whatsapp"
@@ -182,7 +181,7 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
                     key={`${entry.source}:${entry.ref}`}
                     className="grid grid-cols-[auto_1fr_auto] items-baseline gap-3 border-b border-border-subtle px-2 py-2"
                   >
-                    <ChannelPill channel={entry.source} t={t} />
+                    <ChannelPill channel={entry.source} />
                     <p className="min-w-0 text-ui text-foreground">
                       {entry.direction === "outbound" && (
                         <span className="text-subtle-foreground">

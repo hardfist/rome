@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -120,13 +121,12 @@ export function ChannelGlyph({ channel, className }: { channel: string; classNam
 export function ChannelPill({
   channel,
   children,
-  t,
 }: {
   channel: string;
   /** What the pill says after its glyph. The channel's own name when omitted. */
   children?: React.ReactNode;
-  t: TFunction<"people">;
 }) {
+  const { t } = useTranslation("people");
   const { Glyph } = CHANNEL_META[channel] ?? { Glyph: GenericChannelGlyph };
   return (
     <Badge variant="outline" className="shrink-0 text-muted-foreground">
