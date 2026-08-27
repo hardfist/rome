@@ -889,149 +889,58 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           onRemove={removePendingUpload}
           disabled={isComposerBusy}
         />
-        <SlashSkillMenu
-          ref={slashMenuRef}
-          open={slashMenuOpen && !isComposerBusy}
-          onOpenChange={(next) => {
-            setSlashMenuOpen(next);
-            if (!next) setSlashQuery("");
-          }}
-          query={slashQuery}
-          onSelect={acceptSlashSkill}
-          anchor={
-            <div>
-              <AgentMentionMenu
-                ref={mentionMenuRef}
-                open={mentionMenuOpen && !agentMentionLocked}
-                onOpenChange={(next) => {
-                  setMentionMenuOpen(next);
-                  if (!next) {
-                    setMentionAnchorIndex(null);
-                    setMentionQuery("");
-                  }
-                }}
-                query={mentionQuery}
-                onSelect={acceptMention}
-                anchor={
-                  <textarea
-                    ref={textareaRef}
-                    value={inputText}
-                    onChange={handleTextareaChange}
-                    onSelect={handleTextareaSelect}
-                    onKeyDown={handleKeyDown}
-                    onPaste={handlePaste}
-                    placeholder={
-                      pendingUploads.length > 0
-                        ? t("composer.placeholderWithUploads")
-                        : t("composer.placeholderDefault")
+        <div data-chat-composer-input-row className="flex items-end gap-2">
+          <SlashSkillMenu
+            ref={slashMenuRef}
+            open={slashMenuOpen && !isComposerBusy}
+            onOpenChange={(next) => {
+              setSlashMenuOpen(next);
+              if (!next) setSlashQuery("");
+            }}
+            query={slashQuery}
+            onSelect={acceptSlashSkill}
+            anchor={
+              <div className="min-w-0 flex-1">
+                <AgentMentionMenu
+                  ref={mentionMenuRef}
+                  open={mentionMenuOpen && !agentMentionLocked}
+                  onOpenChange={(next) => {
+                    setMentionMenuOpen(next);
+                    if (!next) {
+                      setMentionAnchorIndex(null);
+                      setMentionQuery("");
                     }
-                    rows={1}
-                    className="block w-full resize-none border-0 bg-transparent text-body text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
-                    style={{
-                      minHeight: TEXTAREA_MIN_HEIGHT,
-                      maxHeight: `${TEXTAREA_MAX_HEIGHT}px`,
-                    }}
-                    onInput={(e) => clampTextareaHeight(e.target as HTMLTextAreaElement)}
-                    disabled={isComposerBusy}
-                  />
-                }
-              />
-            </div>
-          }
-        />
-        <div
-          data-chat-composer-toolbar
-          className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-2"
-        >
-          {showProjectSelector && (
-            <ProjectSelector
-              ref={projectMenuRef}
-              t={t}
-              projectCatalog={projectCatalog}
-              projectsLoading={projectsLoading}
-              projectsError={projectsError}
-              draftProjectName={draftProjectName}
-              draftProjectLabel={draftProjectLabel}
-              defaultProjectName={DEFAULT_PROJECT_NAME}
-              menuOpen={draftProjectMenuOpen}
-              searchQuery={projectSearchQuery}
-              setSearchQuery={setProjectSearchQuery}
-              createFormOpen={createProjectFormOpen}
-              setCreateFormOpen={setCreateProjectFormOpen}
-              newProjectName={newProjectName}
-              setNewProjectName={setNewProjectName}
-              creatingProject={creatingProject}
-              connectOnCreate={connectOnCreate}
-              setConnectOnCreate={setConnectOnCreate}
-              onToggleMenu={async () => {
-                const nextOpen = !draftProjectMenuOpen;
-                setDraftProjectMenuOpen(nextOpen);
-                setProjectsError(null);
-                if (!nextOpen) {
-                  setProjectSearchQuery("");
-                  setCreateProjectFormOpen(false);
-                } else if (!projectCatalog) {
-                  await loadProjects();
-                }
-              }}
-              onPickProject={(name) => {
-                setDraftProjectName(name);
-                setDraftProjectMenuOpen(false);
-                setProjectSearchQuery("");
-                setCreateProjectFormOpen(false);
-              }}
-              onCreateProject={() => createProjectAndSelect()}
-            />
-          )}
-          {pendingConnectPath ? (
-            <SourceConnect
-              mode="link"
-              projectPath={pendingConnectPath}
-              open={!!pendingConnectPath}
-              onClose={() => setPendingConnectPath(null)}
-            />
-          ) : null}
-          {impersonationEnabled && (
-            <ImpersonationMenu
-              open={impersonationMenuOpen}
-              onOpenChange={setImpersonationMenuOpen}
-              selectedPersonId={selectedPersonId}
-              onSelectPersonId={setSelectedPersonId}
-              options={impersonationOptions}
-              selectedPerson={selectedPerson}
-              selectedPersonLabel={selectedPersonLabel}
-              guardianLabel={guardianLabel}
-            />
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isComposerBusy}
-            aria-label={t("composer.uploadFiles")}
-            title={t("composer.uploadFiles")}
-            className="touch-target"
-          >
-            <Paperclip aria-hidden />
-          </Button>
-          {showModelSelector && modelSelectorEnabled && (
-            <ModelSelectorMenu
-              open={modelMenuOpen}
-              onOpenChange={setModelMenuOpen}
-              value={largeModelSelection}
-              onChange={(next) => void updateLargeModelSelection(next)}
-              disabled={isComposerBusy}
-            />
-          )}
-          <ReasoningEffortMenu
-            open={reasoningMenuOpen}
-            onOpenChange={setReasoningMenuOpen}
-            value={reasoningEffort}
-            onChange={(next) => void updateReasoningEffort(next)}
-            disabled={isComposerBusy}
+                  }}
+                  query={mentionQuery}
+                  onSelect={acceptMention}
+                  anchor={
+                    <textarea
+                      ref={textareaRef}
+                      value={inputText}
+                      onChange={handleTextareaChange}
+                      onSelect={handleTextareaSelect}
+                      onKeyDown={handleKeyDown}
+                      onPaste={handlePaste}
+                      placeholder={
+                        pendingUploads.length > 0
+                          ? t("composer.placeholderWithUploads")
+                          : t("composer.placeholderDefault")
+                      }
+                      rows={1}
+                      className="block w-full resize-none border-0 bg-transparent text-body text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
+                      style={{
+                        minHeight: TEXTAREA_MIN_HEIGHT,
+                        maxHeight: `${TEXTAREA_MAX_HEIGHT}px`,
+                      }}
+                      onInput={(e) => clampTextareaHeight(e.target as HTMLTextAreaElement)}
+                      disabled={isComposerBusy}
+                    />
+                  }
+                />
+              </div>
+            }
           />
-          {/* Stop + Send cluster on the right; Stop sits just left of Send. */}
+          {/* Stop sits just left of Send. */}
           <div className="ml-auto flex items-center gap-2">
             {isStreaming && onStop && (
               <Button
@@ -1070,6 +979,99 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             </Button>
           </div>
         </div>
+      </div>
+      <div
+        data-chat-composer-toolbar
+        className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-2 px-2"
+      >
+        {showProjectSelector && (
+          <ProjectSelector
+            ref={projectMenuRef}
+            t={t}
+            projectCatalog={projectCatalog}
+            projectsLoading={projectsLoading}
+            projectsError={projectsError}
+            draftProjectName={draftProjectName}
+            draftProjectLabel={draftProjectLabel}
+            defaultProjectName={DEFAULT_PROJECT_NAME}
+            menuOpen={draftProjectMenuOpen}
+            searchQuery={projectSearchQuery}
+            setSearchQuery={setProjectSearchQuery}
+            createFormOpen={createProjectFormOpen}
+            setCreateFormOpen={setCreateProjectFormOpen}
+            newProjectName={newProjectName}
+            setNewProjectName={setNewProjectName}
+            creatingProject={creatingProject}
+            connectOnCreate={connectOnCreate}
+            setConnectOnCreate={setConnectOnCreate}
+            onToggleMenu={async () => {
+              const nextOpen = !draftProjectMenuOpen;
+              setDraftProjectMenuOpen(nextOpen);
+              setProjectsError(null);
+              if (!nextOpen) {
+                setProjectSearchQuery("");
+                setCreateProjectFormOpen(false);
+              } else if (!projectCatalog) {
+                await loadProjects();
+              }
+            }}
+            onPickProject={(name) => {
+              setDraftProjectName(name);
+              setDraftProjectMenuOpen(false);
+              setProjectSearchQuery("");
+              setCreateProjectFormOpen(false);
+            }}
+            onCreateProject={() => createProjectAndSelect()}
+          />
+        )}
+        {pendingConnectPath ? (
+          <SourceConnect
+            mode="link"
+            projectPath={pendingConnectPath}
+            open={!!pendingConnectPath}
+            onClose={() => setPendingConnectPath(null)}
+          />
+        ) : null}
+        {impersonationEnabled && (
+          <ImpersonationMenu
+            open={impersonationMenuOpen}
+            onOpenChange={setImpersonationMenuOpen}
+            selectedPersonId={selectedPersonId}
+            onSelectPersonId={setSelectedPersonId}
+            options={impersonationOptions}
+            selectedPerson={selectedPerson}
+            selectedPersonLabel={selectedPersonLabel}
+            guardianLabel={guardianLabel}
+          />
+        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isComposerBusy}
+          aria-label={t("composer.uploadFiles")}
+          title={t("composer.uploadFiles")}
+          className="touch-target"
+        >
+          <Paperclip aria-hidden />
+        </Button>
+        {showModelSelector && modelSelectorEnabled && (
+          <ModelSelectorMenu
+            open={modelMenuOpen}
+            onOpenChange={setModelMenuOpen}
+            value={largeModelSelection}
+            onChange={(next) => void updateLargeModelSelection(next)}
+            disabled={isComposerBusy}
+          />
+        )}
+        <ReasoningEffortMenu
+          open={reasoningMenuOpen}
+          onOpenChange={setReasoningMenuOpen}
+          value={reasoningEffort}
+          onChange={(next) => void updateReasoningEffort(next)}
+          disabled={isComposerBusy}
+        />
       </div>
     </>
   );
