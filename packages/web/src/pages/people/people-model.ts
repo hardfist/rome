@@ -273,24 +273,44 @@ export function directoryGroups(
 export type LevelCounts = Record<RowLevel, number>;
 
 /**
- * The numbers the chips and the group headings show — the server's, from both
- * reads at once.
+ * The two sets of numbers this page renders — the server's, from both reads at
+ * once, and meant to disagree.
  *
- * The people listing counts the placed levels; the account directory counts the
- * two unplaced ends. A linked account is not counted again as an account: it is
- * already counted under the person it resolves to, which is the same rule that
- * keeps it off the roster as a row of its own.
+ * `chips` is what a filter chip can show: what is *waiting on a decision*. A
+ * contact the address book synced and nobody has ever heard from is not waiting
+ * on anything, so it is not counted, whether or not the directory is currently
+ * showing it.
+ *
+ * `totals` is what a directory heading counts: everyone in the group as the
+ * roster currently stands, silent contacts included once the toggle has asked
+ * for them — a heading answers "how many are in here".
+ *
+ * Both come off the reads rather than the loaded rows. The directory pages, so
+ * a count taken over what happened to arrive would report no waiting senders
+ * whenever placed people filled page one.
+ *
+ * A linked account is never counted twice: it is already counted under the
+ * person it resolves to, which is the same rule that keeps it off the roster as
+ * a row of its own.
  */
 export function levelCounts(
   people: PersonCounts,
-  accounts: Pick<AccountDirectory, "counts">,
-): LevelCounts {
-  return {
-    unknown: accounts.counts.unlinked,
+  accounts: Pick<AccountDirectory, "counts" | "silentTotal">,
+  options: { includeSilent: boolean },
+): { chips: LevelCounts; totals: LevelCounts } {
+  const placed = {
     guardian: people.guardian,
     "inner-circle": people["inner-circle"],
     acquaintance: people.acquaintance,
     other: people.other,
     stranger: accounts.counts.dismissed,
+  };
+  // `counts` describes what the request admitted, so the silent contacts are in
+  // it exactly when the toggle asked for them — and taking them back out is
+  // what keeps the chip counting the same thing in both views.
+  const waiting = accounts.counts.unlinked - (options.includeSilent ? accounts.silentTotal : 0);
+  return {
+    chips: { ...placed, unknown: waiting },
+    totals: { ...placed, unknown: accounts.counts.unlinked },
   };
 }

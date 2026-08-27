@@ -240,13 +240,17 @@ describe("directoryGroups", () => {
 });
 
 describe("levelCounts", () => {
+  const directoryCounts = (over = {}) =>
+    directory([], { counts: { unlinked: 6, linked: 12, dismissed: 2 }, silentTotal: 4, ...over });
+
   it("reads every number off the server, never off the loaded rows", () => {
-    const counts = levelCounts(
+    const { totals } = levelCounts(
       { all: 9, guardian: 1, "inner-circle": 3, acquaintance: 4, other: 1 },
-      directory([], { counts: { unlinked: 6, linked: 12, dismissed: 2 } }),
+      directoryCounts(),
+      { includeSilent: false },
     );
 
-    expect(counts).toEqual({
+    expect(totals).toEqual({
       unknown: 6,
       guardian: 1,
       "inner-circle": 3,
@@ -256,7 +260,31 @@ describe("levelCounts", () => {
     });
     // Linked accounts are counted under the person they resolve to, never again
     // as accounts — the two nouns describe one roster.
-    expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(9 + 6 + 2);
+    expect(Object.values(totals).reduce((a, b) => a + b, 0)).toBe(9 + 6 + 2);
+  });
+
+  it("counts what is waiting on a decision on the chip, and the group on the heading", () => {
+    const people = { all: 9, guardian: 1, "inner-circle": 3, acquaintance: 4, other: 1 };
+    // Browsing: the directory holds the address book back, so its own count of
+    // unlinked accounts is the waiting ones and nothing else.
+    const browsing = levelCounts(people, directoryCounts(), { includeSilent: false });
+    expect(browsing.chips.unknown).toBe(6);
+    expect(browsing.totals.unknown).toBe(6);
+
+    // The toggle admits four contacts nobody has ever heard from. The heading
+    // counts them — it answers "how many are in here" — and the chip does not:
+    // a contact that has never said anything is not waiting on a decision, and
+    // a chip that grew when the address book came on screen would report ten
+    // senders to triage where there are six.
+    const showing = levelCounts(
+      people,
+      directoryCounts({ counts: { unlinked: 10, linked: 12, dismissed: 2 } }),
+      {
+        includeSilent: true,
+      },
+    );
+    expect(showing.chips.unknown).toBe(6);
+    expect(showing.totals.unknown).toBe(10);
   });
 });
 

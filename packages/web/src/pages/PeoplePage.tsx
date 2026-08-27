@@ -101,9 +101,17 @@ export default function PeoplePage() {
     () => directoryGroups(rows, { filter, search: settled, showSilent }),
     [rows, filter, settled, showSilent],
   );
+  // Two sets of numbers, and they are meant to disagree: a chip counts what is
+  // waiting on a decision, a directory heading counts everyone in the group as
+  // the roster currently stands.
   const counts = useMemo(
-    () => levelCounts(roster.peopleCounts, { counts: roster.accountCounts }),
-    [roster.peopleCounts, roster.accountCounts],
+    () =>
+      levelCounts(
+        roster.peopleCounts,
+        { counts: roster.accountCounts, silentTotal: roster.silentTotal },
+        { includeSilent: view === "directory" && showSilent },
+      ),
+    [roster.peopleCounts, roster.accountCounts, roster.silentTotal, view, showSilent],
   );
   // A link lands on a person, so the picker offers the people this read
   // returned rather than the accounts beside them.
@@ -186,7 +194,8 @@ export default function PeoplePage() {
               label: option === "all" ? t("filters.all") : t(levelLabelKey(option)),
               // Unknown is the page's one number that asks for a decision, so
               // it carries a count; the other chips are plain labels.
-              count: option === "unknown" && counts.unknown > 0 ? counts.unknown : undefined,
+              count:
+                option === "unknown" && counts.chips.unknown > 0 ? counts.chips.unknown : undefined,
             }))}
           />
         </div>
@@ -240,7 +249,7 @@ export default function PeoplePage() {
         ) : (
           <DirectoryView
             groups={groups}
-            counts={counts}
+            counts={counts.totals}
             showSilent={showSilent}
             silentTotal={roster.silentTotal}
             onToggleSilent={setShowSilent}
