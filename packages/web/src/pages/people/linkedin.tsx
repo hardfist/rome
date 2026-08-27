@@ -20,7 +20,7 @@ import { fetchJson } from "@/lib/fetch-json";
 import { Avatar } from "./avatar";
 import { ChannelGlyph } from "./channel-meta";
 import { clockTime, dayLabel, navigatorLocale, startOfDay, timeAgo } from "./format";
-import type { LinkedInMessage, LinkedInThread } from "./legacy-api-shapes";
+import type { LinkedInMessage, LinkedInThread } from "./channel-mirror-shapes";
 
 /**
  * The LinkedIn mirror, carried onto the rebuilt People page.

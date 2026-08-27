@@ -1,27 +1,16 @@
-// The shapes of the endpoints that predate the /people contract: the unmapped
-// queue, the curated persons list, and the two conversation mirrors. The People
-// page is off all but the LinkedIn mirror, whose threads are conversations
-// rather than accounts and reach no /accounts row. Core still serves the rest —
-// the WhatsApp mirror backs the chat drawer — so the dashboard's mock backend
-// stands in for them and types its fixtures against these.
+// The two conversation mirrors, which are on neither noun of the /people
+// contract: a thread is a conversation rather than an account, so nothing here
+// reaches a /accounts row.
+//
+// The LinkedIn mirror has a reader — `./linkedin.tsx`, the one section of the
+// People page still on its own endpoints, because a LinkedIn account cannot yet
+// be linked to a person. The WhatsApp mirror has none: the People page rebuild
+// replaced its section with the channel-blind timeline, and core still serves
+// `/api/whatsapp/contacts*` for callers outside this dashboard. Its shapes stay
+// so the mock backend keeps standing in for routes that exist.
 //
 // One definition, read by both the fetch site and the mock that answers it — a
 // second copy would let the two drift while both still typecheck.
-
-export interface UnknownSender {
-  channel: string;
-  channelUserId: string;
-  displayName: string | null;
-  lastMessage: string | null;
-  lastMessageAt: number | null;
-}
-
-export interface Person {
-  id: string;
-  displayName: string;
-  bondLevel: string;
-  channelMappings: { channel: string; channelUserId: string }[];
-}
 
 /** One row of `/api/whatsapp/contacts/:jid/messages`, the WhatsApp mirror's own
  *  message shape. The People page reads the channel-blind timeline instead;

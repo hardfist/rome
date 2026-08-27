@@ -14,11 +14,9 @@ import {
 import type {
   LinkedInMessage,
   LinkedInThread,
-  Person as PeoplePerson,
-  UnknownSender,
   WhatsAppContact,
   WhatsAppMessage,
-} from "@/pages/people/legacy-api-shapes";
+} from "@/pages/people/channel-mirror-shapes";
 
 /**
  * The People tab's in-memory store: the curated people, the sentinel log, and
@@ -92,10 +90,16 @@ const HIKES_JID = "120363041948572901@g.us";
 const DEVIKA_NAME = "Devika";
 const DEVIKA_LATEST = { text: "Are you going on Saturday?", at: 3 * HOUR };
 
-/** The curated graph's row. `./people-api.ts` projects it into
- *  `PersonResource`, so a fixture that drops a field breaks the surface that
- *  reads it. */
-type PersonFixture = PeoplePerson;
+/** The curated graph's row, as the `persons` table holds it: the stored bond
+ *  level, free text included, and the accounts linked to it. `./people-api.ts`
+ *  projects it into `PersonResource`, so a fixture that drops a field breaks
+ *  the surface that reads it. */
+interface PersonFixture {
+  id: string;
+  displayName: string;
+  bondLevel: string;
+  channelMappings: { channel: string; channelUserId: string }[];
+}
 
 /**
  * What a contact row actually stores: address-book facts, and nothing derived.
@@ -185,9 +189,15 @@ export const persons: PersonFixture[] = [
 // is the half of these with no row in `channel_mappings`, so this list is the
 // raw log and the join runs in the handler — that is what makes a link take a
 // row out of the discovery queue instead of leaving it there until a reload.
-/** The log row, plus what Rome said back when it replied — `sentinel_log`
+/** A `sentinel_log` row, plus what Rome said back when it replied — the table
  *  records both halves of an exchange, and the timeline renders both. */
-type SentinelRow = UnknownSender & {
+type SentinelRow = {
+  channel: string;
+  channelUserId: string;
+  displayName: string | null;
+  lastMessage: string | null;
+  /** Unix seconds. */
+  lastMessageAt: number | null;
   reply?: string;
   /** This log row's own id. A timeline `ref` has to be unique across
    *  everything one source contributes to a person, and one channel
