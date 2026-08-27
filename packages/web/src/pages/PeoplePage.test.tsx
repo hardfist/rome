@@ -281,7 +281,15 @@ function applyWrite(
  */
 function mockApi(
   world: { people?: PersonResource[]; accounts?: DirectoryAccount[] } = {},
-  options: { limit?: number; peopleFail?: boolean; accountsFail?: boolean; writes?: "fail" } = {},
+  options: {
+    limit?: number;
+    peopleFail?: boolean;
+    accountsFail?: boolean;
+    writes?: "fail";
+    /** Holds every transfer in flight until this resolves, so a test can act
+     *  while one is still running. */
+    holdTransfers?: Promise<void>;
+  } = {},
 ) {
   // Cloned rather than shared: the writes below mutate this world, and the
   // fixtures are module constants every other test reads.
@@ -308,9 +316,9 @@ function mockApi(
       ({ ok: status < 400, status, json: async () => payload }) as Response;
 
     if (method !== "GET") {
-      return options.writes === "fail"
-        ? json({ error: "write refused" }, 500)
-        : applyWrite(state, method, parsed.pathname, body ?? {}, json);
+      if (options.writes === "fail") return json({ error: "write refused" }, 500);
+      if (body?.transferFrom && options.holdTransfers) await options.holdTransfers;
+      return applyWrite(state, method, parsed.pathname, body ?? {}, json);
     }
 
     if (url.includes("/api/accounts")) {
@@ -740,6 +748,45 @@ describe("PeoplePage placement", () => {
       channelUserId: "6591234472@s.whatsapp.net",
       transferFrom: "mira",
     });
+  });
+
+  it("fires one transfer however many times the confirm is clicked", async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { calls, state } = mockApi(
+      { people: [FRIEND], accounts: [UNKNOWN_SENDER] },
+      { holdTransfers: held },
+    );
+    renderPage();
+
+    await user.click(chip(/^Unknown/));
+    await screen.findByText("Rachel Lim");
+    state.accounts[0]!.state = "linked";
+    state.accounts[0]!.personId = "mira";
+    state.accounts[0]!.personName = "Mira Chen";
+
+    await user.click(screen.getByRole("button", { name: "Link" }));
+    await user.click(screen.getByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: /Wei Chen/ }));
+    await user.click(screen.getByRole("button", { name: "Link" }));
+
+    const dialog = await screen.findByRole("dialog");
+    const confirm = within(dialog).getByRole("button", { name: "Move it here" });
+    await user.click(confirm);
+    await user.click(confirm);
+
+    // The dialog stays up until the write settles, so the confirm is still on
+    // screen while the first transfer is in flight. A second one would re-attribute
+    // the account's history again — and would arrive naming an owner the first
+    // has already replaced, so it refuses and reports a conflict against the
+    // person the guardian just moved it to.
+    expect(calls.filter((call) => call.body?.transferFrom)).toHaveLength(1);
+
+    release();
+    await waitFor(() => expect(state.accounts[0]!.personId).toBe("wei-chen"));
   });
 
   it("writes through no /persons route", async () => {

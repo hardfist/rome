@@ -300,19 +300,31 @@ export function UnknownEntry({
 
   async function handleLink(personId: string, transferFrom?: string) {
     if (!account) return;
+    // The transfer confirm stays on screen until this settles — the write is
+    // what closes it — so the link has to hold the row busy rather than lean on
+    // the form's own submit state, which the confirm does not have. A second
+    // transfer would re-attribute the account's history again, and would arrive
+    // naming an owner the first one has already replaced: it refuses, and
+    // reports a conflict against the person the guardian just moved it to.
+    if (acting) return;
+    setActing(true);
     setError(null);
-    const result = await writes.link(personId, account, transferFrom);
-    if (result.ok) {
+    try {
+      const result = await writes.link(personId, account, transferFrom);
+      if (result.ok) {
+        setTransfer(null);
+        setAction(null);
+        return;
+      }
+      if ("conflict" in result && result.conflict.linkedPersonId) {
+        setTransfer({ conflict: result.conflict, personId });
+        return;
+      }
       setTransfer(null);
-      setAction(null);
-      return;
+      setError("conflict" in result ? result.conflict.error : result.message);
+    } finally {
+      setActing(false);
     }
-    if ("conflict" in result && result.conflict.linkedPersonId) {
-      setTransfer({ conflict: result.conflict, personId });
-      return;
-    }
-    setTransfer(null);
-    setError("conflict" in result ? result.conflict.error : result.message);
   }
 
   async function handleDismiss() {

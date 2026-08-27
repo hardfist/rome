@@ -10,7 +10,6 @@ import {
   linkAccount,
   mergePeople,
   restoreAccount,
-  unlinkAccount,
   updatePerson,
   type AccountRef,
   type WriteOutcome,
@@ -29,6 +28,11 @@ import {
 // gesture that reports itself done at the response leaves the row it acted on
 // standing for as long as the read takes, which reads as a write that did
 // nothing.
+//
+// One method per gesture the page has, which is fewer than the contract's verbs:
+// unlink is `./writes.ts`'s and stays there until a gesture asks for it. This
+// module is policy about settling, and there is nothing to settle for a write
+// nobody makes.
 
 export interface PeopleWrites {
   /** Create a person for an account nobody has placed, in one request. */
@@ -43,7 +47,6 @@ export interface PeopleWrites {
     account: AccountRef,
     transferFrom?: string,
   ): Promise<WriteOutcome<PersonResource>>;
-  unlink(personId: string, account: AccountRef): Promise<WriteOutcome<PersonResource>>;
   dismiss(account: AccountRef): Promise<WriteOutcome<DirectoryAccount>>;
   restore(account: AccountRef): Promise<WriteOutcome<DirectoryAccount>>;
   /** `into` absorbs `from`, and `from` is gone. */
@@ -91,7 +94,6 @@ export function usePeopleWrites(): PeopleWrites {
         settling(() =>
           linkAccount(personId, { ...ref(account), ...(transferFrom ? { transferFrom } : {}) }, t),
         ),
-      unlink: (personId, account) => settling(() => unlinkAccount(personId, ref(account), t)),
       dismiss: (account) => settling(() => dismissAccount(ref(account), t)),
       restore: (account) => settling(() => restoreAccount(ref(account), t)),
       merge: (into, from) => settling(() => mergePeople(into, from, t)),

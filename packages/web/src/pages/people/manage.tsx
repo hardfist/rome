@@ -149,6 +149,10 @@ function LinkAccountPicker({ person, onClose }: { person: PersonResource; onClos
   );
 
   async function link(account: DirectoryAccount, transferFrom?: string) {
+    // The transfer confirm is disabled while `busy`, and this refuses re-entry
+    // besides: a disabled button depends on the render having flushed, and a
+    // second transfer would re-attribute the account's history all over again.
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {

@@ -118,7 +118,14 @@ export function linkAccount(
   );
 }
 
-/** `DELETE /api/people/:id/accounts/:channel/:channelUserId`. */
+/**
+ * `DELETE /api/people/:id/accounts/:channel/:channelUserId`.
+ *
+ * No gesture calls this yet — the row menu that would is still ahead. It sits
+ * here because this module is the contract's verbs and a wire missing one reads
+ * as a verb that does not exist; `./use-writes.ts` carries only the gestures the
+ * page has.
+ */
 export function unlinkAccount(
   personId: string,
   account: AccountRef,
