@@ -18,6 +18,7 @@ const CallbackPage = lazy(() => import("./pages/CallbackPage"));
 const SharePage = lazy(() => import("./pages/share/SharePage"));
 const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 const PeoplePage = lazy(() => import("./pages/PeoplePage"));
+const PersonDetailPage = lazy(() => import("./pages/PersonDetailPage"));
 const MemoryPage = lazy(() => import("./pages/MemoryPage"));
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
 const RoutinesPage = lazy(() => import("./pages/RoutinesPage"));
@@ -126,6 +127,7 @@ export default function App() {
             <Route path="/chat/*" element={<FreePage />} />
             <Route path="/activity" element={<ActivityPage />} />
             <Route path="/people" element={<PeoplePage />} />
+            <Route path="/people/:personId" element={<PersonDetailPage />} />
             <Route path="/memory/*" element={<MemoryPage />} />
             <Route path="/projects/*" element={<ProjectsPage />} />
             <Route path="/sessions/*" element={<SessionsPage />} />

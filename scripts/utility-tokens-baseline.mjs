@@ -79,7 +79,6 @@ export const BASELINE = {
     "bg-[#ff5f57]": 1,
   },
   "packages/web/src/pages/ActivityPage.tsx": { "border-t-gray-800": 1 },
-  "packages/web/src/pages/PeoplePage.tsx": { "border-t-gray-800": 1 },
   "packages/web/src/pages/SessionsPage.tsx": { "text-emerald-600": 1 },
   "packages/web/src/pages/SettingsTabPage.tsx": {
     "from-zinc-900": 1,

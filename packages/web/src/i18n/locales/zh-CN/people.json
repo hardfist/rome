@@ -1,27 +1,38 @@
 {
-  "header": {
-    "liveUpdated": "实时 · 更新于 {{time}}",
+  "page": {
+    "subtitle": "有新动态的人，最新的排在前面。搜索可覆盖 Rome 认识的所有人。",
     "loading": "加载中…",
-    "staleUpdated": "刷新失败 · 上次更新于 {{time}}",
-    "loadFailed": "无法连接到服务器",
-    "partialUpdated": "部分板块刷新失败 · 上次更新于 {{time}}",
-    "partialFailed": "部分板块加载失败",
+    "emptyTitle": "暂无新动态",
+    "emptyHint": "任何给你发消息的人都会出现在这里，等待你安置。",
+    "emptyForSearch": "没有符合搜索条件的人",
+    "loadMore": "显示更多"
+  },
+  "header": {
     "refresh": "刷新"
   },
+  "search": {
+    "label": "搜索人物",
+    "placeholder": "搜索姓名、号码、账号…"
+  },
   "timeAgo": {
-    "unknown": "未知",
     "justNow": "刚刚",
-    "seconds": "{{count}} 秒前",
     "minutes": "{{count}} 分钟前",
     "hours": "{{count}} 小时前",
     "days": "{{count}} 天前"
   },
-  "bondLevels": {
+  "levels": {
+    "unknown": "未知",
     "guardian": "守护者",
     "innerCircle": "核心圈",
     "acquaintance": "熟人",
     "other": "其他",
     "stranger": "陌生人"
+  },
+  "levelHints": {
+    "innerCircle": "Rome 畅所欲言，及时转达",
+    "acquaintance": "Rome 会回应，但行动前会先确认",
+    "other": "认识，但保持距离",
+    "stranger": "Rome 不予理会 — 随时可以撤回"
   },
   "channels": {
     "telegram": "Telegram",
@@ -30,91 +41,101 @@
     "webchat": "网页聊天",
     "linkedin": "领英"
   },
-  "unmappedCalloutSingular": "有 {{count}} 位未关联发件人待处理",
-  "unmappedCalloutPlural": "有 {{count}} 位未关联发件人待处理",
-  "unmapped": {
-    "heading": "未关联发件人",
-    "description": "来自 Sentinel 日志、尚未关联到人物的新发件人",
-    "loading": "加载中…",
-    "emptyTitle": "暂无未关联发件人",
-    "emptyHint": "尚未关联到人物的新发件人将显示在这里",
-    "unknownSender": "未知发件人"
-  },
-  "known": {
-    "heading": "已知人物",
-    "description": "你在各渠道关联过的人物",
-    "loading": "加载中…",
-    "emptyTitle": "暂无已知人物",
-    "emptyHint": "为某个未关联发件人创建资料即可开始",
-    "emptyForFilter": "该亲密度下暂无人物",
-    "noChannels": "暂无渠道"
-  },
   "filters": {
-    "groupLabel": "按关系筛选已知人物",
-    "all": "全部",
-    "innerCircle": "核心圈",
-    "acquaintance": "熟人",
-    "other": "其他"
+    "groupLabel": "按亲密度筛选人物",
+    "all": "全部"
+  },
+  "row": {
+    "messageCount_one": "{{count}} 条消息",
+    "messageCount_other": "{{count}} 条消息",
+    "neverMessaged": "暂无动态 — 由通讯录同步而来",
+    "noPreview": "这条没有文字内容",
+    "noActivity": "暂无动态"
+  },
+  "guardian": {
+    "meta": "这是你本人，拥有所有界面的完整权限。"
+  },
+  "unknown": {
+    "includeSilent": "包含从未联系的联系人",
+    "includeSilentCount_one": "包含从未联系的联系人（{{count}}）",
+    "includeSilentCount_other": "包含从未联系的联系人（{{count}}）"
   },
   "actions": {
+    "select": "选择 {{name}}",
+    "rowMenu": "{{name}} 的操作",
+    "moveTo": "移动到",
+    "mergeInto": "合并到另一位人物…",
+    "cancel": "取消",
+    "open": "打开 {{name}}",
+    "close": "关闭",
     "create": "创建",
     "link": "关联",
     "markStranger": "视为陌生人",
-    "cancel": "取消",
-    "close": "关闭",
     "createProfile": "创建资料",
     "creating": "创建中…",
     "linkSubmit": "关联",
     "linking": "关联中…",
     "markingStranger": "标记中…"
   },
-  "strangerConfirm": {
-    "title": "将 {{name}} 视为陌生人？",
-    "description": "Rome 会把来自 {{name}} 的消息当作陌生人发来的，并且他们将不再出现在“{{section}}”中。此操作无法在面板中撤销。"
+  "bulk": {
+    "selected": "已选择",
+    "moveSelection": "将所选移动到",
+    "moveTo": "移动到…",
+    "mergeIntoOne": "合并为一位人物…",
+    "clear": "清除",
+    "noCommonTarget": "没有适用于全部所选的移动"
   },
-  "createForm": {
-    "nameLabel": "姓名",
-    "bondLevelLabel": "亲密度",
-    "relationLabel": "关系",
-    "relationPlaceholder": "你和他们是什么关系？"
-  },
-  "linkForm": {
-    "label": "关联到已有人物",
-    "selectPlaceholder": "选择一位人物…"
+  "merge": {
+    "title": "合并到另一位人物",
+    "description": "他们的渠道会转移到你选择的人物名下，重复的条目将被移除。",
+    "selectLabel": "要合并到的人物",
+    "confirm": "合并",
+    "searchPlaceholder": "按姓名、电话或账号搜索",
+    "noCandidates": "没有符合该搜索的人。"
   },
   "errors": {
     "requestFailed": "出了点问题，更改未保存。",
+    "changeFailedTitle": "更改保存失败",
     "network": "无法连接服务器，请检查网络后重试。",
     "loadFailedTitle": "加载失败",
     "loadFailedFallback": "出了点问题。请检查网络连接后重试。",
-    "messagesFailed": "消息加载失败",
-    "retry": "重试"
+    "retry": "重试",
+    "messagesFailed": "消息加载失败"
   },
   "whatsapp": {
-    "heading": "WhatsApp 联系人",
-    "description": "从你的 WhatsApp 通讯录同步",
-    "searchPlaceholder": "搜索姓名或号码…",
-    "emptyForSearch": "没有符合搜索条件的联系人",
-    "loadingContacts": "正在加载联系人…",
-    "emptyTitle": "暂无 WhatsApp 联系人",
-    "emptyHint": "尚未同步到任何联系人 — 若未关联 WhatsApp，请在设置中连接。",
-    "linkedTo": "已关联 · {{name}}",
-    "groupChat": "群聊",
-    "contact": "WhatsApp 联系人",
-    "messages": "消息",
-    "dialogTitle": "消息 · {{name}}",
-    "loading": "正在加载消息…",
-    "noMessages": "暂无消息",
-    "noMessagesHint": "发送一条消息开始对话",
-    "mediaPlaceholder": "[{{type}}]",
-    "composerPlaceholder": "输入消息",
     "send": "发送",
-    "sendFailed": "未送达 · 点按重试",
-    "notConnected": "WhatsApp 未连接 — 请在设置中关联后再发送。",
+    "notConnected": "WhatsApp 未连接 — 请在设置中关联后再发送。"
+  },
+  "views": {
+    "label": "视图",
+    "latest": "最新",
+    "directory": "名录"
+  },
+  "stream": {
+    "hint": "每人一行 · 最新在前",
+    "searchHint": "正在搜索 Rome 认识的所有人，包括从未联系过的联系人"
+  },
+  "detail": {
+    "back": "人物",
+    "bond": "亲密度",
+    "linkAccount": "关联账号…",
+    "linkNeedsPerson": "请先把这个身份安置到亲密度阶梯上，然后再为它关联账号",
+    "timeline": "时间线",
+    "timelineEmpty": "各个渠道都还没有任何往来。",
+    "loadOlder": "加载更早",
+    "outboundPrefix": "你：",
+    "sendVia": "发送渠道",
+    "channelReadOnly": "{{channel}}（只读）",
+    "composerLabel": "消息内容",
+    "composerPlaceholder": "给 {{name}} 发消息…",
+    "missingTitle": "找不到这个人",
+    "missingBody": "该身份可能已被合并到其他人名下。返回人物页面即可找到他们。",
+    "linkDescription": "你选择的账号将归属到此人名下，其历史记录也会并入这条时间线。",
+    "noAccounts": "暂无账号"
+  },
+  "timeline": {
     "today": "今天",
-    "yesterday": "昨天",
-    "reactedTo": "对早前的一条消息回应了 {{emoji}}",
-    "reactedToYou": "你对早前的一条消息回应了 {{emoji}}"
+    "yesterday": "昨天"
   },
   "linkedin": {
     "heading": "领英消息",
@@ -125,7 +146,8 @@
     "emptyTitle": "暂无领英对话",
     "emptyHint": "还没有同步内容——如果尚未连接领英,请到设置中连接。",
     "groupChat": "群组对话",
-    "participants": "{{count}} 位参与者",
+    "participants_one": "{{count}} 位参与者",
+    "participants_other": "{{count}} 位参与者",
     "thread": "领英对话",
     "unread": "未读",
     "messages": "消息",
@@ -138,5 +160,19 @@
     "send": "发送",
     "sendFailed": "领英回复发送失败 — 点按重试",
     "notConnected": "领英尚未连接 — 请先在设置中连接再回复。"
+  },
+  "createForm": {
+    "nameLabel": "姓名",
+    "bondLevelLabel": "亲密度",
+    "relationLabel": "关系",
+    "relationPlaceholder": "你和他们是什么关系？"
+  },
+  "linkForm": {
+    "label": "关联到已有人物",
+    "selectPlaceholder": "选择一位人物…"
+  },
+  "strangerConfirm": {
+    "title": "将 {{name}} 视为陌生人？",
+    "description": "Rome 会把来自 {{name}} 的消息当作陌生人发来的，并且他们将不再出现在“{{section}}”中。此操作无法在面板中撤销。"
   }
 }

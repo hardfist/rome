@@ -1,27 +1,38 @@
 {
-  "header": {
-    "liveUpdated": "Live · updated {{time}}",
+  "page": {
+    "subtitle": "Who has something new, most recent first. Search reaches everyone Rome knows.",
     "loading": "Loading…",
-    "staleUpdated": "Couldn't refresh · last updated {{time}}",
-    "loadFailed": "Couldn't reach the server",
-    "partialUpdated": "Some sections couldn't refresh · last updated {{time}}",
-    "partialFailed": "Some sections couldn't load",
+    "emptyTitle": "Nothing new yet",
+    "emptyHint": "Anyone who messages you shows up here, ready to place.",
+    "emptyForSearch": "Nobody matches your search",
+    "loadMore": "Show more"
+  },
+  "header": {
     "refresh": "Refresh"
   },
+  "search": {
+    "label": "Search people",
+    "placeholder": "Search name, phone, handle…"
+  },
   "timeAgo": {
-    "unknown": "unknown",
     "justNow": "just now",
-    "seconds": "{{count}}s ago",
     "minutes": "{{count}}m ago",
     "hours": "{{count}}h ago",
     "days": "{{count}}d ago"
   },
-  "bondLevels": {
+  "levels": {
+    "unknown": "Unknown",
     "guardian": "Guardian",
     "innerCircle": "Inner circle",
     "acquaintance": "Acquaintance",
     "other": "Other",
     "stranger": "Stranger"
+  },
+  "levelHints": {
+    "innerCircle": "Rome speaks freely, relays promptly",
+    "acquaintance": "Rome answers, but checks before acting",
+    "other": "Known, kept at arm's length",
+    "stranger": "Rome does not engage — reversible any time"
   },
   "channels": {
     "telegram": "Telegram",
@@ -30,91 +41,101 @@
     "webchat": "Webchat",
     "linkedin": "LinkedIn"
   },
-  "unmappedCalloutSingular": "{{count}} unmapped sender awaiting review",
-  "unmappedCalloutPlural": "{{count}} unmapped senders awaiting review",
-  "unmapped": {
-    "heading": "Unmapped senders",
-    "description": "New senders from sentinel log without a person mapping",
-    "loading": "Loading…",
-    "emptyTitle": "No unmapped senders",
-    "emptyHint": "New senders without a person mapping will appear here",
-    "unknownSender": "Unknown sender"
-  },
-  "known": {
-    "heading": "Known persons",
-    "description": "People you have mapped across channels",
-    "loading": "Loading…",
-    "emptyTitle": "No known persons yet",
-    "emptyHint": "Create a profile for an unmapped sender to get started",
-    "emptyForFilter": "No persons in this bond level",
-    "noChannels": "No channels"
-  },
   "filters": {
-    "groupLabel": "Filter known persons by bond",
-    "all": "All",
-    "innerCircle": "Inner circle",
-    "acquaintance": "Acquaintance",
-    "other": "Other"
+    "groupLabel": "Filter people by bond level",
+    "all": "All"
+  },
+  "row": {
+    "messageCount_one": "{{count}} message",
+    "messageCount_other": "{{count}} messages",
+    "neverMessaged": "No activity yet — synced from your address book",
+    "noPreview": "No text in this one",
+    "noActivity": "No activity yet"
+  },
+  "guardian": {
+    "meta": "That is you. Full access to every surface."
+  },
+  "unknown": {
+    "includeSilent": "Include never-messaged contacts",
+    "includeSilentCount_one": "Include never-messaged contacts ({{count}})",
+    "includeSilentCount_other": "Include never-messaged contacts ({{count}})"
   },
   "actions": {
+    "select": "Select {{name}}",
+    "rowMenu": "Actions for {{name}}",
+    "moveTo": "Move to",
+    "mergeInto": "Merge into another person…",
+    "cancel": "Cancel",
+    "open": "Open {{name}}",
+    "close": "Close",
     "create": "Create",
     "link": "Link",
     "markStranger": "Treat as stranger",
-    "cancel": "Cancel",
-    "close": "Close",
     "createProfile": "Create profile",
     "creating": "Creating…",
     "linkSubmit": "Link",
     "linking": "Linking…",
     "markingStranger": "Marking…"
   },
-  "strangerConfirm": {
-    "title": "Treat {{name}} as a stranger?",
-    "description": "Rome will treat messages from {{name}} as coming from a stranger, and they will no longer appear under {{section}}. You can't undo this from the dashboard."
+  "bulk": {
+    "selected": "selected",
+    "moveSelection": "Move selection to",
+    "moveTo": "Move to…",
+    "mergeIntoOne": "Merge into one person…",
+    "clear": "Clear",
+    "noCommonTarget": "No move applies to all of these"
   },
-  "createForm": {
-    "nameLabel": "Name",
-    "bondLevelLabel": "Bond level",
-    "relationLabel": "Relation",
-    "relationPlaceholder": "How do you know them?"
-  },
-  "linkForm": {
-    "label": "Link to existing person",
-    "selectPlaceholder": "Select a person…"
+  "merge": {
+    "title": "Merge into another person",
+    "description": "Their channels move onto the person you pick, and the duplicate row goes away.",
+    "selectLabel": "Person to merge into",
+    "confirm": "Merge",
+    "searchPlaceholder": "Search by name, phone, or handle",
+    "noCandidates": "Nobody matches that search."
   },
   "errors": {
     "requestFailed": "Something went wrong. The change wasn't saved.",
+    "changeFailedTitle": "Couldn't save that change",
     "network": "Couldn't reach the server. Check your connection and try again.",
     "loadFailedTitle": "Couldn't load",
     "loadFailedFallback": "Something went wrong. Check your connection and try again.",
-    "messagesFailed": "Couldn't load messages",
-    "retry": "Try again"
+    "retry": "Try again",
+    "messagesFailed": "Couldn't load messages"
   },
   "whatsapp": {
-    "heading": "WhatsApp contacts",
-    "description": "Synced from your WhatsApp address book",
-    "searchPlaceholder": "Search name or number…",
-    "emptyForSearch": "No contacts match your search",
-    "loadingContacts": "Loading contacts…",
-    "emptyTitle": "No WhatsApp contacts",
-    "emptyHint": "Nothing has synced yet — if WhatsApp isn't linked, connect it in Settings.",
-    "linkedTo": "Linked · {{name}}",
-    "groupChat": "Group chat",
-    "contact": "WhatsApp contact",
-    "messages": "Messages",
-    "dialogTitle": "Messages · {{name}}",
-    "loading": "Loading messages…",
-    "noMessages": "No messages yet",
-    "noMessagesHint": "Send a message to start the conversation",
-    "mediaPlaceholder": "[{{type}}]",
-    "composerPlaceholder": "Type a message",
     "send": "Send",
-    "sendFailed": "Not delivered · tap to retry",
-    "notConnected": "WhatsApp isn't connected — link it in Settings to send.",
+    "notConnected": "WhatsApp isn't connected — link it in Settings to send."
+  },
+  "views": {
+    "label": "View",
+    "latest": "Latest",
+    "directory": "Directory"
+  },
+  "stream": {
+    "hint": "one row per person · newest first",
+    "searchHint": "searching everyone Rome knows, quiet contacts included"
+  },
+  "detail": {
+    "back": "People",
+    "bond": "Bond",
+    "linkAccount": "Link account…",
+    "linkNeedsPerson": "Place this identity on the bond ladder first, then link accounts to it",
+    "timeline": "Timeline",
+    "timelineEmpty": "Nothing has happened on any channel yet.",
+    "loadOlder": "Load older",
+    "outboundPrefix": "You:",
+    "sendVia": "Send via",
+    "channelReadOnly": "{{channel}} (read-only)",
+    "composerLabel": "Message text",
+    "composerPlaceholder": "Message {{name}}…",
+    "missingTitle": "That person is not here",
+    "missingBody": "The identity may have been merged into someone else. Head back to People to find them.",
+    "linkDescription": "The account you pick starts resolving to this person, and its history joins this timeline.",
+    "noAccounts": "No accounts yet"
+  },
+  "timeline": {
     "today": "Today",
-    "yesterday": "Yesterday",
-    "reactedTo": "Reacted {{emoji}} to an earlier message",
-    "reactedToYou": "You reacted {{emoji}} to an earlier message"
+    "yesterday": "Yesterday"
   },
   "linkedin": {
     "heading": "LinkedIn messages",
@@ -125,7 +146,8 @@
     "emptyTitle": "No LinkedIn conversations",
     "emptyHint": "Nothing has synced yet — if LinkedIn isn't connected, connect it in Settings.",
     "groupChat": "Group conversation",
-    "participants": "{{count}} participants",
+    "participants_one": "{{count}} participant",
+    "participants_other": "{{count}} participants",
     "thread": "LinkedIn conversation",
     "unread": "Unread",
     "messages": "Messages",
@@ -138,5 +160,19 @@
     "send": "Send",
     "sendFailed": "LinkedIn reply wasn't sent — tap to retry",
     "notConnected": "LinkedIn isn't connected — link it in Settings to reply."
+  },
+  "createForm": {
+    "nameLabel": "Name",
+    "bondLevelLabel": "Bond level",
+    "relationLabel": "Relation",
+    "relationPlaceholder": "How do you know them?"
+  },
+  "linkForm": {
+    "label": "Link to existing person",
+    "selectPlaceholder": "Select a person…"
+  },
+  "strangerConfirm": {
+    "title": "Treat {{name}} as a stranger?",
+    "description": "Rome will treat messages from {{name}} as coming from a stranger, and they will no longer appear under {{section}}. You can't undo this from the dashboard."
   }
 }
