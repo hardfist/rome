@@ -34,13 +34,14 @@ export class AppKeyInjector {
     return true;
   }
 
-  /** Removes a stored key from the environment, only if this injector set it. */
-  remove(name: string): void {
-    if (this.injected.has(name)) {
-      delete this.env[name];
-      this.injected.delete(name);
-    }
+  /** Removes a stored key from the environment, only if this injector set it.
+   * Returns true when the environment actually changed. */
+  remove(name: string): boolean {
     this.overridden.delete(name);
+    if (!this.injected.has(name)) return false;
+    delete this.env[name];
+    this.injected.delete(name);
+    return true;
   }
 
   isOverridden(name: string): boolean {

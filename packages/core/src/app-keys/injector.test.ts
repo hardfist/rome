@@ -26,12 +26,13 @@ describe("AppKeyInjector", () => {
     expect(env.MY_KEY).toBe("v2");
   });
 
-  it("removes only what it injected", () => {
+  it("removes only what it injected, and reports whether the env changed", () => {
     const env: NodeJS.ProcessEnv = { OPERATOR_KEY: "keep" };
     const injector = new AppKeyInjector(env);
     injector.apply("MY_KEY", "secret");
-    injector.remove("MY_KEY");
-    injector.remove("OPERATOR_KEY");
+    expect(injector.remove("MY_KEY")).toBe(true);
+    expect(injector.remove("MY_KEY")).toBe(false);
+    expect(injector.remove("OPERATOR_KEY")).toBe(false);
     expect(env.MY_KEY).toBeUndefined();
     expect(env.OPERATOR_KEY).toBe("keep");
   });

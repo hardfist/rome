@@ -1,7 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
+import { EventEmitter } from "node:events";
+import type { ChildProcess, ForkOptions } from "node:child_process";
 import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { AppKeyInjector } from "../../app-keys/injector.js";
+import { ActionEngine } from "../../actions/engine.js";
+import { ActionRegistryImpl } from "../../actions/registry.js";
 import { appKeysRoutes } from "./app-keys.js";
 
 describe("appKeysRoutes", () => {
@@ -77,6 +81,94 @@ describe("appKeysRoutes", () => {
       keys: Array<{ overridden: boolean }>;
     };
     expect(list.keys[0].overridden).toBe(true);
+  });
+
+  it("recycles the warm action-worker pool so new workers fork with the current env", async () => {
+    // Warm workers snapshot process.env at fork time and are reused, so a
+    // saved or deleted key must retire the pool to reach action code. This
+    // drives the real pool through the fork seam and asserts each generation's
+    // captured env.
+    const TEST_KEY = "APP_KEYS_WORKER_REFRESH_PROBE";
+
+    class FakeWorkerChild extends EventEmitter {
+      pid = 4242;
+      connected = true;
+      exitCode: number | null = null;
+      send(message: unknown, cb?: (err: Error | null) => void): boolean {
+        cb?.(null);
+        if ((message as { type?: unknown }).type === "shutdown") {
+          this.connected = false;
+          this.exitCode = 0;
+          queueMicrotask(() => this.emit("exit", 0, null));
+        }
+        return true;
+      }
+      kill(): boolean {
+        return true;
+      }
+    }
+
+    const forkedEnvs: Array<NodeJS.ProcessEnv | undefined> = [];
+    const children: FakeWorkerChild[] = [];
+    const engine = new ActionEngine(
+      new ActionRegistryImpl([]),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        processRole: "main",
+        workerWarmPoolSize: 1,
+        actionWorkerFork: (_entryPath: string, options: ForkOptions) => {
+          forkedEnvs.push(options.env);
+          const child = new FakeWorkerChild();
+          children.push(child);
+          return child as unknown as ChildProcess;
+        },
+      },
+    );
+    deps.actionEngine = engine;
+    // The engine snapshots the real process.env at fork time, so the injector
+    // must write there for the test to observe propagation.
+    deps.appKeyInjector = new AppKeyInjector();
+    app = new Hono().route("/", appKeysRoutes(deps));
+
+    try {
+      engine.startWorkerWarmPool();
+      expect(children).toHaveLength(1);
+      children[0].emit("message", { type: "ready" });
+      expect(forkedEnvs[0]?.[TEST_KEY]).toBeUndefined();
+
+      const saved = await put(TEST_KEY, { value: "v1" });
+      expect(saved.status).toBe(200);
+      expect(children).toHaveLength(2);
+      expect(forkedEnvs[1]?.[TEST_KEY]).toBe("v1");
+      children[1].emit("message", { type: "ready" });
+
+      const del = await app.request(`/app-keys/${TEST_KEY}`, { method: "DELETE" });
+      expect(del.status).toBe(200);
+      expect(children).toHaveLength(3);
+      expect(forkedEnvs[2]?.[TEST_KEY]).toBeUndefined();
+    } finally {
+      await engine.stopWorkerWarmPool();
+      delete process.env[TEST_KEY];
+    }
+  });
+
+  it("does not recycle workers for a rejected or shadowed save", async () => {
+    const restart = vi.spyOn(deps.actionEngine, "restartWorkerWarmPool");
+
+    const rejected = await put("lowercase", { value: "v" });
+    expect(rejected.status).toBe(400);
+    expect(restart).not.toHaveBeenCalled();
+
+    // A shadowed save changes nothing in the environment, so no recycle.
+    const env: NodeJS.ProcessEnv = { TAKEN_KEY: "from-operator" };
+    deps.appKeyInjector = new AppKeyInjector(env);
+    app = new Hono().route("/", appKeysRoutes(deps));
+    const shadowed = await put("TAKEN_KEY", { value: "from-dashboard" });
+    expect(await shadowed.json()).toEqual({ ok: true, overridden: true });
+    expect(restart).not.toHaveBeenCalled();
   });
 
   it("deletes a key and 404s on an unknown one", async () => {

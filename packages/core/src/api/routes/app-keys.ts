@@ -53,6 +53,10 @@ export function appKeysRoutes(deps: ApiDeps): Hono {
 
     await deps.appKeysRepo.upsert({ name, label, value: body.value });
     const live = deps.appKeyInjector.apply(name, body.value);
+    // Warm action workers were forked with an env snapshot and are reused, so
+    // a changed value never reaches them on its own. Recycle the pool whenever
+    // the environment actually changed (an overridden save changes nothing).
+    if (live) await deps.actionEngine.restartWorkerWarmPool();
     return c.json({ ok: true, overridden: !live });
   });
 
@@ -61,7 +65,9 @@ export function appKeysRoutes(deps: ApiDeps): Hono {
     const existing = await deps.appKeysRepo.get(name);
     if (!existing) return c.json({ error: "Unknown app key." }, 404);
     await deps.appKeysRepo.delete(name);
-    deps.appKeyInjector.remove(name);
+    // Same env-snapshot staleness as the save path: without a recycle, a warm
+    // worker keeps serving the deleted secret for up to its remaining reuses.
+    if (deps.appKeyInjector.remove(name)) await deps.actionEngine.restartWorkerWarmPool();
     return c.json({ ok: true });
   });
 
