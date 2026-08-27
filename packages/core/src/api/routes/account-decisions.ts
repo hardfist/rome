@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import {
   dismissAccount,
   restoreAccount,
-  type AccountDecisionOutcome,
+  type AccountDecision,
   type AccountRef,
 } from "../../people/account-decisions.js";
 import type { ApiDeps } from "../deps.js";
@@ -24,19 +24,20 @@ export function accountDecisionRoutes(deps: ApiDeps): Hono {
 
   const answer = async (
     c: Context,
-    decide: (deps: ApiDeps, ref: AccountRef) => Promise<AccountDecisionOutcome>,
+    decide: (deps: ApiDeps, ref: AccountRef) => Promise<AccountDecision>,
   ) => {
     const result = await decide(deps, {
       channel: c.req.param("channel") ?? "",
       channelUserId: c.req.param("channelUserId") ?? "",
     });
-    if (result.outcome === "unknown") {
-      return c.json({ error: "no account is known at that address" }, 404);
-    }
+    if ("unknown" in result) return c.json({ error: "Unknown account" }, 404);
     // A refusal rather than a displacement: the body names the person who holds
     // the account, so the client can offer unlinking them by name.
-    if (result.outcome === "conflict") return c.json(result.conflict, 409);
-    return c.json(result.decision);
+    if ("conflict" in result) return c.json(result.conflict, 409);
+    // The directory row, which is the row the caller already has: a client
+    // re-renders what it decided without re-reading the listing to find out
+    // what it now says.
+    return c.json(result.account);
   };
 
   app.post("/accounts/:channel/:channelUserId/dismiss", (c) => answer(c, dismissAccount));

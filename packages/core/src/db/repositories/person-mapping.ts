@@ -489,24 +489,22 @@ export class PersonMappingRepository {
   }
 
   /**
-   * {@link writeClaimForStranger}, and who blocked it.
+   * {@link writeClaimForStranger}, throwing {@link AccountHeldError} when a
+   * person kept the identity — the same refusal {@link create} raises, so a
+   * caller phrases one conflict however the account came to be held.
    *
-   * Returns null when the sentinel holds the identity afterwards, and the
-   * person who kept it otherwise — so a caller can refuse by name. Both run in
-   * one transaction: the point of the guard is that the answer is decided by
-   * the write rather than by a read around it, and naming the holder from a
-   * second, separate read would report whoever holds the identity by then
-   * instead of the row that actually refused the claim.
+   * The claim and the read that names its winner share one transaction. The
+   * point of the guard is that the answer is decided by the write rather than
+   * by a read around it, and naming the holder from a second, separate read
+   * would report whoever holds the identity by then instead of the row that
+   * actually refused the claim.
    */
-  async claimForStranger(
-    channel: string,
-    channelUserId: string,
-  ): Promise<{ id: string; displayName: string } | null> {
-    return this.db.transaction((tx) => {
+  async claimForStranger(channel: string, channelUserId: string): Promise<void> {
+    const holder = this.db.transaction((tx) => {
       if (this.writeClaimForStranger(tx, channel, channelUserId)) return null;
       return (
         tx
-          .select({ id: persons.id, displayName: persons.displayName })
+          .select({ personId: persons.id, personName: persons.displayName })
           .from(channelMappings)
           .innerJoin(persons, eq(channelMappings.personId, persons.id))
           .where(
@@ -518,6 +516,7 @@ export class PersonMappingRepository {
           .get() ?? null
       );
     });
+    if (holder) throw new AccountHeldError({ channel, channelUserId, ...holder });
   }
 
   async addChannelMapping(

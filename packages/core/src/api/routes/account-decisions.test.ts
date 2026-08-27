@@ -3,7 +3,6 @@ import { Hono } from "hono";
 import { and, eq } from "drizzle-orm";
 import {
   accountRef,
-  type AccountDecision,
   type AccountDirectory,
   type DirectoryAccount,
   type LinkConflict,
@@ -120,10 +119,10 @@ describe("Account dismiss and restore", () => {
     channel: string,
     channelUserId: string,
     verb: "dismiss" | "restore",
-  ): Promise<AccountDecision> {
+  ): Promise<DirectoryAccount> {
     const res = await decide(channel, channelUserId, verb);
     expect(res.status).toBe(200);
-    return (await res.json()) as AccountDecision;
+    return (await res.json()) as DirectoryAccount;
   }
 
   async function fetchPage(query = ""): Promise<AccountDirectory> {
@@ -147,14 +146,17 @@ describe("Account dismiss and restore", () => {
 
   it("moves an unlinked account to dismissed, and repeating the write changes nothing", async () => {
     const first = await decision("whatsapp", TALKING_JID, "dismiss");
-    expect(first).toEqual({
+    expect(first).toMatchObject({
       channel: "whatsapp",
       channelUserId: TALKING_JID,
       state: "dismissed",
       personId: null,
       personName: null,
     });
-    expect(find(await fetchPage(), `whatsapp:${TALKING_JID}`)?.state).toBe("dismissed");
+    // The row the directory would list, not a bespoke answer: a client
+    // re-renders what it decided without re-reading the listing to learn what
+    // it now says.
+    expect(first).toEqual(find(await fetchPage("?state=dismissed"), `whatsapp:${TALKING_JID}`));
 
     const stored = mappingRows("whatsapp", TALKING_JID);
     expect(stored).toHaveLength(1);
@@ -169,16 +171,16 @@ describe("Account dismiss and restore", () => {
 
   it("moves a dismissed account back to unlinked, and repeating the write changes nothing", async () => {
     const first = await decision("telegram", DISMISSED_SENDER, "restore");
-    expect(first).toEqual({
+    expect(first).toMatchObject({
       channel: "telegram",
       channelUserId: DISMISSED_SENDER,
       state: "unlinked",
       personId: null,
       personName: null,
     });
-    // The account is still observed — restoring it un-decides it, it does not
-    // delete what Rome saw.
-    expect(find(await fetchPage(), `telegram:${DISMISSED_SENDER}`)?.state).toBe("unlinked");
+    // Still observed, and still listed — restoring an account un-decides it,
+    // it does not delete what Rome saw.
+    expect(first).toEqual(find(await fetchPage(), `telegram:${DISMISSED_SENDER}`));
     expect(mappingRows("telegram", DISMISSED_SENDER)).toHaveLength(0);
 
     const second = await decision("telegram", DISMISSED_SENDER, "restore");
@@ -190,10 +192,11 @@ describe("Account dismiss and restore", () => {
     const res = await decide("whatsapp", LINKED_JID, "dismiss");
     expect(res.status).toBe(409);
     const conflict = (await res.json()) as LinkConflict;
-    expect(conflict.error).toBe("LinkConflict");
-    expect(conflict.ownerPersonId).toBe(waPersonId);
-    expect(conflict.ownerPersonName).toBe("Wanda Placed");
-    expect(conflict.message).toContain("Wanda Placed");
+    expect(conflict.linkedPersonId).toBe(waPersonId);
+    expect(conflict.linkedPersonName).toBe("Wanda Placed");
+    expect(conflict.channel).toBe("whatsapp");
+    expect(conflict.channelUserId).toBe(LINKED_JID);
+    expect(conflict.error).toContain("Wanda Placed");
 
     // A refusal, not a half-write: the link is exactly as it was.
     const linked = find(await fetchPage(), `whatsapp:${LINKED_JID}`)!;
@@ -206,7 +209,7 @@ describe("Account dismiss and restore", () => {
     const res = await decide("whatsapp", LINKED_JID, "restore");
     expect(res.status).toBe(409);
     const conflict = (await res.json()) as LinkConflict;
-    expect(conflict.ownerPersonId).toBe(waPersonId);
+    expect(conflict.linkedPersonId).toBe(waPersonId);
 
     const linked = find(await fetchPage(), `whatsapp:${LINKED_JID}`)!;
     expect(linked.state).toBe("linked");
@@ -283,16 +286,35 @@ describe("Account dismiss and restore", () => {
 
     // The rival won, and is named — the same refusal the guardian would have
     // been given had their page been one read newer.
-    expect(result.outcome).toBe("conflict");
-    if (result.outcome !== "conflict") throw new Error("expected a conflict");
-    expect(result.conflict.ownerPersonId).toBe(rivalId);
-    expect(result.conflict.ownerPersonName).toBe("Rival Claimant");
+    if (!("conflict" in result)) throw new Error("expected a conflict");
+    expect(result.conflict.linkedPersonId).toBe(rivalId);
+    expect(result.conflict.linkedPersonName).toBe("Rival Claimant");
 
     // And the placement is still theirs: a dismissal that displaced it would
     // have lost work the guardian did, silently.
     const rows = mappingRows("whatsapp", TALKING_JID);
     expect(rows).toHaveLength(1);
     expect(rows[0].personId).toBe(rivalId);
+  });
+
+  it("reads an address that had to be escaped to survive the path", async () => {
+    // Channel identifiers are the platform's, not Rome's: LinkedIn URNs carry
+    // colons, and a caller escapes whatever it was given. The account decided
+    // has to be the one the escaping stood for.
+    const urn = "urn:li:fsd_profile:ACoAAA+slash/and space";
+    await deps.sentinelLogRepo.create({
+      messageId: "msg-urn-1",
+      channel: "linkedin",
+      channelUserId: urn,
+      displayName: "Escaped Sender",
+      text: "hello from a punctuated id",
+      action: "ignored",
+    });
+
+    const decided = await decision("linkedin", urn, "dismiss");
+    expect(decided.channelUserId).toBe(urn);
+    expect(decided.state).toBe("dismissed");
+    expect(mappingRows("linkedin", urn)).toHaveLength(1);
   });
 
   it("answers 404 for a pair nothing has ever observed, rather than minting an account", async () => {

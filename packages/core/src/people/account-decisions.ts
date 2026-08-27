@@ -19,14 +19,15 @@
 import {
   accountPresentation,
   linkConflict,
-  type AccountDecision,
-  type AccountPresentation,
   type DirectoryAccount,
   type LinkConflict,
 } from "@rome/api-types/people";
 import { STRANGER_PERSON_DISPLAY_NAME, STRANGER_PERSON_ID } from "../constants.js";
 import { readAccountDirectory, type AccountDirectoryDeps } from "./account-directory.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import {
+  AccountHeldError,
+  type PersonMappingRepository,
+} from "../db/repositories/person-mapping.js";
 
 export interface AccountDecisionDeps extends AccountDirectoryDeps {
   personMappingRepo: AccountDirectoryDeps["personMappingRepo"] &
@@ -40,17 +41,19 @@ export interface AccountRef {
 }
 
 /**
- * What a decision came to.
+ * What a decision came to: the account as it reads now, the person who refused
+ * it, or nothing to decide about.
  *
- * "unknown" is its own answer rather than a decision on an empty account: Rome
+ * `unknown` is its own answer rather than a decision on an empty account: Rome
  * never mints an account, so a pair no source has observed is a caller's stale
  * page or typo, and writing a dismissal for it would file a decision about
- * nobody that nothing can ever show or undo.
+ * nobody — and, since a mapping is itself an observation, conjure the account
+ * into the directory to hold it.
  */
-export type AccountDecisionOutcome =
-  | { outcome: "decided"; decision: AccountDecision }
-  | { outcome: "unknown" }
-  | { outcome: "conflict"; conflict: LinkConflict };
+export type AccountDecision =
+  | { account: DirectoryAccount }
+  | { conflict: LinkConflict }
+  | { unknown: true };
 
 /**
  * File an account under the stranger sentinel.
@@ -61,29 +64,37 @@ export type AccountDecisionOutcome =
 export async function dismissAccount(
   deps: AccountDecisionDeps,
   ref: AccountRef,
-): Promise<AccountDecisionOutcome> {
+): Promise<AccountDecision> {
   const account = await locate(deps, ref);
-  if (account == null) return { outcome: "unknown" };
+  if (account == null) return { unknown: true };
 
   // What the guardian was looking at. It refuses the account they can see is
   // placed — including one placed on an addressing other than the one they
   // named, which only the fold knows is the same account.
-  const conflict = linkConflict(account);
-  if (conflict) return { outcome: "conflict", conflict };
+  const holder = heldBy(account);
+  if (holder) return { conflict: linkConflict(account, holder) };
 
   if (account.state !== "dismissed") {
     // And what is true at the moment of writing. The read above cannot see a
     // placement that lands after it, so the claim itself is conditional: it
-    // takes the identity only if nobody holds it, and reports whoever kept it.
-    // Without that, a link arriving in the gap would be re-pointed onto the
-    // sentinel and lost — the exact harm the refusal above exists to prevent,
-    // reached by a different route.
-    const blocked = await deps.personMappingRepo.claimForStranger(
-      account.channel,
-      account.channelUserId,
-    );
-    const lost = blocked && linkConflict(presentationOf(account, blocked));
-    if (lost) return { outcome: "conflict", conflict: lost };
+    // takes the identity only if nobody holds it, and refuses by naming
+    // whoever kept it. Without that, a link arriving in the gap would be
+    // re-pointed onto the sentinel and lost — the exact harm the refusal above
+    // exists to prevent, reached by a different route.
+    try {
+      await deps.personMappingRepo.claimForStranger(account.channel, account.channelUserId);
+    } catch (err) {
+      if (err instanceof AccountHeldError) {
+        const { holder: winner } = err;
+        return {
+          conflict: linkConflict(account, {
+            id: winner.personId,
+            displayName: winner.personName,
+          }),
+        };
+      }
+      throw err;
+    }
   }
 
   return decided(account, {
@@ -102,21 +113,38 @@ export async function dismissAccount(
 export async function restoreAccount(
   deps: AccountDecisionDeps,
   ref: AccountRef,
-): Promise<AccountDecisionOutcome> {
+): Promise<AccountDecision> {
   const account = await locate(deps, ref);
-  if (account == null) return { outcome: "unknown" };
+  if (account == null) return { unknown: true };
 
-  const conflict = linkConflict(account);
-  if (conflict) return { outcome: "conflict", conflict };
+  const holder = heldBy(account);
+  if (holder) return { conflict: linkConflict(account, holder) };
 
   if (account.state === "dismissed") {
     // Every address, because the dismissal is stored against whichever one it
     // was made by, and an account still claimed by one of its other addresses
     // would read as dismissed the moment the fold ran again.
+    //
+    // No conditional claim to lose here: the release is already scoped to the
+    // sentinel's own rows, so a link landing in the same gap is not a row this
+    // write can touch.
     await deps.personMappingRepo.releaseStrangerClaims(account.channel, account.addresses);
   }
 
   return decided(account, null);
+}
+
+/**
+ * The person a refusal names, or null when the account is nobody's and a write
+ * may proceed.
+ *
+ * Read off the account's presentation rather than its stored link, so the owner
+ * can never be the stranger sentinel: a dismissed account presents as
+ * "dismissed" with no person, and a dismissal is what these two verbs are for.
+ */
+function heldBy(account: DirectoryAccount): { id: string; displayName: string } | null {
+  if (account.state !== "linked" || account.personId == null) return null;
+  return { id: account.personId, displayName: account.personName ?? account.personId };
 }
 
 /**
@@ -143,31 +171,22 @@ async function locate(
   );
 }
 
-/** An account as it reads under a link, for the one caller that learns of a
- *  link the directory read did not carry: the loser of a race. */
-function presentationOf(
-  account: DirectoryAccount,
-  owner: { id: string; displayName: string },
-): AccountPresentation & { channel: string; channelUserId: string } {
-  return {
-    channel: account.channel,
-    channelUserId: account.channelUserId,
-    ...accountPresentation({ personId: owner.id, displayName: owner.displayName }),
-  };
-}
-
-/** The answer a landed write gives, read through the same presentation seam a
- *  directory row is — which is what keeps the sentinel off the wire here. */
+/**
+ * The row a landed write answers with: the account as the directory would list
+ * it now.
+ *
+ * Patched rather than re-read. A decision moves the link and nothing else — the
+ * platform's name for the account, the addresses it answers to, its last
+ * message and its count are all untouched — so re-folding every address book to
+ * learn what this function already holds would buy nothing but a second chance
+ * to disagree with the read that made the decision.
+ *
+ * The link goes through the same presentation seam a directory row does, which
+ * is what keeps the sentinel off the wire here.
+ */
 function decided(
   account: DirectoryAccount,
   link: { personId: string; displayName: string } | null,
-): AccountDecisionOutcome {
-  return {
-    outcome: "decided",
-    decision: {
-      channel: account.channel,
-      channelUserId: account.channelUserId,
-      ...accountPresentation(link),
-    },
-  };
+): AccountDecision {
+  return { account: { ...account, ...accountPresentation(link) } };
 }
