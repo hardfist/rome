@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { MoreHorizontal } from "lucide-react";
+import { Avatar as KitAvatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -113,12 +115,14 @@ export function ChannelGlyph({ channel, className }: { channel: Channel; classNa
 }
 
 export function ChannelPill({ channel }: { channel: Channel }) {
-  const { label } = CHANNEL_META[channel];
+  const { label, Glyph } = CHANNEL_META[channel];
+  // The glyph goes in bare: Badge sizes an `<svg>` that carries no `size-*` of
+  // its own, and a size written here would opt out of that rule.
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-border-subtle px-2 py-1 text-badge text-muted-foreground">
-      <ChannelGlyph channel={channel} className="size-3" />
+    <Badge variant="outline" className="text-muted-foreground">
+      <Glyph />
       {label}
-    </span>
+    </Badge>
   );
 }
 
@@ -148,14 +152,24 @@ function initials(name: string): string {
 const AVATAR_TONE = "bg-surface-muted text-muted-foreground";
 const GUARDIAN_TONE = "bg-foreground text-background";
 
-export function Avatar({ name, tone = AVATAR_TONE }: { name: string; tone?: string }) {
+/**
+ * The page's avatar: initials on a neutral tone, never an image. It is the kit's
+ * Avatar with only a fallback child, so the roster inherits the kit's ring and
+ * size steps and a tone is the one thing a caller sets.
+ */
+export function Avatar({
+  name,
+  tone = AVATAR_TONE,
+  size = "default",
+}: {
+  name: string;
+  tone?: string;
+  size?: "default" | "lg";
+}) {
   return (
-    <div
-      className={cn("flex size-8 shrink-0 items-center justify-center rounded-full text-aux", tone)}
-      aria-hidden="true"
-    >
-      {initials(name)}
-    </div>
+    <KitAvatar size={size} aria-hidden="true">
+      <AvatarFallback className={cn("text-aux", tone)}>{initials(name)}</AvatarFallback>
+    </KitAvatar>
   );
 }
 
@@ -539,20 +553,18 @@ export function PersonPageDemo() {
     <Frame label="/people/:identityId">
       <div className="flex flex-col gap-4 p-2">
         <div className="flex items-start gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-surface-muted text-aux text-muted-foreground">
-            MO
-          </div>
+          <Avatar name="Mira Okafor" size="lg" />
           <div className="min-w-0 flex-1">
             <div className="text-title text-foreground">Mira Okafor</div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-2 rounded-full border border-border-subtle px-2 py-1 font-mono text-badge text-muted-foreground">
-                <ChannelGlyph channel="whatsapp" className="size-3" />
+              <Badge variant="outline" className="font-mono text-muted-foreground">
+                <CHANNEL_META.whatsapp.Glyph />
                 +1 206 555 0113
-              </span>
-              <span className="inline-flex items-center gap-2 rounded-full border border-border-subtle px-2 py-1 font-mono text-badge text-muted-foreground">
-                <ChannelGlyph channel="telegram" className="size-3" />
+              </Badge>
+              <Badge variant="outline" className="font-mono text-muted-foreground">
+                <CHANNEL_META.telegram.Glyph />
                 @mira
-              </span>
+              </Badge>
               <Button size="sm" variant="ghost">
                 Link account…
               </Button>
