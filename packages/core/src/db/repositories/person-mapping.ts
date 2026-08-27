@@ -3,7 +3,11 @@ import { v4 as uuid } from "uuid";
 import { persons, channelMappings } from "../schema.js";
 import type { DrizzleDb, SqliteExec } from "../index.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
-import { generatePersonSlug, nextAvailablePersonId } from "@rome/api-types/persons";
+import {
+  generatePersonSlug,
+  nextAvailablePersonId,
+  protectedPersonReason,
+} from "@rome/api-types/persons";
 
 // Re-exported so existing importers keep their path. The derivation itself
 // lives in the shared package because the dashboard's mock backend has to
@@ -54,6 +58,25 @@ export class AccountHeldError extends Error {
  *  ordinary answer to a stale page, not the exceptional one it is for a create,
  *  where the account is the reason the person was being written at all. */
 export type LinkAccountResult = { linked: true } | { linked: false; holder: AccountHolder | null };
+
+/** What a {@link PersonMappingRepository.mergePersons} attempt did: absorbed
+ *  the source, links and all, or refused and said which rule stopped it. The
+ *  reason rather than the sentence, so the wording a caller answers with stays
+ *  the contract's rather than this table's. */
+export type MergePersonsResult =
+  | { merged: true; links: number }
+  | { merged: false; reason: MergeRefusal };
+
+/** Why a merge did not happen. "sentinel-*" and "unknown-*" both describe an
+ *  id that names nobody a caller may address, and "guardian-source" a person
+ *  who exists and stays. */
+export type MergeRefusal =
+  | "same-person"
+  | "unknown-target"
+  | "unknown-source"
+  | "guardian-source"
+  | "sentinel-source"
+  | "sentinel-target";
 
 export interface NewPersonData {
   displayName: string;
@@ -664,6 +687,73 @@ export class PersonMappingRepository {
         tx.update(channelMappings).set({ personId }).where(eq(channelMappings.id, link.id)).run();
       }
       return { linked: true };
+    });
+  }
+
+  /**
+   * Move every link `from` holds onto `into` and delete `from`, or do neither.
+   *
+   * One transaction because a merge is a re-attribution of history: half of a
+   * duplicate's accounts moved is a state no guardian asked for and no retry
+   * repairs — the second attempt reads a source that is missing the links it
+   * already gave away, so it looks like a smaller duplicate than it is.
+   *
+   * The links move rather than being rewritten, so each carries its
+   * channel-side name across the way a transfer does. Nothing can collide on
+   * the identity index: an account carries at most one link, so no account is
+   * held by both people to begin with.
+   *
+   * Both rows are read inside the transaction and the refusals are decided
+   * there, so a source that was deleted or a person that was never there
+   * cannot be reported as a merge that moved nothing. The caller phrases the
+   * refusal; this decides it.
+   *
+   * The persons row is the whole of what is deleted. The link table is the
+   * only thing that references it, so nothing is left pointing at an id that
+   * is gone — and nothing outside the database is touched, memory files
+   * included, because a file cannot join this transaction.
+   */
+  async mergePersons(into: string, from: string): Promise<MergePersonsResult> {
+    return this.db.transaction((tx): MergePersonsResult => {
+      // Guarded here as well as by the caller: this transaction would move a
+      // person's links onto themselves and then delete them, which is the one
+      // outcome a merge must never have.
+      if (into === from) return { merged: false, reason: "same-person" };
+
+      const rows = tx
+        .select({ id: persons.id, bondLevel: persons.bondLevel })
+        .from(persons)
+        .where(inArray(persons.id, [into, from]))
+        .all();
+
+      const target = rows.find((row) => row.id === into);
+      const source = rows.find((row) => row.id === from);
+      if (!target) return { merged: false, reason: "unknown-target" };
+      if (!source) return { merged: false, reason: "unknown-source" };
+      // The guardian anchors the ladder and the sentinel holds every
+      // dismissal, so neither may be merged away. The sentinel is refused as a
+      // target too: it is structure rather than someone a duplicate belongs
+      // to, and absorbing a person into it would read every account they hold
+      // as dismissed.
+      const sourceIsStructure = protectedPersonReason(source);
+      if (sourceIsStructure) {
+        return {
+          merged: false,
+          reason: sourceIsStructure === "guardian" ? "guardian-source" : "sentinel-source",
+        };
+      }
+      if (protectedPersonReason(target) === "stranger-sentinel") {
+        return { merged: false, reason: "sentinel-target" };
+      }
+
+      const moved = tx
+        .update(channelMappings)
+        .set({ personId: into })
+        .where(eq(channelMappings.personId, from))
+        .run();
+      tx.delete(persons).where(eq(persons.id, from)).run();
+
+      return { merged: true, links: moved.changes };
     });
   }
 

@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from "@rsbuild/core";
 import { pluginReact } from "@rsbuild/plugin-react";
 import { pluginSvgr } from "@rsbuild/plugin-svgr";
+import remarkGfm from "remark-gfm";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
@@ -51,6 +52,25 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": srcDir,
+    },
+  },
+  // MDX design docs (src/pages/dev/mdx/docs/*.mdx) compile to React components
+  // so a design note can render the real primitives it is describing. The
+  // loader emits plain JS against the automatic JSX runtime, so nothing
+  // downstream has to transform it. Dev-only surface: the docs are reachable
+  // from /dev, which drops out of production builds.
+  tools: {
+    rspack: {
+      module: {
+        rules: [
+          {
+            test: /\.mdx$/,
+            // remark-gfm buys the table syntax a design doc needs for its
+            // rule/reason columns; plain MDX would render the pipes as text.
+            use: [{ loader: "@mdx-js/loader", options: { remarkPlugins: [remarkGfm] } }],
+          },
+        ],
+      },
     },
   },
   source: {

@@ -63,6 +63,13 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
         Component: lazy(() => import("./ChatBlocksPage")),
       },
       {
+        path: "/dev/mdx",
+        title: "Design docs (MDX)",
+        description:
+          "MDX design notes that render live components — prose and the specimen it describes in one file, against the real tokens and primitives.",
+        Component: lazy(() => import("./mdx/MdxDocsPage")),
+      },
+      {
         path: "/dev/login",
         title: "Login page",
         description:

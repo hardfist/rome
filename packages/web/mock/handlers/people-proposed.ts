@@ -18,7 +18,9 @@ import {
   countPeople,
   parseAccountCursor,
   parseAccountState,
+  parseMergeRequest,
   parsePersonFilterLevel,
+  parseUpdatePersonRequest,
   personMatchesLevel,
   personMatchesQuery,
   sliceAccountDirectory,
@@ -27,10 +29,8 @@ import {
   type DirectoryAccount,
   type LinkAccountRequest,
   type LinkConflict,
-  type MergeRequest,
   type PeopleList,
   type PersonResource,
-  type UpdatePersonRequest,
 } from "@rome/api-types/people";
 import { buildTimeline, proposedApiStore } from "./people";
 
@@ -322,30 +322,19 @@ export const proposedPeopleHandlers = [
   }),
 
   http.patch("/api/people/:id", async ({ params, request }) => {
+    const parsed = parseUpdatePersonRequest(await request.json().catch(() => null));
+    if ("error" in parsed) return HttpResponse.json({ error: parsed.error }, { status: 400 });
     const person = findVisiblePerson(String(params.id));
     if (!person) return notFound("person");
-    const body = (await request.json().catch(() => ({}))) as Partial<UpdatePersonRequest>;
-    if (body.bondLevel !== undefined) {
-      if (protectedPersonReason(person)) {
-        return HttpResponse.json(
-          { error: "the guardian's bond level cannot be changed" },
-          { status: 400 },
-        );
-      }
-      if (!isAssignableBondLevel(body.bondLevel)) {
-        return HttpResponse.json(
-          { error: "bondLevel must be inner-circle, acquaintance, or other" },
-          { status: 400 },
-        );
-      }
-      person.bondLevel = body.bondLevel;
+    // The guardian's name is theirs to change like anyone's; the tier under
+    // them is the top of the ladder and stays where it is.
+    if (parsed.update.bondLevel !== undefined && protectedPersonReason(person) === "guardian") {
+      return HttpResponse.json(
+        { error: "the guardian's bond level cannot be changed" },
+        { status: 400 },
+      );
     }
-    if (body.displayName !== undefined) {
-      if (!body.displayName) {
-        return HttpResponse.json({ error: "displayName cannot be empty" }, { status: 400 });
-      }
-      person.displayName = body.displayName;
-    }
+    Object.assign(person, parsed.update);
     return HttpResponse.json(personResource(person));
   }),
 
@@ -388,19 +377,14 @@ export const proposedPeopleHandlers = [
   // First-class rather than N transfers + a delete, for the same reason
   // transfer itself is explicit: history re-attribution should be atomic.
   http.post("/api/people/:id/merge", async ({ params, request }) => {
-    const target = findVisiblePerson(String(params.id));
+    const into = String(params.id);
+    const parsed = parseMergeRequest(await request.json().catch(() => null), into);
+    if ("error" in parsed) return HttpResponse.json({ error: parsed.error }, { status: 400 });
+    const target = findVisiblePerson(into);
     if (!target) return notFound("person");
-    const body = (await request.json().catch(() => ({}))) as Partial<MergeRequest>;
-    if (!body.from) return HttpResponse.json({ error: "from is required" }, { status: 400 });
-    if (body.from === target.id) {
-      return HttpResponse.json(
-        { error: "a person cannot be merged into themselves" },
-        { status: 400 },
-      );
-    }
-    const source = findVisiblePerson(body.from);
+    const source = findVisiblePerson(parsed.merge.from);
     if (!source) return notFound("person");
-    if (protectedPersonReason(source)) {
+    if (protectedPersonReason(source) === "guardian") {
       return HttpResponse.json({ error: "the guardian cannot be merged away" }, { status: 400 });
     }
     target.channelMappings.push(...source.channelMappings);

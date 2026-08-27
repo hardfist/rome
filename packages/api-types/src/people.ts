@@ -586,6 +586,54 @@ export interface UpdatePersonRequest {
 }
 
 /**
+ * Read a request body as an {@link UpdatePersonRequest}, or say what is wrong
+ * with it. The rule rather than any one route's rule, for the reason
+ * {@link parseCreatePersonRequest} states.
+ *
+ * An omitted field is one the update leaves alone, which is the whole
+ * difference between this and a write of the person: a body naming only a bond
+ * level must not blank the name. So a body naming neither is the empty update
+ * rather than a bad request — it asks for the state the person is already in,
+ * which is also what a retry of an update that already landed asks for.
+ *
+ * A body that is not an object is refused all the same. It names no field to
+ * leave alone, so reading it as the empty update would answer a malformed
+ * request with the person and a 200.
+ *
+ * `bondLevel` is checked against the levels a guardian may assign, so a body
+ * naming "guardian" is refused here whoever it addresses. Whether the person
+ * being addressed may move at all is `protectedPersonReason`'s question in
+ * ./persons.ts, and it is a different one.
+ */
+export function parseUpdatePersonRequest(
+  body: unknown,
+): { update: UpdatePersonRequest } | { error: string } {
+  if (typeof body !== "object" || body === null) {
+    return { error: "displayName or bondLevel is required" };
+  }
+  const raw = body as Record<string, unknown>;
+  const update: UpdatePersonRequest = {};
+
+  if (raw.displayName !== undefined) {
+    // Trimmed before it is judged, as a create's name is: whitespace alone is
+    // no name, and storing it would leave the person unfindable by the name
+    // the guardian typed.
+    const displayName = typeof raw.displayName === "string" ? raw.displayName.trim() : "";
+    if (!displayName) return { error: "displayName cannot be empty" };
+    update.displayName = displayName;
+  }
+
+  if (raw.bondLevel !== undefined) {
+    if (!isAssignableBondLevel(raw.bondLevel)) {
+      return { error: `bondLevel must be one of ${ASSIGNABLE_BOND_LEVELS.join(", ")}` };
+    }
+    update.bondLevel = raw.bondLevel;
+  }
+
+  return { update };
+}
+
+/**
  * `POST /api/people/:id/accounts` — the link verb.
  *
  * Compare-and-swap on the account's current owner: linking an unlinked or
@@ -656,4 +704,25 @@ export function linkConflict(
  *  and a delete, because history re-attribution must not half-happen. */
 export interface MergeRequest {
   from: string;
+}
+
+/**
+ * Read a request body as a {@link MergeRequest} against the person absorbing
+ * it, or say what is wrong with it.
+ *
+ * A merge into oneself is refused here rather than being read as a no-op: the
+ * operation moves a person's links away and then deletes them, so a caller
+ * that names the same person twice is describing a write that would end with
+ * the survivor gone. That the two ids are one is visible in the request, so it
+ * never reaches a transaction.
+ */
+export function parseMergeRequest(
+  body: unknown,
+  into: string,
+): { merge: MergeRequest } | { error: string } {
+  if (typeof body !== "object" || body === null) return { error: "from is required" };
+  const { from } = body as Record<string, unknown>;
+  if (typeof from !== "string" || from === "") return { error: "from is required" };
+  if (from === into) return { error: "a person cannot be merged into themselves" };
+  return { merge: { from } };
 }

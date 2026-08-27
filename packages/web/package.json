@@ -59,6 +59,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@mdx-js/loader": "^3.1.1",
     "@playwright/test": "1.62.1",
     "@rsbuild/core": "^2.0.7",
     "@rsbuild/plugin-react": "^2.0.0",
@@ -66,11 +67,13 @@
     "@tailwindcss/postcss": "^4.1.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/mdx": "^2.0.14",
     "@types/node": "^25.2.3",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "jsdom": "^29.1.1",
     "msw": "^2.15.0",
+    "remark-gfm": "^4.0.1",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.9.3",
     "vite": "^6.0.7"
