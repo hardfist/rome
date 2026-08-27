@@ -30,9 +30,7 @@ import { buildInfoRoutes } from "./routes/build-info.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
-import { personsRoutes } from "./routes/persons.js";
 import { linkedinThreadsRoutes } from "./routes/linkedin-threads.js";
-import { identitiesRoutes } from "./routes/identities.js";
 import { accountsRoutes } from "./routes/accounts.js";
 import { accountDecisionRoutes } from "./routes/account-decisions.js";
 import { peopleRoutes } from "./routes/people.js";
@@ -149,8 +147,6 @@ export function buildApp(
   api.route("/", settingsRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
-  api.route("/", personsRoutes(deps));
-  api.route("/", identitiesRoutes(deps));
   api.route("/", peopleRoutes(deps));
   api.route("/", accountsRoutes(deps));
   api.route("/", accountDecisionRoutes(deps));

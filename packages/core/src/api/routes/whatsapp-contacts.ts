@@ -5,7 +5,7 @@ import type { ApiDeps } from "../deps.js";
 /**
  * Read-only views over the WhatsApp address-book mirror, backing the People
  * tab's "WhatsApp contacts" section. Promotion to a curated `persons` entry
- * reuses the existing `/api/persons/create` + `/api/persons/link` routes — a
+ * goes through `POST /api/people` and `POST /api/people/:id/accounts` — a
  * contact's `jid` is the `channelUserId` those endpoints expect for WhatsApp.
  */
 export function whatsappContactsRoutes(deps: ApiDeps): Hono {

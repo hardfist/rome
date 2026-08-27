@@ -5,8 +5,9 @@ import {
   ASSIGNABLE_BOND_LEVELS,
   normalizeBondLevel,
   type AssignableBondLevel,
-} from "@rome/api-types/identities";
-import type { LinkConflict, PersonResource } from "@rome/api-types/people";
+  type LinkConflict,
+  type PersonResource,
+} from "@rome/api-types/people";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";

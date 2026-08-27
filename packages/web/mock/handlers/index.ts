@@ -47,8 +47,8 @@ import type { FileBrowserTreeNode } from "@/lib/file-browser-tree";
 import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { connections } from "./connections-store";
-import { peopleHandlers } from "./people";
-import { proposedPeopleHandlers } from "./people-proposed";
+import { channelMirrorHandlers } from "./people";
+import { peopleHandlers } from "./people-api";
 import { routineHandlers } from "./routines";
 import { settingsHandlers } from "./settings";
 
@@ -1294,11 +1294,11 @@ export const handlers = [
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
   ...activityHandlers,
+  // The per-channel mirrors, and the /people contract over the same fixture
+  // store. Disjoint path families (/api/whatsapp and /api/linkedin against
+  // /api/people and /api/accounts), so the order between them is free.
+  ...channelMirrorHandlers,
   ...peopleHandlers,
-  // The proposed /people contract (@rome/api-types/people) over the same store
-  // as peopleHandlers — no core route serves it yet. Disjoint path family
-  // (/api/people, /api/accounts), so ordering against peopleHandlers is free.
-  ...proposedPeopleHandlers,
   ...routineHandlers,
   ...settingsHandlers,
 ];

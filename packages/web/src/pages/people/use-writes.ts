@@ -1,8 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import type { AssignableBondLevel } from "@rome/api-types/identities";
-import type { DirectoryAccount, PersonResource } from "@rome/api-types/people";
+import type { AssignableBondLevel, DirectoryAccount, PersonResource } from "@rome/api-types/people";
 import { ACCOUNTS_KEY, PEOPLE_KEY, TIMELINE_KEY } from "./use-roster";
 import {
   createPerson,

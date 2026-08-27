@@ -75,7 +75,7 @@ describe("guardian channel mapping", () => {
 
     // A second identity lands between the plan and its application: the grant
     // section the conferral holds keeps competing conferrals out, not
-    // `/persons/link`.
+    // a link write.
     await repo.addChannelMapping("guardian", "telegram", "tg-personal");
 
     testDb.db.transaction((tx) => {
@@ -86,7 +86,7 @@ describe("guardian channel mapping", () => {
 
   it("maps the incoming identity when the one it would re-canonicalize is gone", async () => {
     // The guardian read reports an identity the database no longer holds — the
-    // window between that read and the write, where `/persons/link` runs.
+    // window between that read and the write, where a link write runs.
     vi.spyOn(repo, "findByBondLevel").mockResolvedValue([
       { id: "guardian", channelMappings: [{ channel: "telegram", channelUserId: "tg-gone" }] },
     ] as unknown as Awaited<ReturnType<PersonMappingRepository["findByBondLevel"]>>);

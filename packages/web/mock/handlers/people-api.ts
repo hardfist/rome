@@ -1,29 +1,22 @@
 import { http, HttpResponse } from "msw";
 import { STRANGER_PERSON_ID, protectedPersonReason } from "@rome/api-types/persons";
 import {
-  channelIdentityId,
-  isAfterTimelineCursor,
-  isAssignableBondLevel,
-  latestDynamic,
-  parseTimelineCursor,
-  personIdentityId,
-  timelineCursor,
-  whatsAppDisplayName,
-  type TimelineEntry,
-  type TimelinePage,
-} from "@rome/api-types/identities";
-import {
   accountPresentation,
   comparePeople,
   countPeople,
+  isAfterTimelineCursor,
+  isAssignableBondLevel,
+  latestDynamic,
   parseAccountCursor,
   parseAccountState,
   parseMergeRequest,
   parsePersonFilterLevel,
+  parseTimelineCursor,
   parseUpdatePersonRequest,
   personMatchesLevel,
   personMatchesQuery,
   sliceAccountDirectory,
+  timelineCursor,
   timelinePageLimit,
   type CreatePersonRequest,
   type DirectoryAccount,
@@ -31,43 +24,39 @@ import {
   type LinkConflict,
   type PeopleList,
   type PersonResource,
+  type TimelineEntry,
+  type TimelinePage,
 } from "@rome/api-types/people";
-import { buildTimeline, proposedApiStore } from "./people";
+import {
+  accountTimeline,
+  nameForAccount,
+  nextPersonId,
+  ownerOf,
+  personTimeline,
+  persons,
+  sentinelSenders,
+  summarize,
+  whatsappContacts,
+} from "./people";
 
 /**
- * The proposed /people contract — Person, Account, Link — served over the SAME
- * in-memory store as the legacy handlers in ./people.ts, so a write through
- * either contract is visible to the other and the People page can migrate
- * incrementally. Wire types and route map: `@rome/api-types/people`;
+ * The /people contract — Person, Account, Link — over the fixture store in
+ * ./people.ts, so a link made here is visible to the channel thread the mirror
+ * endpoints open. Wire types and route map: `@rome/api-types/people`;
  * vocabulary: docs/concepts/identity.md.
  *
- * No core route serves this surface yet. The contract itself lives in
- * `@rome/api-types/people` — this file is only mock mode's implementation of
- * it, typed against that module like every other handler here, so the
- * dashboard can build against the surface before the backend lands.
+ * Mock mode's implementation of the same surface core serves
+ * (`packages/core/src/api/routes/people.ts` and `.../accounts.ts`), typed
+ * against the contract module like every other handler here, so the dashboard
+ * cannot be built against a shape production does not answer with.
  *
  * The stranger sentinel is implementation, not contract: dismissal is stored
  * as a link to the sentinel row, presented as `state: "dismissed"` through
  * `accountPresentation`, and no /api/people route addresses the sentinel.
  */
 
-const { persons, sentinelSenders, whatsappContacts, ownerOf, nextPersonId, summarize } =
-  proposedApiStore;
-
 type PersonFixture = (typeof persons)[number];
 type AccountRef = { channel: string; channelUserId: string };
-
-/** Stand-in for the per-provider account directory seam: what the platform
- *  calls this account, mirror profile first, push name second, raw id last.
- *  Core's implementation owns this chain in one module per provider. */
-function accountDisplayName(channel: string, channelUserId: string): string {
-  const contact =
-    channel === "whatsapp" ? whatsappContacts.find((c) => c.jid === channelUserId) : undefined;
-  const sender = sentinelSenders.find(
-    (s) => s.channel === channel && s.channelUserId === channelUserId,
-  );
-  return (contact ? whatsAppDisplayName(contact) : null) ?? sender?.displayName ?? channelUserId;
-}
 
 function messageCountFor(channel: string, channelUserId: string): number {
   if (channel === "whatsapp" && whatsappContacts.some((c) => c.jid === channelUserId)) {
@@ -79,7 +68,7 @@ function messageCountFor(channel: string, channelUserId: string): number {
 }
 
 function personResource(person: PersonFixture): PersonResource {
-  const entries = buildTimeline(personIdentityId(person.id)) ?? [];
+  const entries = personTimeline(person.id) ?? [];
   return {
     id: person.id,
     displayName: person.displayName,
@@ -87,7 +76,7 @@ function personResource(person: PersonFixture): PersonResource {
     accounts: person.channelMappings.map((a) => ({
       channel: a.channel,
       channelUserId: a.channelUserId,
-      displayName: accountDisplayName(a.channel, a.channelUserId),
+      displayName: nameForAccount(a.channel, a.channelUserId),
     })),
     // Timeline entries, not records: the contract pins a person's count to the
     // history GET /api/people/:id/messages pages.
@@ -98,12 +87,12 @@ function personResource(person: PersonFixture): PersonResource {
 
 function directoryRow(ref: AccountRef): DirectoryAccount {
   const owner = ownerOf(ref.channel, ref.channelUserId);
-  const entries = buildTimeline(channelIdentityId(ref.channel, ref.channelUserId)) ?? [];
+  const entries = accountTimeline(ref);
   return {
     channel: ref.channel,
     channelUserId: ref.channelUserId,
     addresses: [ref.channelUserId],
-    displayName: accountDisplayName(ref.channel, ref.channelUserId),
+    displayName: nameForAccount(ref.channel, ref.channelUserId),
     ...accountPresentation(owner ? { personId: owner.id, displayName: owner.displayName } : null),
     messageCount: messageCountFor(ref.channel, ref.channelUserId),
     latest: latestDynamic(entries),
@@ -166,7 +155,7 @@ const refFromParams = (params: Record<string, unknown>): AccountRef => ({
   channelUserId: decodeURIComponent(String(params.channelUserId)),
 });
 
-export const proposedPeopleHandlers = [
+export const peopleHandlers = [
   // Curated people only — the sentinel's holdings surface on /api/accounts as
   // dismissed rows, never as a person.
   http.get("/api/people", ({ request }) => {
@@ -188,8 +177,9 @@ export const proposedPeopleHandlers = [
   }),
 
   // Every account ever observed — from links, the sentinel log, and channel
-  // mirrors — with its derived state. `?state=unlinked` is the discovery queue
-  // that replaces /api/persons/unknown and the union's unknown rows.
+  // mirrors — with its derived state. `?state=unlinked` is the discovery queue:
+  // every account nobody has placed, which is the question the retired unknown
+  // senders endpoint answered over one channel at a time.
   http.get("/api/accounts", ({ request }) => {
     const params = new URL(request.url).searchParams;
     const rawState = params.get("state");
@@ -295,7 +285,7 @@ export const proposedPeopleHandlers = [
     if (!person) return notFound("person");
     const search = new URL(request.url).searchParams;
     const channel = search.get("channel");
-    const all = (buildTimeline(personIdentityId(person.id)) ?? []).filter(
+    const all = (personTimeline(person.id) ?? []).filter(
       (entry) => !channel || entry.source === channel,
     );
     const rawCursor = search.get("cursor");

@@ -6,8 +6,7 @@
 // underneath both reads that have to show every account there is: which
 // addressings are one account, and what that account last did.
 
-import type { AccountDynamic } from "@rome/api-types/people";
-import { compareCodePoints } from "@rome/api-types/identities";
+import { compareCodePoints, type AccountDynamic } from "@rome/api-types/people";
 import type { SentinelSenderActivity } from "../db/repositories/sentinel-log.js";
 import type { TalkAccountActivity } from "./account-activity.js";
 import type { TalkAccounts } from "./accounts.js";

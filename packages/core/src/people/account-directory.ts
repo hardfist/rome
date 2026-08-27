@@ -8,8 +8,11 @@
 // read once through `AccountFold` (../channels/account-fold.ts), so nothing
 // here is channel-specific and adding a mirror changes nothing in this file.
 
-import { accountPresentation, type DirectoryAccount } from "@rome/api-types/people";
-import { compareCodePoints } from "@rome/api-types/identities";
+import {
+  accountPresentation,
+  compareCodePoints,
+  type DirectoryAccount,
+} from "@rome/api-types/people";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import type { AccountNames } from "../channels/account-names.js";
 import { foldAccounts, mirrorRegistry, type MirrorPlane } from "../channels/account-fold.js";

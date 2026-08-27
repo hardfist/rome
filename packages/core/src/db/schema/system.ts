@@ -113,7 +113,7 @@ export const channelMappings = sqliteTable(
 // events. Deliberately separate from the curated `persons` graph: a WhatsApp
 // account can have thousands of contacts, so they live here as a browsable
 // address book and are promoted to a `persons` row only on guardian action
-// (via the existing channel_mappings + /api/persons/create|link flow). The
+// (via the `POST /api/people` + `POST /api/people/:id/accounts` flow). The
 // bridge key is the JID: a private contact's `jid` equals the `channelUserId`
 // inbound messages map to, so a promoted contact is recognized on its next
 // message with no extra wiring.

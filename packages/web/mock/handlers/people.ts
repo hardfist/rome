@@ -5,41 +5,11 @@ import {
   nextAvailablePersonId,
   STRANGER_PERSON_DISPLAY_NAME,
   STRANGER_PERSON_ID,
-  protectedPersonReason,
 } from "@rome/api-types/persons";
 import {
-  channelIdentityId,
-  compareIdentityRows,
   compareTimelineEntries,
-  identityMatchesQuery,
-  isAfterTimelineCursor,
-  isAssignableBondLevel,
-  latestDynamic,
-  compareCodePoints,
-  normalizeBondLevel,
-  parseIdentityCursor,
-  parseIdentityFilterLevel,
-  parseIdentityId,
-  parseTimelineCursor,
-  personIdentityId,
-  sliceIdentityPage,
-  timelineCursor,
   whatsAppDisplayName,
-  TIMELINE_PAGE_DEFAULT_LIMIT,
-  TIMELINE_PAGE_MAX_LIMIT,
-  type IdentityChannel,
-  type IdentityRow,
   type TimelineEntry,
-  type TimelinePage,
-} from "@rome/api-types/identities";
-import {
-  countPeople,
-  comparePeople,
-  parsePersonFilterLevel,
-  personMatchesLevel,
-  personMatchesQuery,
-  type PeopleList,
-  type PersonResource,
 } from "@rome/api-types/people";
 import type {
   LinkedInMessage,
@@ -51,16 +21,14 @@ import type {
 } from "@/pages/people/legacy-api-shapes";
 
 /**
- * The People tab: `/api/identities` — the union the page reads — plus the
- * writes that move an identity along the bond ladder, over the same in-memory
- * store the legacy `/api/persons*` and `/api/whatsapp/contacts` endpoints are
- * served from. One store, so a move made through the new page is visible to
- * every other surface reading the old endpoints.
+ * The People tab's in-memory store: the curated people, the sentinel log, and
+ * the channel mirrors behind them — plus the per-channel message and send
+ * endpoints served straight off it.
  *
- * `/api/people` is served from the same store, projected into the people
- * contract by `buildPeople`. The composer's mention list reads it; only the
- * People page's own reads and writes still speak `/api/persons`, which is what
- * that route is left alive for.
+ * The store is exported because the /people contract (./people-api.ts) is
+ * served from it too: one store, so a link made through the contract is visible
+ * to the thread a mirror endpoint opens, and a send lands where the next read
+ * of either surface will find it.
  */
 
 const MINUTE = 60;
@@ -124,9 +92,9 @@ const HIKES_JID = "120363041948572901@g.us";
 const DEVIKA_NAME = "Devika";
 const DEVIKA_LATEST = { text: "Are you going on Saturday?", at: 3 * HOUR };
 
-/** The curated graph's row, typed against the People page's `/api/persons`
- *  decode. `buildPeople` projects the same row into `PersonResource`, so a
- *  fixture that drops a field breaks whichever surface reads it. */
+/** The curated graph's row. `./people-api.ts` projects it into
+ *  `PersonResource`, so a fixture that drops a field breaks the surface that
+ *  reads it. */
 type PersonFixture = PeoplePerson;
 
 /**
@@ -145,7 +113,7 @@ type WhatsAppContactRow = Omit<
 
 // The curated graph. Bond levels are chosen to cover each branch the page
 // takes on them rather than to look like a plausible address book.
-const persons: PersonFixture[] = [
+export const persons: PersonFixture[] = [
   {
     // The guardian. `/api/bootstrap` reports `phase: "ready"`, and the only
     // route to that phase inserts this row, so a persons payload without it is
@@ -203,8 +171,8 @@ const persons: PersonFixture[] = [
   },
   {
     // The sentinel row core seeds at boot, carrying one already-dismissed
-    // sender. `/api/persons` returns it and the page filters it back out, while
-    // `/api/people` withholds it — it is here to keep both honest, not to be
+    // sender. `/api/people` withholds it and `/api/accounts` surfaces its
+    // holdings as dismissed rows — it is here to keep those honest, not to be
     // looked at.
     id: STRANGER_PERSON_ID,
     displayName: STRANGER_PERSON_DISPLAY_NAME,
@@ -213,10 +181,10 @@ const persons: PersonFixture[] = [
   },
 ];
 
-// Senders seen in `sentinel_log`. The endpoint is the half of these with no
-// row in `channel_mappings`, so this list is the raw log and the join runs in
-// the handler — that is what makes create, link and mark-stranger take a card
-// off the queue instead of leaving it there until a reload.
+// Senders seen in `sentinel_log`. `?state=unlinked` on the account directory
+// is the half of these with no row in `channel_mappings`, so this list is the
+// raw log and the join runs in the handler — that is what makes a link take a
+// row out of the discovery queue instead of leaving it there until a reload.
 /** The log row, plus what Rome said back when it replied — `sentinel_log`
  *  records both halves of an exchange, and the timeline renders both. */
 type SentinelRow = UnknownSender & {
@@ -228,7 +196,7 @@ type SentinelRow = UnknownSender & {
   logId: string;
 };
 
-const sentinelSenders: SentinelRow[] = (
+export const sentinelSenders: SentinelRow[] = (
   [
     {
       channel: "telegram",
@@ -315,7 +283,7 @@ const sentinelSenders: SentinelRow[] = (
 
 // The WhatsApp address book. Unordered: the handler sorts, because the order
 // the repository returns depends on the summary fields it projects.
-const whatsappContacts: WhatsAppContactRow[] = [
+export const whatsappContacts: WhatsAppContactRow[] = [
   {
     jid: RAY_JID,
     phoneNumber: "14155550142",
@@ -542,7 +510,7 @@ function displayNameOf(contact: WhatsAppContactRow): string {
  * `messageCount`, which the repository takes as a plain `COUNT(*)` over the
  * chat.
  */
-function summarize(
+export function summarize(
   jid: string,
 ): Pick<WhatsAppContact, "lastMessageAt" | "lastMessagePreview" | "messageCount"> {
   const thread = threads[jid] ?? [];
@@ -566,7 +534,7 @@ function summarize(
 /** The person a channel identity currently maps to, or `undefined` while it is
  *  still unmapped. The `channel_mappings` lookup both the unknown-sender query
  *  and the contacts join run. */
-function ownerOf(channel: string, channelUserId: string): PersonFixture | undefined {
+export function ownerOf(channel: string, channelUserId: string): PersonFixture | undefined {
   return persons.find((person) =>
     person.channelMappings.some(
       (mapping) => mapping.channel === channel && mapping.channelUserId === channelUserId,
@@ -575,7 +543,7 @@ function ownerOf(channel: string, channelUserId: string): PersonFixture | undefi
 }
 
 /**
- * The id `POST /persons/create` mints, over the in-memory store. Both the slug
+ * The id `POST /api/people` mints, over the in-memory store. Both the slug
  * and the collision rule come from the shared derivation; all this adds is the
  * set of ids to resolve against, which is the one thing the two sides cannot
  * share — the repository resolves against the rows it queries, this against the
@@ -584,7 +552,7 @@ function ownerOf(channel: string, channelUserId: string): PersonFixture | undefi
  * A name that slugs to nothing gets a uuid on the real route.
  * `crypto.randomUUID` is the browser's equivalent of core's `uuid()`.
  */
-function nextPersonId(displayName: string): string {
+export function nextPersonId(displayName: string): string {
   const base = generatePersonSlug(displayName);
   if (!base) return crypto.randomUUID();
   return nextAvailablePersonId(
@@ -593,24 +561,10 @@ function nextPersonId(displayName: string): string {
   );
 }
 
-/**
- * The route's rejection for a request missing a required field, wording
- * included: the page puts a 4xx `error` body straight on the card, so the copy
- * is the contract here, not the status alone. Core writes these as an Oxford
- * list — "a and b", "a, b, and c".
- */
-const missingFields = (fields: string[]) => {
-  const list =
-    fields.length < 3
-      ? fields.join(" and ")
-      : `${fields.slice(0, -1).join(", ")}, and ${fields.at(-1)}`;
-  return HttpResponse.json({ error: `${list} are required` }, { status: 400 });
-};
-
 /** What the account's own platform calls it, then the name its sender put on a
  *  message, then the address itself — the order `DirectoryAccount.displayName`
  *  and `LinkedAccount.displayName` both name. Never the linked person's name. */
-function nameForAccount(channel: string, channelUserId: string): string {
+export function nameForAccount(channel: string, channelUserId: string): string {
   const contact =
     channel === "whatsapp"
       ? whatsappContacts.find((candidate) => candidate.jid === channelUserId)
@@ -621,169 +575,33 @@ function nameForAccount(channel: string, channelUserId: string): string {
   return (contact ? whatsAppDisplayName(contact) : null) ?? sender?.displayName ?? channelUserId;
 }
 
-export function buildIdentities(): IdentityRow[] {
-  const rows: IdentityRow[] = [];
-  const mapped = new Set<string>();
-  const contactByJid = new Map(whatsappContacts.map((contact) => [contact.jid, contact]));
-  const key = (channel: string, channelUserId: string) => `${channel}\n${channelUserId}`;
-
-  /**
-   * How many records the producers hold for one channel identity — reactions
-   * and replies included, because the field counts history rather than rendered
-   * entries.
-   */
-  const messageCountFor = (channel: string, channelUserId: string): number => {
-    const contact = channel === "whatsapp" ? contactByJid.get(channelUserId) : undefined;
-    if (contact) return summarize(contact.jid).messageCount;
-    return sentinelSenders
-      .filter((s) => s.channel === channel && s.channelUserId === channelUserId)
-      .reduce((total, s) => total + (s.reply ? 2 : 1), 0);
-  };
-
-  /**
-   * A row's activity.
-   *
-   * `latest` is the head of the row's own timeline rather than a separately
-   * computed maximum. The two orderings settle a same-second tie differently —
-   * the timeline on direction and `ref`, a dynamic on `source` and `preview` —
-   * so computing them apart lets a row preview one event while its timeline
-   * opens on another. Deriving one from the other makes that unrepresentable.
-   */
-  const activityForChannels = (channels: IdentityChannel[]) => {
-    return {
-      messageCount: channels.reduce(
-        (total, mapping) => total + messageCountFor(mapping.channel, mapping.channelUserId),
-        0,
-      ),
-      latest: latestDynamic(timelineForChannels(channels)),
-    };
-  };
-
-  for (const person of persons) {
-    for (const mapping of person.channelMappings) {
-      mapped.add(key(mapping.channel, mapping.channelUserId));
-    }
-
-    if (person.id === STRANGER_PERSON_ID) {
-      for (const head of person.channelMappings) {
-        const group = [head];
-        rows.push({
-          id: channelIdentityId(head.channel, head.channelUserId),
-          displayName: nameForAccount(head.channel, head.channelUserId),
-          level: "stranger",
-          channels: group,
-          ...activityForChannels(group),
-          neverMessaged: false,
-        });
-      }
-      continue;
-    }
-
-    const channels = person.channelMappings;
-    rows.push({
-      id: personIdentityId(person.id),
-      displayName: person.displayName,
-      level: person.bondLevel === "guardian" ? "guardian" : normalizeBondLevel(person.bondLevel),
-      channels,
-      ...activityForChannels(channels),
-      neverMessaged: false,
-    });
-  }
-
-  for (const sender of sentinelSenders) {
-    const k = key(sender.channel, sender.channelUserId);
-    if (mapped.has(k)) continue;
-    mapped.add(k);
-    const senderGroup = [{ channel: sender.channel, channelUserId: sender.channelUserId }];
-    rows.push({
-      id: channelIdentityId(sender.channel, sender.channelUserId),
-      displayName: nameForAccount(sender.channel, sender.channelUserId),
-      level: "unknown",
-      channels: senderGroup,
-      ...activityForChannels(senderGroup),
-      neverMessaged: false,
-    });
-  }
-
-  for (const contact of whatsappContacts) {
-    // Groups are conversations, not identities — they cannot hold a bond.
-    if (contact.isGroup) continue;
-    const k = key("whatsapp", contact.jid);
-    if (mapped.has(k)) continue;
-    mapped.add(k);
-    const group = [{ channel: "whatsapp", channelUserId: contact.jid }];
-    const activity = activityForChannels(group);
-    rows.push({
-      id: channelIdentityId("whatsapp", contact.jid),
-      displayName: whatsAppDisplayName(contact) ?? contact.jid,
-      level: "unknown",
-      channels: group,
-      ...activity,
-      neverMessaged: activity.latest === null,
-    });
-  }
-
-  return rows;
+/** One account, named the way every channel names it: the platform and its own
+ *  id for the person there. */
+export interface AccountRef {
+  channel: string;
+  channelUserId: string;
 }
 
 /**
- * Every curated person, as `GET /api/people` serves them.
- *
- * Projected off {@link buildIdentities} rather than off the fixture store a
- * second time: the two surfaces list the same people with the same accounts
- * and the same activity, so a second derivation would let the mention list and
- * the identity union disagree about a person the fixtures describe once.
- *
- * The stranger sentinel never appears. It contributes one `channel:` row per
- * dismissed sender rather than a `person:` row, so it falls out here by
- * construction — the same reason the route withholds it.
- */
-export function buildPeople(): PersonResource[] {
-  const byId = new Map(persons.map((person) => [person.id, person]));
-  return buildIdentities().flatMap((row) => {
-    const parsed = parseIdentityId(row.id);
-    if (parsed?.kind !== "person") return [];
-    const person = byId.get(parsed.personId);
-    if (!person) return [];
-    return [
-      {
-        id: person.id,
-        displayName: person.displayName,
-        // The stored value, free text included — the page buckets it, the
-        // contract does not launder it.
-        bondLevel: person.bondLevel,
-        accounts: row.channels.map((mapping) => ({
-          channel: mapping.channel,
-          channelUserId: mapping.channelUserId,
-          displayName: nameForAccount(mapping.channel, mapping.channelUserId),
-        })),
-        messageCount: row.messageCount,
-        latest: row.latest,
-      },
-    ];
-  });
-}
-
-/**
- * One identity's dynamics, newest first, the way the route merges them: the
+ * One person's dynamics, newest first, the way the route merges them: the
  * WhatsApp mirror holds full threads, and every other channel contributes the
  * single line the sentinel recorded. Entries are generic — source, time, body,
  * direction, ref — so nothing here knows it is looking at WhatsApp.
  */
-export function buildTimeline(id: string): TimelineEntry[] | null {
-  const parsed = parseIdentityId(id);
-  if (!parsed) return null;
-  const channels =
-    parsed.kind === "channel"
-      ? [{ channel: parsed.channel, channelUserId: parsed.channelUserId }]
-      : (persons.find((person) => person.id === parsed.personId)?.channelMappings ?? null);
-  if (channels === null) return null;
-  return timelineForChannels(channels);
+export function personTimeline(personId: string): TimelineEntry[] | null {
+  const channels = persons.find((person) => person.id === personId)?.channelMappings;
+  return channels ? timelineForChannels(channels) : null;
+}
+
+/** One account's dynamics, newest first. Always an answer: an account Rome has
+ *  never heard from has an empty history, not a missing one. */
+export function accountTimeline(ref: AccountRef): TimelineEntry[] {
+  return timelineForChannels([ref]);
 }
 
 /** One channel set's dynamics, newest first. The row's `latest` is this
  *  sequence's head, so the two cannot disagree about what happened last. */
-function timelineForChannels(channels: IdentityChannel[]): TimelineEntry[] {
+function timelineForChannels(channels: AccountRef[]): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
   for (const mapping of channels) {
     if (mapping.channel === "whatsapp") {
@@ -823,7 +641,7 @@ function timelineForChannels(channels: IdentityChannel[]): TimelineEntry[] {
 }
 
 /** Every sentinel log row for one channel identity, as timeline entries. */
-function sentinelEntriesFor(mapping: IdentityChannel): TimelineEntry[] {
+function sentinelEntriesFor(mapping: AccountRef): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
   for (const sender of sentinelSenders) {
     if (sender.channel !== mapping.channel || sender.channelUserId !== mapping.channelUserId) {
@@ -849,36 +667,10 @@ function sentinelEntriesFor(mapping: IdentityChannel): TimelineEntry[] {
   return entries;
 }
 
-/**
- * The legacy `/api/persons/unknown` queue: one card per unmapped sender, newest
- * first, the way core's endpoint groups it.
- *
- * The log holds a record per exchange, so one sender can own several. The queue
- * is a list of people waiting rather than a list of things they said, so the
- * records collapse to their newest — returning them raw renders one person as
- * two cards sharing a React key, the older of them stale.
- */
-
-export function listUnknownSenders(): SentinelRow[] {
-  const newest = new Map<string, SentinelRow>();
-  for (const sender of sentinelSenders) {
-    if (ownerOf(sender.channel, sender.channelUserId)) continue;
-    const k = `${sender.channel}\n${sender.channelUserId}`;
-    const held = newest.get(k);
-    if (!held || (sender.lastMessageAt ?? 0) > (held.lastMessageAt ?? 0)) newest.set(k, sender);
-  }
-  return [...newest.values()].sort(
-    (a, b) =>
-      (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0) ||
-      compareCodePoints(a.channelUserId, b.channelUserId),
-  );
-}
-
-// ── LinkedIn inbox mirror fixtures ──────────────────────────────────────────
+// ── LinkedIn inbox mirror fixtures ──────────────────────────────────
 // Two threads exercise both dialog shapes: a 1:1 with a subject-carrying
 // InMail and reactions, and a group conversation (personName + conversationName)
 // so the sender labels render.
-
 const LI_ARVIND_THREAD = "2-mock-arvind==";
 const LI_FOUNDERS_THREAD = "2-mock-founders==";
 
@@ -991,321 +783,10 @@ const linkedinThreads: LinkedInThread[] = [
   },
 ];
 
-// Shared-store escape hatch for ./people-proposed.ts, so a write made through
-// the proposed /people routes is visible to every legacy endpoint in this file
-// and vice versa. Retires with the legacy endpoints once the People surface
-// reads the /people contract.
-export const proposedApiStore = {
-  persons,
-  sentinelSenders,
-  whatsappContacts,
-  ownerOf,
-  nextPersonId,
-  summarize,
-};
-
-export const peopleHandlers = [
-  http.get("/api/identities", ({ request }) => {
-    const params = new URL(request.url).searchParams;
-    const wanted = params.get("id");
-    const query = params.get("q") ?? "";
-    const includeNeverMessaged = params.get("includeNeverMessaged") === "true";
-    const limit = Number(params.get("limit"));
-    const rawLevel = params.get("level");
-    const level = parseIdentityFilterLevel(rawLevel);
-    if (rawLevel != null && rawLevel !== "" && level === null) {
-      return HttpResponse.json({ error: `level must name a bond level or "all"` }, { status: 400 });
-    }
-
-    const rawCursor = params.get("cursor");
-    const cursor = parseIdentityCursor(rawCursor);
-    if (rawCursor != null && rawCursor !== "" && cursor === null) {
-      return HttpResponse.json({ error: "cursor is not an identity cursor" }, { status: 400 });
-    }
-
-    const all = buildIdentities();
-    // The whole matching union, `?id=` included — narrowing to one row is the
-    // shared rule's job, so a by-id refresh still reads union-wide counts.
-    const rows = all.filter((row) => identityMatchesQuery(row, query));
-    rows.sort(compareIdentityRows);
-    return HttpResponse.json(
-      // Counts, the silent-contact toggle, the level filter and paging are all
-      // the shared rule's job — the whole matching union goes in, so the
-      // fixtures cannot drift from the route on any of them, and the counts
-      // still describe rows this page is holding back.
-      sliceIdentityPage(rows, {
-        cursor,
-        limit: Number.isFinite(limit) && limit > 0 ? limit : null,
-        level,
-        id: wanted,
-        // A search reaches the whole address book; the toggle only decides what
-        // the browsing views carry. A lookup by id needs no such pairing —
-        // `sliceIdentityPage` answers about the row it names either way.
-        includeNeverMessaged: includeNeverMessaged || query.trim() !== "",
-      }),
-    );
-  }),
-
-  http.get("/api/identities/:id/timeline", ({ params, request }) => {
-    const id = String(params.id);
-    // The id has to name a row the union actually exposes. A syntactically
-    // valid `channel:` id for an identity that was never seen, or one since
-    // folded into a person, would otherwise answer 200 and an empty or partial
-    // history — a stale client would render "no messages" for someone who has
-    // them rather than learning its id is gone.
-    if (!buildIdentities().some((row) => row.id === id)) {
-      return HttpResponse.json({ error: "Unknown identity" }, { status: 404 });
-    }
-    const entries = buildTimeline(id);
-    if (entries === null) {
-      return HttpResponse.json({ error: "Unknown identity" }, { status: 404 });
-    }
-    const timelineParams = new URL(request.url).searchParams;
-    const rawCursor = timelineParams.get("cursor");
-    const cursor = parseTimelineCursor(rawCursor);
-    if (rawCursor != null && rawCursor !== "" && cursor === null) {
-      return HttpResponse.json({ error: "cursor is not a timeline cursor" }, { status: 400 });
-    }
-    // Clamped the way the contract defines, so `?limit=` exercises paging here
-    // exactly as it will against the route.
-    const rawLimit = Number(timelineParams.get("limit"));
-    const limit =
-      Number.isFinite(rawLimit) && rawLimit > 0
-        ? Math.min(rawLimit, TIMELINE_PAGE_MAX_LIMIT)
-        : TIMELINE_PAGE_DEFAULT_LIMIT;
-    // Resumes at the entry the cursor names rather than at its second: a
-    // second holds more than one entry, and the route pages the same way.
-    const remaining = cursor
-      ? entries.filter((entry) => isAfterTimelineCursor(entry, cursor))
-      : entries;
-    const page = remaining.slice(0, limit);
-    const oldest = page.at(-1);
-    const body: TimelinePage = {
-      entries: page,
-      nextCursor: remaining.length > page.length && oldest ? timelineCursor(oldest) : null,
-    };
-    return HttpResponse.json(body);
-  }),
-
-  http.post("/api/persons/set-bond-level", async ({ request }) => {
-    const body = (await request.json().catch(() => ({}))) as Partial<{
-      personId: string;
-      bondLevel: string;
-    }>;
-    const { personId, bondLevel } = body;
-    if (!personId || !bondLevel) return missingFields(["personId", "bondLevel"]);
-    if (!isAssignableBondLevel(bondLevel)) {
-      return HttpResponse.json(
-        { error: "bondLevel must be inner-circle, acquaintance, or other" },
-        { status: 400 },
-      );
-    }
-    const person = persons.find((candidate) => candidate.id === personId);
-    if (!person) return HttpResponse.json({ error: "Unknown person" }, { status: 404 });
-    // Which rows are structure rather than people is the shared rule's call,
-    // so the route and this handler cannot disagree on it.
-    const protectedReason = protectedPersonReason(person);
-    if (protectedReason) {
-      return HttpResponse.json(
-        {
-          error:
-            protectedReason === "guardian"
-              ? "the guardian's bond level cannot be changed"
-              : "the stranger sentinel has no bond level",
-        },
-        { status: 400 },
-      );
-    }
-    person.bondLevel = bondLevel;
-    return HttpResponse.json({ success: true });
-  }),
-
-  http.post("/api/persons/move-channel", async ({ request }) => {
-    const body = (await request.json().catch(() => ({}))) as Partial<{
-      channel: string;
-      channelUserId: string;
-      bondLevel: string;
-      displayName: string;
-    }>;
-    const { channel, channelUserId, bondLevel, displayName } = body;
-    if (!channel || !channelUserId || !bondLevel) {
-      return missingFields(["channel", "channelUserId", "bondLevel"]);
-    }
-    if (!isAssignableBondLevel(bondLevel)) {
-      return HttpResponse.json(
-        { error: "bondLevel must be inner-circle, acquaintance, or other" },
-        { status: 400 },
-      );
-    }
-    const owner = ownerOf(channel, channelUserId);
-    if (owner && owner.id !== STRANGER_PERSON_ID) {
-      return HttpResponse.json(
-        { error: "identity is already mapped to a person" },
-        { status: 409 },
-      );
-    }
-    const name = displayName || channelUserId;
-    const personId = nextPersonId(name);
-    const placed: PersonFixture = {
-      id: personId,
-      displayName: name,
-      bondLevel,
-      channelMappings: [],
-    };
-    persons.push(placed);
-    // A dismissed identity's mapping is re-pointed rather than duplicated,
-    // which is what makes recovery from the Stranger group a plain move.
-    if (owner) {
-      owner.channelMappings = owner.channelMappings.filter(
-        (mapping) => !(mapping.channel === channel && mapping.channelUserId === channelUserId),
-      );
-    }
-    placed.channelMappings.push({ channel, channelUserId });
-    return HttpResponse.json({ success: true, personId });
-  }),
-
-  http.post("/api/persons/merge", async ({ request }) => {
-    const body = (await request.json().catch(() => ({}))) as Partial<{
-      sourcePersonId: string;
-      targetPersonId: string;
-    }>;
-    const { sourcePersonId, targetPersonId } = body;
-    if (!sourcePersonId || !targetPersonId) {
-      return missingFields(["sourcePersonId", "targetPersonId"]);
-    }
-    if (sourcePersonId === targetPersonId) {
-      return HttpResponse.json(
-        { error: "a person cannot be merged into themselves" },
-        { status: 400 },
-      );
-    }
-    const sourceIndex = persons.findIndex((person) => person.id === sourcePersonId);
-    const target = persons.find((person) => person.id === targetPersonId);
-    if (sourceIndex === -1 || !target) {
-      return HttpResponse.json({ error: "Unknown person" }, { status: 404 });
-    }
-    // Dismissing a curated person is a merge into the sentinel: their mappings
-    // move across and each renders as its own stranger-level row, so the
-    // identity survives the source row going away. That only holds while there
-    // is a mapping to carry — a person with none leaves nothing behind, which
-    // is the one case this refuses. `canMoveToStranger` is the same rule, so a
-    // caller can omit the move rather than discover it here.
-    if (target.id === STRANGER_PERSON_ID && persons[sourceIndex].channelMappings.length === 0) {
-      return HttpResponse.json(
-        { error: "an identity with no channel mappings cannot be dismissed" },
-        { status: 400 },
-      );
-    }
-    const protectedSource = protectedPersonReason(persons[sourceIndex]);
-    if (protectedSource) {
-      return HttpResponse.json(
-        {
-          error:
-            protectedSource === "guardian"
-              ? "the guardian cannot be merged away"
-              : "the stranger sentinel cannot be merged away",
-        },
-        { status: 400 },
-      );
-    }
-    target.channelMappings.push(...persons[sourceIndex].channelMappings);
-    persons.splice(sourceIndex, 1);
-    return HttpResponse.json({ success: true });
-  }),
-
-  // Ordered before `/api/persons` only for readability — MSW matches full
-  // paths, so neither shadows the other.
-  http.get("/api/persons/unknown", () => HttpResponse.json(listUnknownSenders())),
-
-  http.post("/api/persons/create", async ({ request }) => {
-    const body = (await request.json().catch(() => ({}))) as Partial<{
-      displayName: string;
-      bondLevel: string;
-      channel: string;
-      channelUserId: string;
-    }>;
-    const { displayName, bondLevel, channel, channelUserId } = body;
-    if (!displayName || !bondLevel || !channel || !channelUserId) {
-      return missingFields(["displayName", "bondLevel", "channel", "channelUserId"]);
-    }
-    const personId = nextPersonId(displayName);
-    persons.push({
-      id: personId,
-      displayName,
-      bondLevel,
-      channelMappings: [{ channel, channelUserId }],
-    });
-    return HttpResponse.json({ success: true, personId });
-  }),
-
-  http.post("/api/persons/link", async ({ request }) => {
-    const body = (await request.json().catch(() => ({}))) as Partial<{
-      channel: string;
-      channelUserId: string;
-      existingPersonId: string;
-    }>;
-    const { channel, channelUserId, existingPersonId } = body;
-    if (!channel || !channelUserId || !existingPersonId) {
-      return missingFields(["channel", "channelUserId", "existingPersonId"]);
-    }
-    const person = persons.find((candidate) => candidate.id === existingPersonId);
-    // Unreachable from the page, whose link form only lists persons that exist.
-    // It stands in for the foreign key on `channel_mappings.person_id`, so a
-    // mistyped id cannot leave a mapping pointing at nobody.
-    if (!person) return HttpResponse.json({ error: "Unknown person" }, { status: 404 });
-    // An identity belongs to one person: an already-mapped one is re-pointed,
-    // never mapped a second time, or it would surface in two groups at once.
-    const owner = ownerOf(channel, channelUserId);
-
-    if (owner) {
-      if (owner.id === existingPersonId) return HttpResponse.json({ success: true });
-      owner.channelMappings = owner.channelMappings.filter(
-        (mapping) => !(mapping.channel === channel && mapping.channelUserId === channelUserId),
-      );
-    }
-    person.channelMappings.push({ channel, channelUserId });
-    return HttpResponse.json({ success: true });
-  }),
-
-  http.post("/api/persons/mark-stranger", async ({ request }) => {
-    const body = (await request.json().catch(() => ({}))) as Partial<{
-      channel: string;
-      channelUserId: string;
-    }>;
-    const { channel, channelUserId } = body;
-    if (!channel || !channelUserId) return missingFields(["channel", "channelUserId"]);
-    const stranger = persons.find((person) => person.id === STRANGER_PERSON_ID);
-    if (!stranger) return HttpResponse.json({ error: "Unknown person" }, { status: 404 });
-    stranger.channelMappings.push({ channel, channelUserId });
-    return HttpResponse.json({ success: true });
-  }),
-
-  http.get("/api/persons", () => HttpResponse.json(persons)),
-
-  // The curated people read. Query parsing and the counts' scope are the
-  // route's (`packages/core/src/api/routes/people.ts`); the rules they run on
-  // are the contract's, so both ends call the same ones.
-  http.get("/api/people", ({ request }) => {
-    const params = new URL(request.url).searchParams;
-    const rawLevel = params.get("level");
-    const level = parsePersonFilterLevel(rawLevel);
-    if (rawLevel != null && rawLevel !== "" && level === null) {
-      return HttpResponse.json({ error: `level must name a bond level or "all"` }, { status: 400 });
-    }
-
-    // The whole `?q=` match, before `?level=` narrows it — every chip's number
-    // has to stay true while another chip is the selected one.
-    const matching = buildPeople().filter((person) =>
-      personMatchesQuery(person, params.get("q") ?? ""),
-    );
-    return HttpResponse.json({
-      people: matching
-        .filter((person) => personMatchesLevel(person, level ?? "all"))
-        .sort(comparePeople),
-      counts: countPeople(matching),
-    } satisfies PeopleList);
-  }),
-
+/** The per-channel message and send endpoints. Not the people contract —
+ *  a thread is a conversation rather than an account — so they keep their own
+ *  paths and are served straight off the store above. */
+export const channelMirrorHandlers = [
   http.get("/api/whatsapp/contacts", () => {
     const rows = whatsappContacts.map((contact) => {
       const owner = ownerOf("whatsapp", contact.jid);

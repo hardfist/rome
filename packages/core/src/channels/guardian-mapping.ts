@@ -42,7 +42,7 @@ export async function mapGuardianToChannel(
       });
       return true;
     }
-    // Nothing holds the guardian read above against the write, so `/persons/link`
+    // Nothing holds the guardian read above against the write, so a link write
     // can retire that identity in between. Fall through and map the incoming one
     // rather than report a heal that did not happen. The transactional path
     // cannot: its write is one statement settled before the transaction opened.
@@ -70,7 +70,7 @@ export async function mapGuardianToChannel(
  * keeps the mapping joinable to the canonicalized contacts mirror.
  *
  * Several held identities are several accounts (a person may hold more than one
- * per channel, and `/persons/link` places them), and nothing distinguishes a
+ * per channel, and the link verb places them), and nothing distinguishes a
  * superseded one from a live one. Adding the incoming identity leaves a stale
  * identifier behind at worst; re-pointing an arbitrary one would take an account
  * away from the guardian.
@@ -125,7 +125,7 @@ export async function planGuardianMapping(
   const guardian = guardians[0];
   const stale = staleIdentity(guardian.channelMappings, channel);
   // The plan names the row it re-points, so an identity placed between this read
-  // and the apply — `/persons/link` runs outside the grant section that holds
+  // and the apply — a link write runs outside the grant section that holds
   // competing conferrals off — is left where it is rather than swept onto
   // `channelUserId` with it.
   return stale
@@ -139,7 +139,7 @@ export async function planGuardianMapping(
  * the whole conferral transaction (credential + placeholder + mapping), leaving
  * zero residual state.
  *
- * A planned re-point whose `from` is gone by now — `/persons/link` moved or
+ * A planned re-point whose `from` is gone by now — a link write moved or
  * removed that identity in the window — writes nothing and leaves the incoming
  * identity unmapped, which the log below records. Deliberate: the guardian
  * decided where that identity belongs more recently than the plan did, and

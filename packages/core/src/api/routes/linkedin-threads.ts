@@ -15,7 +15,7 @@ import type { ApiDeps } from "../deps.js";
  * before sending.
  *
  * Promoting a mirrored participant to a curated `persons` entry reuses the
- * existing `/api/persons/create` + `/api/persons/link` routes — a participant's
+ * `POST /api/people` and `POST /api/people/:id/accounts` — a participant's
  * bare member id is the `channelUserId` those endpoints expect for LinkedIn,
  * and it is what an inbound LinkedIn message resolves through. Nothing here
  * promotes: the mirror is read-only towards the person graph, and the guardian

@@ -374,9 +374,8 @@ export class PersonMappingRepository {
    * Create a person and its first channel mapping in one transaction. A person
    * with no mapping is unreachable — no inbound message resolves to it, and
    * there is no API to repair it — so the two writes must stand or fall
-   * together. Used by `POST /api/persons/create`, where the guardian names an
-   * unknown sender: the person exists precisely to give that channel account an
-   * identity.
+   * together. For the caller that names an unknown sender: the person exists
+   * precisely to give that channel account an identity.
    *
    * Claims the identity on the same terms as {@link create}, refusing one a
    * real person already holds. The senders this route offers are unmapped by

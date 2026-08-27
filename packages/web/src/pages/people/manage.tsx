@@ -1,14 +1,12 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  accountRef,
   ASSIGNABLE_BOND_LEVELS,
   formatWhatsAppPhone,
   normalizeBondLevel,
-  type AssignableBondLevel,
-} from "@rome/api-types/identities";
-import {
-  accountRef,
   personMatchesQuery,
+  type AssignableBondLevel,
   type DirectoryAccount,
   type LinkConflict,
   type PersonResource,

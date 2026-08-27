@@ -23,54 +23,272 @@
 // So the writes here move a link between people; none of them creates or
 // destroys the account under it.
 //
-// The timeline's entry shape, its ordering and its cursor are the identity
-// union's, and they are re-exported rather than restated. The surfaces page
-// the same entries: a row's `latest` is the head of the timeline the same row
-// opens, and a cursor written against one has to name a position in the
-// other. A second definition of either is a page boundary the two ends
-// disagree about.
+// The bond ladder, the merged timeline and the cursor over an activity order
+// live here too. They outlived the identity union that first defined them —
+// the flattened row shape this two-noun contract replaced — and they are the
+// pieces both nouns still share: a row's `latest` is the head of the timeline
+// the same row opens, and a cursor written against one listing has to name a
+// position in the other. A second definition of any of them is a page boundary
+// the two ends disagree about, so they are stated once, here.
 
-import {
-  ASSIGNABLE_BOND_LEVELS,
-  compareIdentityCursors,
-  encodeIdentityCursor,
-  identityCursorOf,
-  isAssignableBondLevel,
-  isChannelIdentifier,
-  matchesQuery,
-  normalizeBondLevel,
-  parseFilterLevel,
-  parseIdentityCursor,
-  TIMELINE_PAGE_DEFAULT_LIMIT,
-  TIMELINE_PAGE_MAX_LIMIT,
-  type AssignableBondLevel,
-  type IdentityCursor,
-  type IdentityDynamic,
-  type PlacedBondLevel,
-} from "./identities.js";
 import { STRANGER_PERSON_ID } from "./persons.js";
 
-export {
-  compareTimelineEntries,
-  isAfterTimelineCursor,
-  latestDynamic,
-  parseTimelineCursor,
-  timelineCursor,
-  TIMELINE_PAGE_DEFAULT_LIMIT,
-  TIMELINE_PAGE_MAX_LIMIT,
-  // Which level a stored `persons.bondLevel` counts and filters under. The
-  // column is free text — older rows carry levels off today's ladder — so
-  // every reader has to bucket them the same way.
-  normalizeBondLevel,
-  // The levels a guardian may place a person at. Guardian is not one of them:
-  // the instance serves exactly one, and the ladder's other two positions —
-  // unknown and stranger — are read off the links rather than stored.
-  ASSIGNABLE_BOND_LEVELS,
-  type AssignableBondLevel,
-  type IdentityDynamic,
-  type TimelineEntry,
-  type TimelinePage,
-} from "./identities.js";
+// ---------------------------------------------------------------------------
+// The bond ladder
+// ---------------------------------------------------------------------------
+
+/**
+ * Every position on the bond ladder a surface renders, in display order.
+ *
+ * "unknown" and "stranger" are positions on the same ladder as the curated
+ * bonds, not separate kinds of thing, and neither is ever stored on a person:
+ * an account is unknown by having no link, and dismissed by being linked to
+ * the stranger sentinel. Both are read off the links.
+ */
+export const BOND_LADDER = [
+  "unknown",
+  "guardian",
+  "inner-circle",
+  "acquaintance",
+  "other",
+  "stranger",
+] as const;
+
+export type BondLadderLevel = (typeof BOND_LADDER)[number];
+
+/** A level a person row can actually hold: the ladder minus its two computed
+ *  positions. */
+export type PlacedBondLevel = Exclude<BondLadderLevel, "unknown" | "stranger">;
+
+/**
+ * The levels a guardian may place a person at.
+ *
+ * Guardian is not one of them: the instance serves exactly one, and the
+ * ladder's other two positions are read off the links rather than stored.
+ */
+export const ASSIGNABLE_BOND_LEVELS = ["inner-circle", "acquaintance", "other"] as const;
+
+export type AssignableBondLevel = (typeof ASSIGNABLE_BOND_LEVELS)[number];
+
+export function isAssignableBondLevel(value: unknown): value is AssignableBondLevel {
+  return ASSIGNABLE_BOND_LEVELS.includes(value as AssignableBondLevel);
+}
+
+/**
+ * Bucket a stored `persons.bondLevel` onto the ladder. The column is free text
+ * and older rows carry values outside today's enum (e.g. "colleague"), so
+ * every reader has to agree on where those land rather than dropping the row
+ * from every group.
+ */
+export function normalizeBondLevel(raw: string): PlacedBondLevel {
+  return (BOND_LADDER as readonly string[]).includes(raw) && raw !== "unknown" && raw !== "stranger"
+    ? (raw as PlacedBondLevel)
+    : "other";
+}
+
+// ---------------------------------------------------------------------------
+// Ordering and matching, defined the same way in every runtime
+// ---------------------------------------------------------------------------
+
+/**
+ * Compare two strings by code point, returning zero only for exact equality.
+ *
+ * `localeCompare` answers zero for strings that are canonically equivalent but
+ * distinct — "\u00e9" and "e\u0301" — and its result depends on the running
+ * locale, so a server and a client can disagree on the same pair. Neither is
+ * acceptable where an order has to be total and has to mean the same thing on
+ * both ends of a cursor.
+ */
+export function compareCodePoints(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+/**
+ * Order two display names the same way in every runtime.
+ *
+ * Not `localeCompare`, even with a code-point tiebreak behind it. That fallback
+ * repairs a tie but cannot repair an inversion, and collations genuinely
+ * disagree about order: "\u00e4" sorts before "z" under English and after it
+ * under Swedish. The mock runs in a browser and the route runs in Node, so a
+ * cursor written by one and read by the other would skip or repeat rows.
+ *
+ * Case-folded first so "ada" and "Ada" sit together, then by code point.
+ * Accented names therefore sort after unaccented ones, which is the price of an
+ * order both ends agree on. It is a small price here: the listings sort by
+ * activity first, so a name only ever settles a tie between two rows whose
+ * newest dynamic landed in the same second.
+ */
+export function compareDisplayNames(a: string, b: string): number {
+  const normalizedA = a.normalize("NFC");
+  const normalizedB = b.normalize("NFC");
+  const byFolded = compareCodePoints(normalizedA.toLowerCase(), normalizedB.toLowerCase());
+  return byFolded !== 0 ? byFolded : compareCodePoints(normalizedA, normalizedB);
+}
+
+/**
+ * Whether a search box's text is anywhere in what a row can be found by.
+ *
+ * The rule rather than the haystack: each surface knows which of its own
+ * fields are searchable, and every one of them has to normalize the same way
+ * or one typed string finds different rows on each.
+ *
+ * NFC first, the way the orderings normalize: a keyboard that composes "José"
+ * should find a row that stored it decomposed, and the reverse.
+ */
+export function matchesQuery(query: string, haystack: readonly string[]): boolean {
+  const q = query.normalize("NFC").trim().toLowerCase();
+  if (!q) return true;
+  return haystack.join(" ").normalize("NFC").toLowerCase().includes(q);
+}
+
+/**
+ * Parse a `?level=` value against the levels a surface counts by, or null when
+ * it names no view — an unknown filter is a client bug, and answering it as
+ * "all" would silently show the wrong rows.
+ *
+ * Takes the ladder because the surfaces count by different ones: a listing of
+ * curated people has no chip for the two positions no person row can hold.
+ */
+export function parseFilterLevel<L extends string>(
+  raw: string | undefined | null,
+  levels: readonly L[],
+): "all" | L | null {
+  if (raw == null || raw === "") return null;
+  if (raw === "all") return "all";
+  return (levels as readonly string[]).includes(raw) ? (raw as L) : null;
+}
+
+/**
+ * Whether a value can name a channel in a composed token.
+ *
+ * Only the first colon of an account ref is structural, so a channel carrying
+ * one would make the token ambiguous: "a:b" with user "c" and "a" with user
+ * "b:c" both render `a:b:c`. Channel names are short slugs, so refusing the
+ * separator costs nothing and removes the ambiguity rather than documenting it.
+ */
+export function isChannelIdentifier(channel: string): boolean {
+  return channel.length > 0 && !channel.includes(":");
+}
+
+// ---------------------------------------------------------------------------
+// The merged timeline, and the cursor that resumes it
+// ---------------------------------------------------------------------------
+
+/**
+ * One entry on a person's merged timeline, whichever surface produced it.
+ *
+ * Deliberately generic: `source` names the producer, `ref` is that producer's
+ * own id for the entry, and `body` is the line to render. A Rome App that
+ * starts contributing dynamics fills the same five fields instead of
+ * extending this shape.
+ *
+ * `ref` must be unique across everything one `source` can put on one person's
+ * timeline, not merely within the conversation it came from. A person holds
+ * several accounts, and a producer whose ids are per-conversation (WhatsApp
+ * message ids are unique within a chat, not within an account) has to qualify
+ * them — `<chat>:<messageId>` — before writing them here.
+ * {@link compareTimelineEntries} settles ties on `(source, ref)`, so two
+ * entries sharing one within the same second compare equal, serialize to the
+ * same cursor, and lose one of the pair on resume.
+ */
+export interface TimelineEntry {
+  source: string;
+  /** Epoch seconds. */
+  timestamp: number;
+  body: string | null;
+  direction: "inbound" | "outbound";
+  ref: string;
+}
+
+/** One page of a person's timeline, newest first. `nextCursor` is opaque and
+ *  null once the oldest entry has been sent. */
+export interface TimelinePage {
+  entries: TimelineEntry[];
+  nextCursor: string | null;
+}
+
+export const TIMELINE_PAGE_DEFAULT_LIMIT = 100;
+export const TIMELINE_PAGE_MAX_LIMIT = 300;
+
+/**
+ * The timeline's order: newest first, and total.
+ *
+ * Producers share no key but the timestamp, and timestamps collide — whole
+ * seconds from two stores, and a reply Rome sent recorded against the message
+ * it answers. So the order is settled past the timestamp: a reply sits above
+ * the line it answers, and `source`/`ref` break what remains. Totality is not
+ * cosmetic — it is what lets a cursor name a position and resume there without
+ * repeating or skipping an entry.
+ */
+export function compareTimelineEntries(a: TimelineEntry, b: TimelineEntry): number {
+  if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
+  if (a.direction !== b.direction) return a.direction === "outbound" ? -1 : 1;
+  const bySource = compareCodePoints(a.source, b.source);
+  return bySource !== 0 ? bySource : compareCodePoints(a.ref, b.ref);
+}
+
+/**
+ * The dynamic a row reports as `latest`: the newest entry of that row's own
+ * timeline, projected.
+ *
+ * One definition rather than two. A separate "newest dynamic" comparison
+ * settles a same-second tie on its own terms — timestamps are whole seconds and
+ * collide — so a row could preview one event while its timeline opened on
+ * another, and neither would be wrong. Deriving the preview from the ordering
+ * makes that disagreement unrepresentable.
+ *
+ * `entries` must already be in {@link compareTimelineEntries} order.
+ */
+export function latestDynamic(entries: readonly TimelineEntry[]): AccountDynamic | null {
+  const newest = entries[0];
+  return newest
+    ? { source: newest.source, timestamp: newest.timestamp, preview: newest.body }
+    : null;
+}
+
+/**
+ * A cursor naming the exact entry a page ended on.
+ *
+ * Encoded rather than a bare timestamp: the timestamp alone cannot say *which*
+ * of a second's entries was the last one sent, so resuming from it drops the
+ * rest of that second.
+ *
+ * Every part is escaped. `source` is whatever a producer calls itself and a
+ * Rome App names its own, so neither it nor `ref` can be trusted to leave the
+ * separator alone — an unescaped one shifts the split and resumes the page at
+ * a position no entry occupies.
+ */
+export function timelineCursor(entry: TimelineEntry): string {
+  return [entry.timestamp, entry.direction, entry.source, entry.ref]
+    .map((part) => encodeURIComponent(String(part)))
+    .join("|");
+}
+
+/** Decode a {@link timelineCursor}, or null when it is not one. */
+export function parseTimelineCursor(raw: string | undefined | null): TimelineEntry | null {
+  if (!raw) return null;
+  const parts = raw.split("|");
+  if (parts.length !== 4) return null;
+  let decoded: string[];
+  try {
+    decoded = parts.map(decodeURIComponent);
+  } catch {
+    return null;
+  }
+  const [rawTimestamp, direction, source, ref] = decoded;
+  const timestamp = Number(rawTimestamp);
+  if (rawTimestamp === "" || !Number.isFinite(timestamp)) return null;
+  if (direction !== "inbound" && direction !== "outbound") return null;
+  if (!ref) return null;
+  return { timestamp, direction, source, ref, body: null };
+}
+
+/** Whether an entry falls after a cursor in {@link compareTimelineEntries}
+ *  order — i.e. belongs on a later page than the one that cursor ended. */
+export function isAfterTimelineCursor(entry: TimelineEntry, cursor: TimelineEntry): boolean {
+  return compareTimelineEntries(cursor, entry) < 0;
+}
 
 /**
  * The page size a `?limit=` value asks for: clamped to `max`, and `fallback`
@@ -100,14 +318,26 @@ export function timelinePageLimit(raw: string | number | null | undefined): numb
 }
 
 /**
- * The newest thing that happened on an account: which surface it happened on,
- * when, and one line of it.
+ * The newest thing that happened on an account, whichever surface it happened
+ * on: what a listing sorts by and what a row shows.
  *
- * The identity union's shape, under the name the account contract uses for it.
- * A directory row's `latest` is the head of the history that row opens, so the
- * two are one type rather than two that can disagree.
+ * A row's `latest` is always {@link latestDynamic} of the history that row
+ * opens, so the two are one shape rather than two that can disagree. A producer
+ * that computes it any other way can preview one event while its timeline opens
+ * on another, and a reader has no way to reconcile the pair.
+ *
+ * `source` is a channel name today ("whatsapp", "telegram"); a Rome App that
+ * starts producing dynamics writes its own name here and the surface renders it
+ * through the same glyph lookup.
  */
-export type AccountDynamic = IdentityDynamic;
+export interface AccountDynamic {
+  source: string;
+  /** Epoch seconds. */
+  timestamp: number;
+  /** One line, already trimmed to a preview; null when the dynamic carries no
+   *  text (an image, a call, an app event with no body). */
+  preview: string | null;
+}
 
 /**
  * What the guardian has decided about an account.
@@ -271,27 +501,83 @@ export function accountMatchesQuery(account: DirectoryAccount, query: string): b
 }
 
 /**
- * Where one account sits in the directory's order: the tuple the ordering
- * reads, and nothing else. A cursor carries this rather than a ref, so resuming
- * needs a position rather than an account that still exists.
+ * Where one row sits in an activity order: the tuple the ordering reads, and
+ * nothing else. A cursor carries this rather than a row id, so resuming needs a
+ * position rather than a row that still exists.
  *
- * The identity stream's position, over an account's ref — one activity order
- * and one encoding of it, so the reasons it is a tuple rather than a row id and
- * the reasons every part is escaped hold in one place
- * ({@link encodeIdentityCursor}) rather than two that can be fixed apart.
+ * One position type over both listings. People and accounts are ordered by the
+ * same activity, so a second tuple would be a second answer to "who is at the
+ * top" — and the reasons it is a position rather than a row id, and the reasons
+ * every part is escaped, would live in two places that can be fixed apart.
+ * Named for the account directory because that is the listing that pages.
  */
-export type AccountCursor = IdentityCursor;
+export interface AccountCursor {
+  /** The row's `latest.timestamp`, or null for a row that has never done
+   *  anything — those sort last. */
+  timestamp: number | null;
+  displayName: string;
+  id: string;
+}
 
-export const compareAccountCursors = compareIdentityCursors;
-export const encodeAccountCursor = encodeIdentityCursor;
-export const parseAccountCursor = parseIdentityCursor;
+/**
+ * The order both listings run on: newest activity first, rows that have never
+ * done anything last, ties broken by name and then id so the sequence is total
+ * — which is what lets a cursor resume it.
+ */
+export function compareAccountCursors(a: AccountCursor, b: AccountCursor): number {
+  const aAt = a.timestamp;
+  const bAt = b.timestamp;
+  if ((aAt == null) !== (bAt == null)) return aAt == null ? 1 : -1;
+  if (aAt !== bAt) return (bAt ?? 0) - (aAt ?? 0);
+  const byName = compareDisplayNames(a.displayName, b.displayName);
+  return byName !== 0 ? byName : compareCodePoints(a.id, b.id);
+}
+
+/**
+ * Encode the position a page ended at.
+ *
+ * The whole ordering tuple, not the last row's id: between two requests a row
+ * is linked, merged away, or dismissed — every one of them an ordinary write on
+ * this surface — and a cursor that has to find that row again answers the next
+ * page empty and truncates the listing until the query is restarted. A position
+ * is still a position after the row at it is gone.
+ *
+ * Each part is escaped, because a display name is guardian-supplied text and an
+ * account ref carries a jid; neither can be trusted to avoid the separator.
+ */
+export function encodeAccountCursor(cursor: AccountCursor): string {
+  return [cursor.timestamp ?? "", cursor.displayName, cursor.id]
+    .map((part) => encodeURIComponent(String(part)))
+    .join("|");
+}
+
+/** Decode an {@link encodeAccountCursor}, or null when it is not one. */
+export function parseAccountCursor(raw: string | undefined | null): AccountCursor | null {
+  if (!raw) return null;
+  const parts = raw.split("|");
+  if (parts.length !== 3) return null;
+  let decoded: string[];
+  try {
+    decoded = parts.map(decodeURIComponent);
+  } catch {
+    return null;
+  }
+  const [rawTimestamp, displayName, id] = decoded;
+  if (!id) return null;
+  const timestamp = rawTimestamp === "" ? null : Number(rawTimestamp);
+  if (timestamp !== null && !Number.isFinite(timestamp)) return null;
+  return { timestamp, displayName, id };
+}
+
+/** The ordering tuple for any row that carries one, given its id. Widened past
+ *  either row type so both listings order through
+ *  {@link compareAccountCursors} rather than restating it. */
+function cursorOf(row: { displayName: string; latest: AccountDynamic | null }, id: string) {
+  return { timestamp: row.latest?.timestamp ?? null, displayName: row.displayName, id };
+}
 
 export function accountCursorOf(account: DirectoryAccount): AccountCursor {
-  return {
-    timestamp: account.latest?.timestamp ?? null,
-    displayName: account.displayName,
-    id: accountRef(account),
-  };
+  return cursorOf(account, accountRef(account));
 }
 
 /**
@@ -413,7 +699,7 @@ export interface PersonResource {
   bondLevel: string;
   accounts: LinkedAccount[];
   messageCount: number;
-  latest: IdentityDynamic | null;
+  latest: AccountDynamic | null;
 }
 
 /**
@@ -509,13 +795,13 @@ export function personMatchesQuery(person: PersonResource, query: string): boole
  * The listing's order: newest activity first, people who have never said
  * anything last, ties broken by name and then id.
  *
- * The identity stream's order, not a second one that happens to agree — the
- * two surfaces list the same rows, so an order defined twice is two answers to
- * "who is at the top" and, once this listing takes a cursor, a row skipped or
- * repeated at every page boundary.
+ * The account directory's order, not a second one that happens to agree — the
+ * two listings are two views of the same activity, so an order defined twice is
+ * two answers to "who is at the top" and, once this listing takes a cursor, a
+ * row skipped or repeated at every page boundary.
  */
 export function comparePeople(a: PersonResource, b: PersonResource): number {
-  return compareIdentityCursors(identityCursorOf(a), identityCursorOf(b));
+  return compareAccountCursors(cursorOf(a, a.id), cursorOf(b, b.id));
 }
 
 /**
@@ -725,4 +1011,54 @@ export function parseMergeRequest(
   if (typeof from !== "string" || from === "") return { error: "from is required" };
   if (from === into) return { error: "a person cannot be merged into themselves" };
   return { merge: { from } };
+}
+
+// ---------------------------------------------------------------------------
+// Display names a channel account falls back to
+// ---------------------------------------------------------------------------
+
+/**
+ * A phone-shaped rendering of a WhatsApp jid or raw number, or null when the
+ * value has no digits to show (`@lid` and group jids carry none).
+ *
+ * Display-name derivation is server-side (the directory answers with final
+ * display names), but the mock backend and the chat dialog derive the same
+ * fallback, so the formatter lives with the contract they share.
+ */
+export function formatWhatsAppPhone(value: string | null | undefined): string | null {
+  if (!value || value.endsWith("@lid") || value.endsWith("@g.us")) return null;
+  const user = value.replace(/@s\.whatsapp\.net$/, "").replace(/:.+$/, "");
+  const digits = user.replace(/\D/g, "");
+  if (digits.length === 0) return null;
+  // A jid carries the country code, so grouping is only safe where the code is
+  // unambiguous. +1 is; a bare 10-digit number is not — it is a Singapore or
+  // Hong Kong number as readily as a US one, and guessing renders someone's
+  // number as a country they are not in.
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  }
+  return `+${digits}`;
+}
+
+/**
+ * The display name for a WhatsApp account nobody has curated: the guardian's
+ * saved name, then the contact's own push name, then the verified business
+ * name, then the chat's name, then the formatted phone. Callers append their
+ * own last-resort label when even the phone is unrenderable.
+ */
+export function whatsAppDisplayName(contact: {
+  jid: string;
+  phoneNumber: string | null;
+  name: string | null;
+  notify: string | null;
+  verifiedName: string | null;
+  chatName: string | null;
+}): string | null {
+  return (
+    contact.name ||
+    contact.notify ||
+    contact.verifiedName ||
+    contact.chatName ||
+    formatWhatsAppPhone(contact.phoneNumber || contact.jid)
+  );
 }

@@ -1,6 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { formatWhatsAppPhone } from "@rome/api-types/identities";
-import type { LinkConflict } from "@rome/api-types/people";
+import { formatWhatsAppPhone, type LinkConflict } from "@rome/api-types/people";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 
 // The second half of a link that another person already holds.

@@ -174,7 +174,7 @@ describe("/api/auth/verify", () => {
 
   it("returns 401 for private /api/* paths without a cookie", async () => {
     const host = buildHost(await stubDeps([]));
-    const res = await verifyRequest(host, "/api/persons");
+    const res = await verifyRequest(host, "/api/people");
     expect(res.status).toBe(401);
   });
 
@@ -197,7 +197,7 @@ describe("/api/auth/verify", () => {
   it("accepts a raw guardian session explicitly injected by a Native client", async () => {
     const host = buildHost(await stubDeps([]));
     const session = createGuardianSession("native-account");
-    const res = await verifyRequest(host, "/api/persons", {
+    const res = await verifyRequest(host, "/api/people", {
       cookie: `${COOKIE_NAME}=${session.token}`,
     });
 

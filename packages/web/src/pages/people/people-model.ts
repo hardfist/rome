@@ -1,16 +1,14 @@
 import {
+  accountRef,
   BOND_LADDER,
-  compareIdentityCursors,
+  compareAccountCursors,
   formatWhatsAppPhone,
+  isSilentAccount,
   matchesQuery,
   normalizeBondLevel,
-  type BondLadderLevel,
-  type IdentityDynamic,
-} from "@rome/api-types/identities";
-import {
-  accountRef,
-  isSilentAccount,
   type AccountDirectory,
+  type AccountDynamic,
+  type BondLadderLevel,
   type DirectoryAccount,
   type PersonCounts,
   type PersonResource,
@@ -85,7 +83,7 @@ export interface PeopleRow {
    * than folding a second time and disagreeing.
    */
   addresses: string[];
-  latest: IdentityDynamic | null;
+  latest: AccountDynamic | null;
   messageCount: number;
   /** An account with nothing on record that nobody has decided about: a synced
    *  address-book contact and no more. Never true of a person. */
@@ -181,7 +179,7 @@ export function searchRows(rows: readonly PeopleRow[], query: string): PeopleRow
  *  sequence is total. The identity stream's order rather than a second one that
  *  happens to agree. */
 export function compareRows(a: PeopleRow, b: PeopleRow): number {
-  return compareIdentityCursors(
+  return compareAccountCursors(
     { timestamp: a.latest?.timestamp ?? null, displayName: a.displayName, id: a.id },
     { timestamp: b.latest?.timestamp ?? null, displayName: b.displayName, id: b.id },
   );

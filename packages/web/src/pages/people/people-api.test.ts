@@ -1,11 +1,12 @@
 /**
- * Walkthrough of the proposed /people contract (@rome/api-types/people): the
- * state transitions that are easy to get wrong — atomic create-and-link, the
+ * Walkthrough of the /people contract (@rome/api-types/people): the state
+ * transitions that are easy to get wrong — atomic create-and-link, the
  * link/transfer compare-and-swap, the account state machine
  * (unlinked -> dismissed -> unlinked -> linked), merge, and cross-account
- * timeline paging. Runs the proposed handlers and the legacy handlers against
- * ONE store, so each step also proves a write through the new contract is
- * visible to the old surface — the property incremental migration rides on.
+ * timeline paging. Each write is read back through the noun it did not go
+ * through — a link through the directory, a dismissal through the person —
+ * because the two listings are two views of one store and a write visible to
+ * only one of them is the bug this walkthrough is for.
  *
  * The other contract pinned here: the stranger sentinel never crosses the
  * wire. Dismissal reads as `state: "dismissed"` with a null person, and no
@@ -15,10 +16,10 @@
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { setupServer } from "msw/node";
 import { STRANGER_PERSON_ID } from "@rome/api-types/persons";
-import { peopleHandlers } from "../../../mock/handlers/people";
-import { proposedPeopleHandlers } from "../../../mock/handlers/people-proposed";
+import { channelMirrorHandlers } from "../../../mock/handlers/people";
+import { peopleHandlers } from "../../../mock/handlers/people-api";
 
-const server = setupServer(...proposedPeopleHandlers, ...peopleHandlers);
+const server = setupServer(...peopleHandlers, ...channelMirrorHandlers);
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 
@@ -80,14 +81,20 @@ test("proposed /people contract walkthrough", async () => {
   const devikaId = r.body.id;
   expect(r.body.accounts).toHaveLength(1);
 
-  // ...she leaves discovery, and the LEGACY surface sees the same write.
+  // ...she leaves discovery, and the account reads back as hers from both
+  // nouns: off the directory as a linked row, and off the person she now is.
   r = await call("GET", "/api/accounts?state=unlinked");
   expect(r.body.accounts.map((a: { channelUserId: string }) => a.channelUserId)).not.toContain(
     DEV_JID,
   );
-  r = await call("GET", "/api/persons");
-  const legacyDevika = r.body.find((p: { id: string }) => p.id === devikaId);
-  expect(legacyDevika.channelMappings).toEqual([{ channel: "whatsapp", channelUserId: DEV_JID }]);
+  r = await call("GET", `/api/accounts?q=${encodeURIComponent(DEV_JID)}`);
+  expect(
+    r.body.accounts.find((a: { channelUserId: string }) => a.channelUserId === DEV_JID),
+  ).toMatchObject({ state: "linked", personId: devikaId });
+  r = await call("GET", `/api/people/${devikaId}`);
+  expect(r.body.accounts).toEqual([
+    { channel: "whatsapp", channelUserId: DEV_JID, displayName: expect.any(String) },
+  ]);
 
   // Link a second account — an unseen LinkedIn identity; linking does not
   // require the account to have been observed first. Re-link is idempotent.
@@ -175,12 +182,11 @@ test("proposed /people contract walkthrough", async () => {
   expect(r.body.accounts.map((a: { channelUserId: string }) => a.channelUserId)).toContain(
     JULES_TG,
   );
-  r = await call("GET", "/api/persons");
-  const legacySentinel = r.body.find((p: { id: string }) => p.id === STRANGER_PERSON_ID);
-  expect(legacySentinel.channelMappings).toContainEqual({
-    channel: "telegram",
-    channelUserId: JULES_TG,
-  });
+  // Dismissal is stored as a link onto the sentinel, and that is exactly what
+  // never crosses the wire: the row says "dismissed" and names nobody.
+  expect(
+    r.body.accounts.find((a: { channelUserId: string }) => a.channelUserId === JULES_TG),
+  ).toMatchObject({ state: "dismissed", personId: null });
   // Dismiss is idempotent; dismissing a linked account refuses.
   r = await call("POST", `/api/accounts/telegram/${JULES_TG}/dismiss`);
   expect(r.status).toBe(200);

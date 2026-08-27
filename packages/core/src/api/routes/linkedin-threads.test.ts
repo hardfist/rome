@@ -72,7 +72,7 @@ function successfulSender(): SendReplySpy {
 }
 
 describe("GET /linkedin/participants", () => {
-  // Promotion goes through `/api/persons/create` + `/api/persons/link`; this
+  // Promotion goes through `POST /api/people` and `POST /api/people/:id/accounts`; this
   // route exists so a caller can tell which identities have already been there.
   it("serves each mirrored identity with its promotion state", async () => {
     const res = await mount(successfulSender()).request("/linkedin/participants");

@@ -4,7 +4,7 @@
 // always been in this database.
 //
 // Neither verb invents storage. A dismissal is a channel mapping onto the
-// sentinel — the row `/persons/mark-stranger` has always written — and a
+// sentinel — the row the dismiss verb has always written — and a
 // restore is that row's removal. What is new is that both are addressed at an
 // account rather than at the sentinel, and that neither can reach an account a
 // real person holds: linking and unlinking are that account's verbs, and a

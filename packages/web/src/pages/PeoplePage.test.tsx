@@ -455,14 +455,12 @@ describe("PeoplePage stream", () => {
     await waitFor(() => expect(calls.some((c) => c.url.includes("level=inner-circle"))).toBe(true));
   });
 
-  it("reads no identity union and no legacy person listing", async () => {
+  it("reads no channel mirror for a roster the contract already answers", async () => {
     const { calls } = mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER] });
     renderPage();
 
     await screen.findByText("Wei Chen");
     const reads = calls.filter((call) => call.method === "GET").map((call) => call.url);
-    expect(reads.filter((url) => url.includes("/api/identities"))).toEqual([]);
-    expect(reads.filter((url) => url.includes("/api/persons"))).toEqual([]);
     expect(reads.filter((url) => url.includes("/api/whatsapp/contacts"))).toEqual([]);
   });
 
@@ -787,20 +785,6 @@ describe("PeoplePage placement", () => {
 
     release();
     await waitFor(() => expect(state.accounts[0]!.personId).toBe("wei-chen"));
-  });
-
-  it("writes through no /persons route", async () => {
-    const user = userEvent.setup();
-    const { calls } = mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER] });
-    renderPage();
-
-    await user.click(chip(/^Unknown/));
-    await screen.findByText("Rachel Lim");
-    await user.click(screen.getByRole("button", { name: "Create" }));
-    await user.click(screen.getByRole("button", { name: "Create profile" }));
-
-    await waitFor(() => expect(calls.some((c) => c.url === "/api/people")).toBe(true));
-    expect(calls.filter((c) => c.url.includes("/api/persons"))).toEqual([]);
   });
 });
 

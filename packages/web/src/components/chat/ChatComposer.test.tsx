@@ -133,19 +133,6 @@ describe("composer mention list", () => {
 
     expect(await screen.findByText("No other users available.")).toBeTruthy();
   });
-
-  it("never calls the legacy /api/persons route", async () => {
-    const { fetchSpy } = renderComposer(
-      {},
-      { settings: { enableImpersonation: true }, people: [GUARDIAN, RAY] },
-    );
-
-    await userEvent.click(await screen.findByRole("button", { name: "Impersonation" }));
-    await screen.findByText("Ray Oster");
-
-    const requested = fetchSpy.mock.calls.map(([input]) => String(input));
-    expect(requested.filter((url) => url.startsWith("/api/persons"))).toEqual([]);
-  });
 });
 
 describe("composer error status", () => {

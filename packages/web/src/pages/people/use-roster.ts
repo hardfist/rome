@@ -6,8 +6,8 @@ import type {
   AccountState,
   PeopleList,
   PersonResource,
+  TimelinePage,
 } from "@rome/api-types/people";
-import type { TimelinePage } from "@rome/api-types/identities";
 import { getApiErrorMessage } from "@/lib/api-error";
 import { fetchJson } from "@/lib/fetch-json";
 import { peopleRows, type PeopleRow } from "./people-model";

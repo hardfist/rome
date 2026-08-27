@@ -26,13 +26,13 @@ import type { LinkedInMessage, LinkedInThread } from "./legacy-api-shapes";
  * The LinkedIn mirror, carried onto the rebuilt People page.
  *
  * LinkedIn reaches Rome through the connection's inbox poller, which fills its
- * own `linkedin_threads`/`linkedin_messages` tables. Those rows are not
- * identities and do not appear in `/api/identities`, so nothing above this
- * section can render them: the stream, the directory and the person page all
- * read the identity union. Until a LinkedIn account can be linked to an
- * identity, this section is the only way the mirror is visible at all, so it
- * survives the rewrite as its own module rather than being deleted with the
- * WhatsApp surface the person page did supersede.
+ * own `linkedin_threads`/`linkedin_messages` tables. A thread is a conversation
+ * rather than an account, so those rows are on neither noun of the /people
+ * contract and nothing above this section can render them: the stream, the
+ * directory and the person page all read people and accounts. Until a LinkedIn
+ * account can be linked to a person, this section is the only way the mirror is
+ * visible at all, so it survives the rewrite as its own module rather than
+ * being deleted with the WhatsApp surface the person page did supersede.
  *
  * Everything here is lifted from the pre-rewrite page unchanged in behavior —
  * the same endpoints, the same states, the same optimistic reply. It is meant

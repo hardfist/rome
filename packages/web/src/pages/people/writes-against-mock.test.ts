@@ -3,8 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupServer } from "msw/node";
 import type { TFunction } from "i18next";
 import i18n from "@/i18n";
-import { peopleHandlers } from "../../../mock/handlers/people";
-import { proposedPeopleHandlers } from "../../../mock/handlers/people-proposed";
+import { channelMirrorHandlers } from "../../../mock/handlers/people";
+import { peopleHandlers } from "../../../mock/handlers/people-api";
 import {
   createPerson,
   dismissAccount,
@@ -25,7 +25,7 @@ import {
 // decoding have to agree, and a test that asserts a URL string proves only that
 // the client is self-consistent.
 
-const server = setupServer(...proposedPeopleHandlers, ...peopleHandlers);
+const server = setupServer(...peopleHandlers, ...channelMirrorHandlers);
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");

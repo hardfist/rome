@@ -11,9 +11,10 @@
 /**
  * The sentinel person every sender the guardian dismisses is mapped onto.
  *
- * Core seeds the row at boot and `/persons/mark-stranger` points mappings at
- * it. It is a real row in the persons table, so `/api/persons` returns it and
- * every reader has to know to leave it out of a list of people.
+ * Core seeds the row at boot and the dismiss verb points mappings at it. It is
+ * a real row in the persons table — `GET /api/people` withholds it and
+ * `GET /api/people/:id` answers 404 for its id — so every reader that goes
+ * under the contract to the table has to know to leave it out.
  */
 export const STRANGER_PERSON_ID = "__STRANGER__";
 

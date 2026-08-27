@@ -6,11 +6,7 @@
 // `assignAccounts` defines and for the reason stated there, and summarized in
 // one read per store however many people are asked about.
 
-import {
-  compareTimelineEntries,
-  latestDynamic,
-  type IdentityDynamic,
-} from "@rome/api-types/people";
+import { compareTimelineEntries, latestDynamic, type AccountDynamic } from "@rome/api-types/people";
 import {
   assignAccounts,
   type AccountDigest,
@@ -21,7 +17,7 @@ import {
 /** A person's history at a glance. `latest` is null exactly when
  *  `messageCount` is zero — a person nobody has ever written to. */
 export interface PersonActivity {
-  latest: IdentityDynamic | null;
+  latest: AccountDynamic | null;
   messageCount: number;
 }
 

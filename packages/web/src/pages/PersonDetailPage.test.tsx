@@ -4,7 +4,7 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { TimelineEntry } from "@rome/api-types/identities";
+import type { TimelineEntry } from "@rome/api-types/people";
 import {
   countPeople,
   linkConflict,
