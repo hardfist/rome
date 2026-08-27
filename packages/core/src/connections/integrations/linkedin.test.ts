@@ -79,11 +79,12 @@ describe("LinkedIn message identity", () => {
   });
 
   it("resolves a promoted participant to their person", async () => {
-    await people.createWithChannelMapping(
-      "ada-lovelace",
-      { displayName: "Ada Lovelace", bondLevel: "acquaintance", approved: true },
-      { channel: "linkedin", channelUserId: "ACoAAAda0001", displayName: "Ada Lovelace" },
-    );
+    await people.create({
+      displayName: "Ada Lovelace",
+      bondLevel: "acquaintance",
+      approved: true,
+      channelMappings: [{ channel: "linkedin", channelUserId: "ACoAAAda0001" }],
+    });
 
     const [message] = await readHistory([historyMessage()]);
     const person = await people.findByChannelUser("linkedin", message.senderId);

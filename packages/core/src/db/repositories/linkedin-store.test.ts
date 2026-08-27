@@ -614,11 +614,12 @@ describe("LinkedInStoreRepository", () => {
       });
 
       it("promoting writes a person and a linkedin mapping carrying the member id", async () => {
-        await people.createWithChannelMapping(
-          "ada-lovelace",
-          { displayName: "Ada Lovelace", bondLevel: "acquaintance", approved: true },
-          { channel: "linkedin", channelUserId: ada.participantId, displayName: ada.name },
-        );
+        await people.create({
+          displayName: "Ada Lovelace",
+          bondLevel: "acquaintance",
+          approved: true,
+          channelMappings: [{ channel: "linkedin", channelUserId: ada.participantId }],
+        });
 
         const mapping = (
           testDb.db.all(
@@ -644,18 +645,22 @@ describe("LinkedInStoreRepository", () => {
       });
 
       it("refuses to promote a participant a person already holds", async () => {
-        await people.createWithChannelMapping(
-          "ada-lovelace",
-          { displayName: "Ada Lovelace", bondLevel: "acquaintance", approved: true },
-          { channel: "linkedin", channelUserId: ada.participantId },
-        );
+        await people.create({
+          displayName: "Ada Lovelace",
+          bondLevel: "acquaintance",
+          approved: true,
+          channelMappings: [{ channel: "linkedin", channelUserId: ada.participantId }],
+        });
 
+        // The second promotion slugs to a free id (`ada-lovelace-2`), so the
+        // refusal is the held identity's rather than a colliding person id's.
         await expect(
-          people.createWithChannelMapping(
-            "ada-lovelace-2",
-            { displayName: "Ada Lovelace", bondLevel: "acquaintance", approved: true },
-            { channel: "linkedin", channelUserId: ada.participantId },
-          ),
+          people.create({
+            displayName: "Ada Lovelace",
+            bondLevel: "acquaintance",
+            approved: true,
+            channelMappings: [{ channel: "linkedin", channelUserId: ada.participantId }],
+          }),
         ).rejects.toThrow(/already belongs to person/);
 
         expect(personCount()).toBe(1);
@@ -663,11 +668,12 @@ describe("LinkedInStoreRepository", () => {
       });
 
       it("linking an already-promoted participant re-points the one mapping", async () => {
-        await people.createWithChannelMapping(
-          "ada-lovelace",
-          { displayName: "Ada Lovelace", bondLevel: "acquaintance", approved: true },
-          { channel: "linkedin", channelUserId: ada.participantId, displayName: "Ada Lovelace" },
-        );
+        await people.create({
+          displayName: "Ada Lovelace",
+          bondLevel: "acquaintance",
+          approved: true,
+          channelMappings: [{ channel: "linkedin", channelUserId: ada.participantId }],
+        });
         await people.createWithId("ada-byron", {
           displayName: "Ada Byron",
           bondLevel: "inner-circle",

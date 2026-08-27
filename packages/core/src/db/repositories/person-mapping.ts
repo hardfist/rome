@@ -88,7 +88,7 @@ export interface NewPersonData {
 export class PersonMappingRepository {
   constructor(private db: DrizzleDb) {}
 
-  async generatePersonId(displayName: string): Promise<string> {
+  private async generatePersonId(displayName: string): Promise<string> {
     const base = generatePersonSlug(displayName);
     if (!base) return uuid();
 
@@ -368,31 +368,6 @@ export class PersonMappingRepository {
 
   async createWithId(id: string, data: NewPersonData) {
     return this.writePerson(this.db, id, data);
-  }
-
-  /**
-   * Create a person and its first channel mapping in one transaction. A person
-   * with no mapping is unreachable — no inbound message resolves to it, and
-   * there is no API to repair it — so the two writes must stand or fall
-   * together. For the caller that names an unknown sender: the person exists
-   * precisely to give that channel account an identity.
-   *
-   * Claims the identity on the same terms as {@link create}, refusing one a
-   * real person already holds. The senders this route offers are unmapped by
-   * construction, so reaching a held identity means a race or a stale page —
-   * exactly where re-pointing would take the identity from whoever won.
-   */
-  async createWithChannelMapping(
-    id: string,
-    data: NewPersonData,
-    mapping: { channel: string; channelUserId: string; displayName?: string },
-  ) {
-    const claims = await this.resolveClaims([mapping]);
-    this.db.transaction((tx) => {
-      this.writePerson(tx, id, data);
-      for (const claim of claims) this.writeClaim(tx, id, claim);
-    });
-    return id;
   }
 
   async updatePerson(

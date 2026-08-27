@@ -89,12 +89,13 @@ describe("PersonMappingRepository", () => {
     });
   });
 
-  it("createWithChannelMapping() writes the person and its first mapping together", async () => {
-    const id = await repo.createWithChannelMapping(
-      "dana",
-      { displayName: "Dana", bondLevel: "acquaintance", approved: true },
-      { channel: "telegram", channelUserId: "tg-dana", displayName: "Dana" },
-    );
+  it("create() writes the person and its mappings together", async () => {
+    const id = await repo.create({
+      displayName: "Dana",
+      bondLevel: "acquaintance",
+      approved: true,
+      channelMappings: [{ channel: "telegram", channelUserId: "tg-dana" }],
+    });
 
     expect(id).toBe("dana");
     const found = await repo.findByChannelUser("telegram", "tg-dana");
@@ -102,7 +103,7 @@ describe("PersonMappingRepository", () => {
     expect(found!.approved).toBe(true);
   });
 
-  it("createWithChannelMapping() leaves no person behind when the mapping write fails", async () => {
+  it("create() leaves no person behind when a mapping write fails", async () => {
     const boom = new Error("mapping write failed");
     // The seam the person insert must be enlisted with: forcing the mapping
     // write to throw is the only way to observe the rollback, since the claim
@@ -112,11 +113,11 @@ describe("PersonMappingRepository", () => {
     };
 
     await expect(
-      repo.createWithChannelMapping(
-        "erin",
-        { displayName: "Erin", bondLevel: "acquaintance" },
-        { channel: "telegram", channelUserId: "tg-erin" },
-      ),
+      repo.create({
+        displayName: "Erin",
+        bondLevel: "acquaintance",
+        channelMappings: [{ channel: "telegram", channelUserId: "tg-erin" }],
+      }),
     ).rejects.toThrow(boom);
 
     // Without the transaction the person row would survive, unreachable: no
@@ -699,11 +700,12 @@ describe("PersonMappingRepository", () => {
       });
 
       await expect(
-        repo.createWithChannelMapping(
-          "bob",
-          { displayName: "Bob", bondLevel: "inner-circle", approved: true },
-          { channel: "whatsapp", channelUserId: "+15551234", displayName: "Bob" },
-        ),
+        repo.create({
+          displayName: "Bob",
+          bondLevel: "inner-circle",
+          approved: true,
+          channelMappings: [{ channel: "whatsapp", channelUserId: "+15551234" }],
+        }),
       ).rejects.toThrow(/already belongs to person "alice"/);
 
       // Creating a person is not a re-point, whichever path asks for it.
@@ -714,11 +716,12 @@ describe("PersonMappingRepository", () => {
     it("reclaims a dismissed identity from the dashboard path", async () => {
       await dismiss("whatsapp", "+15558888", "Carol");
 
-      await repo.createWithChannelMapping(
-        "carol",
-        { displayName: "Carol", bondLevel: "inner-circle", approved: true },
-        { channel: "whatsapp", channelUserId: "+15558888", displayName: "Carol" },
-      );
+      await repo.create({
+        displayName: "Carol",
+        bondLevel: "inner-circle",
+        approved: true,
+        channelMappings: [{ channel: "whatsapp", channelUserId: "+15558888" }],
+      });
 
       expect((await repo.findByChannelUser("whatsapp", "+15558888"))?.id).toBe("carol");
       expect((await repo.findById(STRANGER_PERSON_ID))!.channelMappings).toHaveLength(0);
