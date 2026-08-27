@@ -138,7 +138,7 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
             aria-label={t("project.buttonLabel")}
           >
             <span className="truncate">{isDefault ? defaultProjectName : draftProjectLabel}</span>
-            <ChevronDown className="size-3 shrink-0 opacity-50" aria-hidden />
+            <ChevronDown data-icon="inline-end" aria-hidden="true" />
           </Button>
         </PopoverTrigger>
 
