@@ -34,12 +34,26 @@ const PEOPLE_KEY = "people";
 const ACCOUNTS_KEY = "accounts";
 const TIMELINE_KEY = "person-timeline";
 
-// An open dossier's poll. Short, because it is what a just-sent message waits
-// on: a send returns before the echo that stores it, and a slower cadence would
-// leave the reader looking at a timeline missing the line they just typed.
-const TIMELINE_POLL_MS = 4_000;
-
 const ROSTER_POLL_MS = 30_000;
+
+/**
+ * An open dossier's poll — the roster's cadence, not a faster one.
+ *
+ * A refetch of a paged read refetches *every page it holds*, so the cost of
+ * this interval is one request per page the reader has opened: a dossier paged
+ * six pages back costs six requests a tick, re-reading history that cannot have
+ * changed. At four seconds that is ninety requests a minute to catch a message
+ * that has not arrived.
+ *
+ * Four seconds is what a page with a composer needs, and for a specific reason:
+ * a WhatsApp send returns once the adapter accepted the text, not once the echo
+ * that stores it lands, so the reader is waiting on a line they just typed.
+ * This page has no composer — the writes are rome-os/rome#67 — so nothing here
+ * is waiting on a write of its own, and when the composer returns it can
+ * invalidate this query at the moment of the send rather than have every reader
+ * pay a fast poll for it.
+ */
+const TIMELINE_POLL_MS = ROSTER_POLL_MS;
 
 // How long the search box settles before its term reaches the wire. Long enough
 // that a typed word is one request rather than one per letter, short enough

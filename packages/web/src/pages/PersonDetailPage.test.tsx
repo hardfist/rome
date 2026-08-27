@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -117,7 +117,7 @@ function mockApi(
 
 function renderPage(id = "wei-chen") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[`/people/${id}`]}>
         <Routes>
@@ -127,6 +127,7 @@ function renderPage(id = "wei-chen") {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...view, queryClient };
 }
 
 describe("PersonDetailPage", () => {
@@ -189,6 +190,63 @@ describe("PersonDetailPage", () => {
     // Appended, not swapped in: the head of the history stays above it.
     expect(screen.getByText("the landlord replies fast")).toBeTruthy();
     expect(calls.some((call) => call.url.includes("cursor=older-1"))).toBe(true);
+  });
+
+  it("keeps a paged timeline whole when the head is read again", async () => {
+    // The reader has paged back through the history and a message arrives, so
+    // the head answers something new. What must not happen is the page losing
+    // where it had paged to and re-appending the page it already holds: those
+    // entries would render twice, under keys React would then see twice.
+    // Paging belongs to the query rather than to state kept here, so there is
+    // no cursor to snap back — this is that, pinned.
+    const older: TimelineEntry = {
+      source: "telegram",
+      timestamp: NOW - 400_000,
+      body: "first hello",
+      direction: "inbound",
+      ref: "sentinel:1",
+    };
+    const arrival: TimelineEntry = {
+      source: "whatsapp",
+      timestamp: NOW - 5,
+      body: "one more thing",
+      direction: "inbound",
+      ref: "wa-3",
+    };
+    let headEntries = ENTRIES;
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const json = (body: unknown) =>
+        ({ ok: true, status: 200, json: async () => body }) as Response;
+      if (url.includes("/messages")) {
+        return new URL(url, "http://localhost").searchParams.get("cursor")
+          ? json({ entries: [older], nextCursor: null })
+          : json({ entries: headEntries, nextCursor: "older-1" });
+      }
+      return json(PERSON);
+    }) as typeof fetch);
+    const { queryClient } = renderPage();
+
+    await screen.findByText("the landlord replies fast");
+    await user.click(screen.getByRole("button", { name: "Load older" }));
+    await screen.findByText("first hello");
+
+    // A message lands, and the read is refreshed the way its poll refreshes it.
+    headEntries = [arrival, ...ENTRIES];
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["person-timeline"] });
+    });
+
+    expect(await screen.findByText("one more thing")).toBeTruthy();
+    // Every entry once: the page the reader had paged to is still there, and
+    // still there only once.
+    expect(screen.getAllByText("first hello")).toHaveLength(1);
+    expect(screen.getAllByText("the landlord replies fast")).toHaveLength(1);
+    // And the history is still exhausted. A page that had forgotten where it
+    // paged to would offer to fetch the last page again, which is how the
+    // duplicates would arrive.
+    expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
   });
 
   it("says a person is gone only when the server said so", async () => {
