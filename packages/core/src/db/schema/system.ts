@@ -313,6 +313,18 @@ export const settings = sqliteTable("settings", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+// Guardian-entered named values ("App keys" in Settings → Connections) injected
+// into process.env at boot so any installed app can read them. `name` is the
+// env var name apps read; `label` is the guardian's human description. Values
+// never leave the server through the API — the read surface returns names only.
+export const appKeys = sqliteTable("app_keys", {
+  name: text("name").primaryKey(),
+  label: text("label").notNull(),
+  value: text("value").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 export const policies = sqliteTable("policies", {
   id: text("id").primaryKey(),
   scopeType: text("scope_type").notNull(),

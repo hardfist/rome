@@ -203,6 +203,38 @@
       }
     }
   },
+  "appKeys": {
+    "title": "应用密钥",
+    "subtitle": "供你 Rome 上的应用使用的密码和 API 密钥。",
+    "loading": "正在加载应用密钥",
+    "errorTitle": "应用密钥加载失败",
+    "emptyTitle": "还没有应用密钥",
+    "emptyBody": "当应用需要时再添加密钥——例如数据库密码或 API 密钥。",
+    "add": "添加密钥",
+    "set": "已设置",
+    "overridden": "已被服务器设置覆盖",
+    "overriddenHint": "存在同名的服务器环境变量并优先生效，此处保存的值不会被使用。",
+    "replace": "替换",
+    "remove": "移除",
+    "removeTitle": "移除 {{name}}？",
+    "removeBody": "应用将无法再读取该值。此操作无法撤销。",
+    "form": {
+      "labelField": "这个密钥是做什么用的？",
+      "labelPlaceholder": "例如：我的商店数据库密码",
+      "nameField": "应用读取的名称",
+      "namePlaceholder": "例如：SHOP_DB_PASSWORD",
+      "valueField": "秘密值",
+      "valueHint": "保存后 Rome 会一直隐藏它。以后修改时需要重新输入。",
+      "valueRequired": "请输入秘密值。",
+      "consent": "安装在你 Rome 上的任何应用都能读取它。",
+      "save": "对所有应用保存",
+      "saving": "保存中…",
+      "cancel": "取消"
+    },
+    "saved": "已保存。应用现在可以读取 {{name}}。",
+    "savedOverridden": "已保存，但存在同名的服务器设置并优先生效——你输入的值不会被使用。",
+    "removed": "已移除 {{name}}。"
+  },
   "trust": {
     "title": "关系层级规则",
     "trustedLevels": {

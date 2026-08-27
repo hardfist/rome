@@ -78,6 +78,7 @@ import {
   advanceAdvancedEasterEggSequence,
 } from "@/lib/advanced-easter-egg";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
+import { AppKeysSection } from "@/components/connections/app-keys-section";
 import { ChannelsSettingsPage } from "@/components/channels/channels-settings-page";
 import { AiToolsPanel } from "@/components/ai-tools-panel";
 import { SystemUpgradeSection } from "@/components/system-upgrade-section";
@@ -407,15 +408,18 @@ export default function SettingsPage() {
             <>
               {activeTab === "Appearance" && <AppearanceSection />}
               {activeTab === "Connections" && (
-                <ConnectionsSection
-                  connections={connections}
-                  composio={composio}
-                  loading={connectionsLoading}
-                  error={connectionsError}
-                  onRetry={loadConnections}
-                  onRefresh={loadConnections}
-                  onFlash={(message) => toast.error(message)}
-                />
+                <>
+                  <ConnectionsSection
+                    connections={connections}
+                    composio={composio}
+                    loading={connectionsLoading}
+                    error={connectionsError}
+                    onRetry={loadConnections}
+                    onRefresh={loadConnections}
+                    onFlash={(message) => toast.error(message)}
+                  />
+                  <AppKeysSection />
+                </>
               )}
               {activeTab === "Channels" && <ChannelsSettingsPage />}
               {activeTab === "Favors" && <FavorsSection />}

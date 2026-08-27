@@ -25,6 +25,7 @@ import { appApiDashboardRoutes, appApiPublicRoutes } from "./routes/app-api.js";
 import { webhookRoutes } from "./routes/webhooks.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
 import { settingsRoutes } from "./routes/settings.js";
+import { appKeysRoutes } from "./routes/app-keys.js";
 import { uptimeRoutes } from "./routes/uptime.js";
 import { buildInfoRoutes } from "./routes/build-info.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
@@ -147,6 +148,7 @@ export function buildApp(
   api.route("/", conversationSettingsRoutes(deps));
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
+  api.route("/", appKeysRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
   api.route("/", personsRoutes(deps));

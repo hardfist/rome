@@ -24,6 +24,8 @@ import type { ActionRegistryImpl } from "../actions/registry.js";
 import type { AgentLoader } from "../core/agent-loader.js";
 import type { SkillCatalog } from "../core/skill-catalog.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
+import type { AppKeysRepository } from "../db/repositories/app-keys.js";
+import type { AppKeyInjector } from "../app-keys/injector.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import type { SessionManager } from "../core/session-manager.js";
@@ -116,6 +118,8 @@ export interface ApiDeps {
   /** Override for `~/.rome/<profile>/apps/` (tests inject tmpdir). */
   appsRoot?: string;
   settingsRepo: SettingsRepository;
+  appKeysRepo: AppKeysRepository;
+  appKeyInjector: AppKeyInjector;
   appRuntimeRepositories: AppRuntimeRepositories;
   sentinelLogRepo: SentinelLogRepository;
   actionExecutionsRepo: ActionExecutionsRepository;

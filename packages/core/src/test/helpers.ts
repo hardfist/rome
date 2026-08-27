@@ -57,6 +57,8 @@ import { createAccountNames } from "../channels/account-names.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
+import { AppKeysRepository } from "../db/repositories/app-keys.js";
+import { AppKeyInjector } from "../app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
@@ -385,6 +387,10 @@ export async function buildTestDeps(
   });
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
+  // A private env object per deps bag: route tests exercise apply/remove
+  // without touching the real process.env of the test runner.
+  const appKeysRepo = new AppKeysRepository(db);
+  const appKeyInjector = new AppKeyInjector({});
   const policiesRepo = new PoliciesRepository(db);
   const webchatRepo = new WebChatRepository(db);
   const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
@@ -548,6 +554,8 @@ export async function buildTestDeps(
     approvalHandler,
     backendTurnRunner,
     settingsRepo,
+    appKeysRepo,
+    appKeyInjector,
     appRuntimeRepositories,
     policiesRepo,
     webchatRepo,

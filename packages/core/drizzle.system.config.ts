@@ -17,6 +17,7 @@ export default defineConfig({
     "sentinel_log",
     "approvals",
     "settings",
+    "app_keys",
     "policies",
     "guardian_auth",
     "provider_accounts",

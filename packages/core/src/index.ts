@@ -57,6 +57,8 @@ import { createAccountNames } from "./channels/account-names.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
+import { AppKeysRepository } from "./db/repositories/app-keys.js";
+import { AppKeyInjector } from "./app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
 import { WebChatRepository } from "./db/repositories/webchat.js";
 import { ActionExecutionsRepository } from "./db/repositories/action-executions.js";
@@ -248,6 +250,15 @@ async function main() {
     log.info("Seeded instance token from environment into database");
   }
   await hydrateInstanceToken(settingsRepo);
+
+  // App keys: guardian-entered values go live in process.env before any app
+  // code, action worker, or route can read them. Operator-set env always wins;
+  // the injector records those as overridden instead of clobbering.
+  const appKeysRepo = new AppKeysRepository(db);
+  const appKeyInjector = new AppKeyInjector();
+  for (const row of await appKeysRepo.listWithValues()) {
+    appKeyInjector.apply(row.name, row.value);
+  }
 
   const policiesRepo = new PoliciesRepository(db);
   const webchatRepo = new WebChatRepository(db);
@@ -1176,6 +1187,8 @@ async function main() {
       skillCatalog,
       db,
       settingsRepo,
+      appKeysRepo,
+      appKeyInjector,
       appRuntimeRepositories,
       sentinelLogRepo,
       actionExecutionsRepo,
