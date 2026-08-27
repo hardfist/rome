@@ -11,7 +11,6 @@ import { ArrowUp, Lock, Paperclip, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
 import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
 import { ProjectSelector } from "@/components/project-selector";
 import { SourceConnect } from "@/components/sync/SourceConnect";
@@ -1003,13 +1002,18 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               guardianLabel={guardianLabel}
             />
           )}
-          <IconButton
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={() => fileInputRef.current?.click()}
             disabled={isComposerBusy}
-            label={t("composer.uploadFiles")}
-            icon={<Paperclip aria-hidden />}
-            className="touch-target text-muted-foreground hover:text-foreground"
-          />
+            aria-label={t("composer.uploadFiles")}
+            title={t("composer.uploadFiles")}
+            className="touch-target"
+          >
+            <Paperclip aria-hidden />
+          </Button>
           {showModelSelector && modelSelectorEnabled && (
             <ModelSelectorMenu
               open={modelMenuOpen}
@@ -1032,7 +1036,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               <Button
                 type="button"
                 variant="outline"
-                size="icon-md"
+                size="icon-sm"
                 onClick={onStop}
                 className="touch-target"
                 title={t("composer.stopGenerating")}
@@ -1047,7 +1051,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                   ? "secondary"
                   : "default"
               }
-              size="icon-md"
+              size="icon-sm"
               onClick={() => void runSend()}
               disabled={
                 isComposerBusy || (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)

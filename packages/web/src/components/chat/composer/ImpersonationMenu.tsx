@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Check, Users } from "lucide-react";
+import { Check, ChevronDown, Users } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -7,7 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { IconButton } from "@/components/ui/icon-button";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { PersonResource } from "@rome/api-types/people";
 
@@ -37,23 +37,27 @@ export function ImpersonationMenu({
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
-        <IconButton
-          label={t("impersonation.buttonLabel")}
-          icon={
+        <Button
+          type="button"
+          variant="ghost"
+          // Impersonation's default is the absence of a value, not a value —
+          // there is no persona to name while the guardian speaks as itself. So
+          // the trigger is a bare icon until someone is picked, and the name
+          // appearing is the whole signal. A project and a model always have a
+          // value, which is why those two always show one.
+          size={selectedPerson ? "sm" : "icon-sm"}
+          aria-label={t("impersonation.buttonLabel")}
+          title={selectedPersonLabel}
+          className="touch-target"
+        >
+          <Users aria-hidden />
+          {selectedPerson && (
             <>
-              <Users aria-hidden />
-              {selectedPerson && (
-                <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-info" />
-              )}
+              <span className="max-w-[10rem] truncate">{selectedPerson.displayName}</span>
+              <ChevronDown data-icon="inline-end" aria-hidden="true" />
             </>
-          }
-          className={cn(
-            "relative touch-target",
-            selectedPerson
-              ? "bg-info-bg text-info-fg hover:bg-info-bg"
-              : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
           )}
-        />
+        </Button>
       </DropdownMenuTrigger>
 
       <DropdownMenuContent side="top" align="start" className="w-64 p-0">

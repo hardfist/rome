@@ -1,12 +1,12 @@
 import { useTranslation } from "react-i18next";
-import { Check, Zap } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { IconButton } from "@/components/ui/icon-button";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DEFAULT_LARGE_MODEL_SELECTION, LARGE_MODEL_OPTIONS } from "@/lib/chat-constants";
 
@@ -27,22 +27,27 @@ export function ModelSelectorMenu({
 }: ModelSelectorMenuProps) {
   const { t } = useTranslation("chat");
 
-  const customSelected = value !== DEFAULT_LARGE_MODEL_SELECTION;
+  // `auto` is a value like any other, so the trigger always has something to
+  // name. The label IS the state — nothing has to encode "non-default" on top.
+  const selected =
+    LARGE_MODEL_OPTIONS.find((option) => option.id === value) ??
+    LARGE_MODEL_OPTIONS.find((option) => option.id === DEFAULT_LARGE_MODEL_SELECTION)!;
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
-        <IconButton
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
           disabled={disabled}
-          label={t("modelSelector.label")}
-          icon={<Zap aria-hidden />}
-          className={cn(
-            "touch-target",
-            customSelected
-              ? "bg-info-bg text-info-fg hover:bg-info-bg"
-              : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
-          )}
-        />
+          aria-label={t("modelSelector.label")}
+          title={t("modelSelector.label")}
+          className="touch-target"
+        >
+          <span className="truncate">{t(selected.labelKey)}</span>
+          <ChevronDown data-icon="inline-end" aria-hidden="true" />
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56 rounded-12 p-2">
         <div className="px-2 pb-2 pt-1">
