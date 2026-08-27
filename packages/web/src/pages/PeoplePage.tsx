@@ -7,10 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { useInvalidatePeople } from "@/hooks/use-people";
 import { PageShell, PageBody } from "@/shell/PageShell";
 import { DirectoryRow, StreamRow, levelLabelKey } from "./people/rows";
-import { UnknownEntry } from "./people/triage";
+import { DismissedEntry, UnknownEntry } from "./people/triage";
 import {
   directoryGroups,
   FILTER_ORDER,
@@ -41,7 +40,8 @@ import { LinkedInSection } from "./people/linkedin";
  *
  * Every number on screen is the server's. The directory pages, so a count taken
  * over the rows that happened to arrive would report no waiting senders as soon
- * as placed people filled page one.
+ * as placed people filled page one — and it is why a write settles by
+ * invalidating these reads rather than by editing what they returned.
  */
 
 /** The chips whose level the people read can be narrowed by: the levels a
@@ -62,10 +62,6 @@ export default function PeoplePage() {
   const { t } = useTranslation("people");
   const { t: tCommon } = useTranslation("common");
   const navigate = useNavigate();
-  // A placement changes who Rome knows, so the one shared people cache — the
-  // composer's mention list reads it — is invalidated alongside this page's own
-  // refetch rather than left to its own staleness window.
-  const invalidatePeople = useInvalidatePeople();
 
   const [view, setView] = useState<PeopleView>("latest");
   const [filter, setFilter] = useState<PeopleFilter>("all");
@@ -140,17 +136,16 @@ export default function PeoplePage() {
   const loading = roster.isPending;
   const loadError = roster.error ? roster.error.message : null;
 
-  const triage = (row: PeopleRow) => (
-    <UnknownEntry
-      key={row.id}
-      row={row}
-      people={linkTargets}
-      onSettled={() => {
-        void roster.refetch();
-        void invalidatePeople();
-      }}
-    />
-  );
+  // Both unplaced ends of the ladder render dense, with the gesture their
+  // position admits. A restore decides on the same evidence a placement does —
+  // what the sender actually sent — so it gets the same row rather than a
+  // roster line with a button on it.
+  const unplaced = (row: PeopleRow) =>
+    row.level === "stranger" ? (
+      <DismissedEntry key={row.id} row={row} />
+    ) : (
+      <UnknownEntry key={row.id} row={row} people={linkTargets} />
+    );
 
   return (
     <PageShell>
@@ -244,7 +239,7 @@ export default function PeoplePage() {
             rows={latest}
             searching={settled !== ""}
             onOpen={openRow}
-            renderUnknown={triage}
+            renderUnplaced={unplaced}
           />
         ) : (
           <DirectoryView
@@ -254,7 +249,7 @@ export default function PeoplePage() {
             silentTotal={roster.silentTotal}
             onToggleSilent={setShowSilent}
             onOpen={openRow}
-            renderUnknown={triage}
+            renderUnplaced={unplaced}
           />
         )}
 
@@ -288,12 +283,12 @@ function LatestView({
   rows,
   searching,
   onOpen,
-  renderUnknown,
+  renderUnplaced,
 }: {
   rows: PeopleRow[];
   searching: boolean;
   onOpen: (row: PeopleRow) => void;
-  renderUnknown: (row: PeopleRow) => React.ReactNode;
+  renderUnplaced: (row: PeopleRow) => React.ReactNode;
 }) {
   const { t } = useTranslation("people");
   if (rows.length === 0) {
@@ -321,14 +316,10 @@ function LatestView({
       </div>
       <div className="flex flex-col">
         {rows.map((row) =>
-          row.level === "unknown" ? (
-            renderUnknown(row)
+          row.kind === "account" ? (
+            renderUnplaced(row)
           ) : (
-            <StreamRow
-              key={row.id}
-              row={row}
-              onOpen={row.kind === "person" ? () => onOpen(row) : undefined}
-            />
+            <StreamRow key={row.id} row={row} onOpen={() => onOpen(row)} />
           ),
         )}
       </div>
@@ -343,7 +334,7 @@ function DirectoryView({
   silentTotal,
   onToggleSilent,
   onOpen,
-  renderUnknown,
+  renderUnplaced,
 }: {
   groups: { level: RowLevel; rows: PeopleRow[] }[];
   counts: Record<RowLevel, number>;
@@ -353,7 +344,7 @@ function DirectoryView({
   silentTotal: number;
   onToggleSilent: (value: boolean) => void;
   onOpen: (row: PeopleRow) => void;
-  renderUnknown: (row: PeopleRow) => React.ReactNode;
+  renderUnplaced: (row: PeopleRow) => React.ReactNode;
 }) {
   const { t } = useTranslation("people");
   if (groups.length === 0) {
@@ -406,14 +397,10 @@ function DirectoryView({
           </div>
           <div className="flex flex-col">
             {group.rows.map((row) =>
-              row.level === "unknown" ? (
-                renderUnknown(row)
+              row.kind === "account" ? (
+                renderUnplaced(row)
               ) : (
-                <DirectoryRow
-                  key={row.id}
-                  row={row}
-                  onOpen={row.kind === "person" ? () => onOpen(row) : undefined}
-                />
+                <DirectoryRow key={row.id} row={row} onOpen={() => onOpen(row)} />
               ),
             )}
           </div>

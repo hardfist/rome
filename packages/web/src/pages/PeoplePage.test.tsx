@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   countPeople,
+  linkConflict,
   parseAccountCursor,
   parseAccountState,
   parsePersonFilterLevel,
@@ -43,10 +44,22 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Every field any of the contract's write bodies carries, so one shape reads
+ *  them all — the mock below dispatches on the path, not on the body. */
+interface WriteBody {
+  displayName?: string;
+  bondLevel?: string;
+  accounts?: { channel: string; channelUserId: string }[];
+  channel?: string;
+  channelUserId?: string;
+  transferFrom?: string;
+  from?: string;
+}
+
 interface FetchCall {
   url: string;
   method: string;
-  body: unknown;
+  body: WriteBody | undefined;
 }
 
 const NOW = Math.floor(Date.now() / 1000);
@@ -126,6 +139,140 @@ const LINKED_ACCOUNT: DirectoryAccount = {
   messageCount: 30,
 };
 
+/** The world both reads are served from, and every write applies to. */
+interface World {
+  people: PersonResource[];
+  accounts: DirectoryAccount[];
+  peopleFail: boolean;
+  accountsFail: boolean;
+}
+
+type Json = (payload: unknown, status?: number) => Response;
+
+interface AccountRef {
+  channel: string;
+  channelUserId: string;
+}
+
+function findAccount(world: World, ref: AccountRef) {
+  return world.accounts.find(
+    (account) => account.channel === ref.channel && account.channelUserId === ref.channelUserId,
+  );
+}
+
+/** Move an account under a person, on both sides of the join. */
+function attach(world: World, person: PersonResource, ref: AccountRef) {
+  const account = findAccount(world, ref);
+  if (!account) return;
+  const previous = account.personId && world.people.find((p) => p.id === account.personId);
+  if (previous) {
+    previous.accounts = previous.accounts.filter(
+      (held) => held.channel !== account.channel || held.channelUserId !== account.channelUserId,
+    );
+  }
+  account.state = "linked";
+  account.personId = person.id;
+  account.personName = person.displayName;
+  person.accounts = [
+    ...person.accounts,
+    {
+      channel: account.channel,
+      channelUserId: account.channelUserId,
+      displayName: account.displayName,
+    },
+  ];
+  person.messageCount += account.messageCount;
+  person.latest = account.latest ?? person.latest;
+}
+
+/**
+ * The write half of the contract, applied to the same world the reads serve.
+ *
+ * Every verb answers the row it changed and leaves the listing to be read
+ * again, which is what lets a test tell a page that settles by refetching from
+ * one that patched what it already had.
+ */
+function applyWrite(
+  world: World,
+  method: string,
+  path: string,
+  body: WriteBody,
+  json: Json,
+): Response {
+  const holder = (account: DirectoryAccount) => ({
+    id: account.personId ?? "",
+    displayName: account.personName ?? "",
+  });
+
+  const decision = /^\/api\/accounts\/([^/]+)\/(.+)\/(dismiss|restore)$/.exec(path);
+  if (decision) {
+    const [, channel, rawId, verb] = decision;
+    const account = findAccount(world, {
+      channel: decodeURIComponent(channel ?? ""),
+      channelUserId: decodeURIComponent(rawId ?? ""),
+    });
+    if (!account) return json({ error: "Unknown account" }, 404);
+    if (account.state === "linked") return json(linkConflict(account, holder(account)), 409);
+    account.state = verb === "dismiss" ? "dismissed" : "unlinked";
+    return json(account);
+  }
+
+  if (path === "/api/people" && method === "POST") {
+    const refs = body.accounts ?? [];
+    for (const ref of refs) {
+      const held = findAccount(world, ref);
+      if (held?.state === "linked") return json(linkConflict(ref, holder(held)), 409);
+    }
+    const person: PersonResource = {
+      id: (body.displayName ?? "").toLowerCase().replace(/\s+/g, "-"),
+      displayName: body.displayName ?? "",
+      bondLevel: body.bondLevel ?? "other",
+      accounts: [],
+      messageCount: 0,
+      latest: null,
+    };
+    world.people.push(person);
+    for (const ref of refs) attach(world, person, ref);
+    return json(person, 201);
+  }
+
+  const link = /^\/api\/people\/([^/]+)\/accounts$/.exec(path);
+  if (link && method === "POST") {
+    const person = world.people.find((p) => p.id === decodeURIComponent(link[1] ?? ""));
+    if (!person) return json({ error: "Unknown person" }, 404);
+    const ref = { channel: body.channel ?? "", channelUserId: body.channelUserId ?? "" };
+    const held = findAccount(world, ref);
+    // Compare-and-swap on the current owner: taking an account from another
+    // person needs `transferFrom` naming them exactly.
+    if (held?.state === "linked" && held.personId !== person.id) {
+      if (body.transferFrom !== held.personId) return json(linkConflict(ref, holder(held)), 409);
+    }
+    attach(world, person, ref);
+    return json(person);
+  }
+
+  const merge = /^\/api\/people\/([^/]+)\/merge$/.exec(path);
+  if (merge && method === "POST") {
+    const into = world.people.find((p) => p.id === decodeURIComponent(merge[1] ?? ""));
+    const from = world.people.find((p) => p.id === body.from);
+    if (!into || !from) return json({ error: "Unknown person" }, 404);
+    for (const ref of [...from.accounts]) attach(world, into, ref);
+    world.people = world.people.filter((p) => p.id !== from.id);
+    return json(into);
+  }
+
+  const one = /^\/api\/people\/([^/]+)$/.exec(path);
+  if (one && method === "PATCH") {
+    const person = world.people.find((p) => p.id === decodeURIComponent(one[1] ?? ""));
+    if (!person) return json({ error: "Unknown person" }, 404);
+    if (body.displayName !== undefined) person.displayName = body.displayName;
+    if (body.bondLevel !== undefined) person.bondLevel = body.bondLevel;
+    return json(person);
+  }
+
+  return json({ error: "Unknown route" }, 404);
+}
+
 /**
  * Serves both reads from mutable lists, through the same contract helpers the
  * routes are built on — so a fixture cannot drift from them on ordering,
@@ -136,9 +283,11 @@ function mockApi(
   world: { people?: PersonResource[]; accounts?: DirectoryAccount[] } = {},
   options: { limit?: number; peopleFail?: boolean; accountsFail?: boolean; writes?: "fail" } = {},
 ) {
-  const state = {
-    people: world.people ?? [],
-    accounts: world.accounts ?? [],
+  // Cloned rather than shared: the writes below mutate this world, and the
+  // fixtures are module constants every other test reads.
+  const state: World = {
+    people: (world.people ?? []).map((person) => ({ ...person, accounts: [...person.accounts] })),
+    accounts: (world.accounts ?? []).map((account) => ({ ...account })),
     peopleFail: options.peopleFail ?? false,
     accountsFail: options.accountsFail ?? false,
   };
@@ -149,16 +298,19 @@ function mockApi(
   ) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
-    const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    const body = (typeof init?.body === "string" ? JSON.parse(init.body) : undefined) as
+      | WriteBody
+      | undefined;
     calls.push({ url, method, body });
-    const params = new URL(url, "http://localhost").searchParams;
-    const json = (payload: unknown, status = 200) =>
+    const parsed = new URL(url, "http://localhost");
+    const params = parsed.searchParams;
+    const json: Json = (payload: unknown, status = 200) =>
       ({ ok: status < 400, status, json: async () => payload }) as Response;
 
-    if (method === "POST") {
+    if (method !== "GET") {
       return options.writes === "fail"
         ? json({ error: "write refused" }, 500)
-        : json({ success: true, personId: "new-person" });
+        : applyWrite(state, method, parsed.pathname, body ?? {}, json);
     }
 
     if (url.includes("/api/accounts")) {
@@ -422,12 +574,12 @@ describe("PeoplePage directory", () => {
 });
 
 describe("PeoplePage placement", () => {
-  // The gestures that place an account are carried forward unchanged — they
-  // still post to the legacy `/api/persons/*` routes, and repointing them onto
-  // this contract is rome-os/rome#67. What the rebuild owes them is the row
-  // they hang off.
+  // The write half of the page, on the /people contract's verbs. What the union
+  // page called one "move" decomposes here: placing a sender is a create or a
+  // link, dismissing one is a decision about the account, and the ladder's
+  // dismissed end has a way back.
 
-  it("creates a person for a waiting sender, naming the account it came from", async () => {
+  it("places a waiting sender by creating the person and linking the account at once", async () => {
     const user = userEvent.setup();
     const { calls } = mockApi({ accounts: [UNKNOWN_SENDER] });
     renderPage();
@@ -437,22 +589,25 @@ describe("PeoplePage placement", () => {
     await user.click(screen.getByRole("button", { name: "Create" }));
     await user.click(screen.getByRole("button", { name: "Create profile" }));
 
-    await waitFor(() =>
-      expect(calls.some((c) => c.method === "POST" && c.url.includes("/api/persons/create"))).toBe(
-        true,
-      ),
-    );
-    expect(calls.find((c) => c.url.includes("/api/persons/create"))?.body).toMatchObject({
+    const create = await waitFor(() => {
+      const call = calls.find((c) => c.method === "POST" && c.url === "/api/people");
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    // One request, not a create followed by a link: a person created for an
+    // account must never exist without it.
+    expect(create.body).toMatchObject({
       displayName: "Rachel Lim",
       bondLevel: "acquaintance",
-      channel: "whatsapp",
-      channelUserId: "6591234472@s.whatsapp.net",
+      accounts: [{ channel: "whatsapp", channelUserId: "6591234472@s.whatsapp.net" }],
     });
+    // The sender is placed, so it is no longer waiting on a decision.
+    await waitFor(() => expect(screen.queryByText("Rachel Lim")).toBeNull());
   });
 
   it("links a waiting sender onto a person the roster already holds", async () => {
     const user = userEvent.setup();
-    const { calls } = mockApi({ people: [GUARDIAN, FRIEND], accounts: [UNKNOWN_SENDER] });
+    const { calls, state } = mockApi({ people: [GUARDIAN, FRIEND], accounts: [UNKNOWN_SENDER] });
     renderPage();
 
     await user.click(chip(/^Unknown/));
@@ -462,16 +617,17 @@ describe("PeoplePage placement", () => {
     await user.click(await screen.findByRole("option", { name: /Wei Chen/ }));
     await user.click(screen.getByRole("button", { name: "Link" }));
 
-    await waitFor(() =>
-      expect(calls.some((c) => c.method === "POST" && c.url.includes("/api/persons/link"))).toBe(
-        true,
-      ),
-    );
-    expect(calls.find((c) => c.url.includes("/api/persons/link"))?.body).toMatchObject({
+    const link = await waitFor(() => {
+      const call = calls.find((c) => c.url === "/api/people/wei-chen/accounts");
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect(link.method).toBe("POST");
+    expect(link.body).toEqual({
       channel: "whatsapp",
       channelUserId: "6591234472@s.whatsapp.net",
-      existingPersonId: "wei-chen",
     });
+    expect(state.accounts[0]!.personId).toBe("wei-chen");
   });
 
   it("confirms a dismissal before writing it, and says so when it fails", async () => {
@@ -483,18 +639,121 @@ describe("PeoplePage placement", () => {
     await screen.findByText("Rachel Lim");
     await user.click(screen.getByRole("button", { name: "Treat as stranger" }));
 
-    // A dismissal writes a mapping the dashboard cannot reverse, so nothing is
-    // posted until the confirmation is accepted.
+    // A dismissal changes how Rome answers this sender, so nothing is posted
+    // until the confirmation is accepted.
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain("Rachel Lim");
-    expect(calls.some((c) => c.url.includes("mark-stranger"))).toBe(false);
+    expect(calls.some((c) => c.url.includes("/dismiss"))).toBe(false);
 
     await user.click(within(dialog).getByRole("button", { name: "Treat as stranger" }));
 
     // A write that didn't land leaves the account where it was, and says so —
     // closing the dialog silently would read as success.
     expect(await screen.findByRole("alert")).toBeTruthy();
-    expect(calls.some((c) => c.method === "POST" && c.url.includes("mark-stranger"))).toBe(true);
+    expect(calls.some((c) => c.method === "POST" && c.url.includes("/dismiss"))).toBe(true);
+  });
+
+  it("takes a dismissed sender out of Unknown, and the count that drops is the server's", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockApi({ accounts: [UNKNOWN_SENDER, SILENT_CONTACT] });
+    renderPage();
+
+    await user.click(chip(/^Unknown/));
+    await screen.findByText("Rachel Lim");
+    await waitFor(() => expect(within(chip(/^Unknown/)).getByText("1")).toBeTruthy());
+
+    await user.click(screen.getByRole("button", { name: "Treat as stranger" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Treat as stranger" }));
+
+    // The row leaves the view because the directory no longer serves it under
+    // `state=unlinked`, and the chip loses its number because the directory's
+    // own `counts` came back one lower. Neither is a patch of what was cached:
+    // the page holds nothing it could have patched.
+    await waitFor(() => expect(screen.queryByText("Rachel Lim")).toBeNull());
+    expect(within(chip(/^Unknown/)).queryByText(/^\d+$/)).toBeNull();
+    const dismiss = calls.find((c) => c.url.includes("/dismiss"))!;
+    // Named by the pair the contract says is the account's identity, so every
+    // address it answers to travels with it.
+    expect(dismiss.url).toBe("/api/accounts/whatsapp/6591234472%40s.whatsapp.net/dismiss");
+  });
+
+  it("restores a dismissed sender back onto the ladder", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockApi({ accounts: [DISMISSED] });
+    renderPage();
+
+    await user.click(chip(/^Stranger/));
+    await screen.findByText("Crypto signals");
+    await user.click(screen.getByRole("button", { name: "Restore" }));
+
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.method === "POST" &&
+            c.url === "/api/accounts/whatsapp/447700900123%40s.whatsapp.net/restore",
+        ),
+      ).toBe(true),
+    );
+    // Dismissal is a state an account is in, not a merge into a sentinel, so
+    // the way back is the same account under the Unknown chip.
+    await waitFor(() => expect(screen.queryByText("Crypto signals")).toBeNull());
+    await user.click(chip(/^Unknown/));
+    expect(await screen.findByText("Crypto signals")).toBeTruthy();
+  });
+
+  it("offers a transfer only after naming who holds the account, and only on a second yes", async () => {
+    const user = userEvent.setup();
+    const { calls, state } = mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER] });
+    renderPage();
+
+    await user.click(chip(/^Unknown/));
+    await screen.findByText("Rachel Lim");
+    // Somebody else claimed the account between the read and the click — the
+    // race the contract's compare-and-swap exists to catch.
+    state.accounts[0]!.state = "linked";
+    state.accounts[0]!.personId = "mira";
+    state.accounts[0]!.personName = "Mira Chen";
+
+    await user.click(screen.getByRole("button", { name: "Link" }));
+    await user.click(screen.getByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: /Wei Chen/ }));
+    await user.click(screen.getByRole("button", { name: "Link" }));
+
+    // The refusal names the owner rather than reporting a failed write.
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("Mira Chen");
+    expect(calls.filter((c) => c.url.endsWith("/accounts") && c.body?.transferFrom)).toHaveLength(
+      0,
+    );
+
+    await user.click(within(dialog).getByRole("button", { name: "Move it here" }));
+
+    await waitFor(() => expect(state.accounts[0]!.personId).toBe("wei-chen"));
+    // A transfer re-attributes the account's whole history, so it never happens
+    // as the side effect of a retry: the second request is the one that names
+    // the person it is taken from.
+    expect(calls.filter((c) => c.url === "/api/people/wei-chen/accounts")).toHaveLength(2);
+    expect(calls.find((c) => c.body?.transferFrom)?.body).toEqual({
+      channel: "whatsapp",
+      channelUserId: "6591234472@s.whatsapp.net",
+      transferFrom: "mira",
+    });
+  });
+
+  it("writes through no /persons route", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER] });
+    renderPage();
+
+    await user.click(chip(/^Unknown/));
+    await screen.findByText("Rachel Lim");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await user.click(screen.getByRole("button", { name: "Create profile" }));
+
+    await waitFor(() => expect(calls.some((c) => c.url === "/api/people")).toBe(true));
+    expect(calls.filter((c) => c.url.includes("/api/persons"))).toEqual([]);
   });
 });
 

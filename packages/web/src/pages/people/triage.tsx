@@ -1,9 +1,12 @@
 import { useId, useState } from "react";
 import { useForm } from "@tanstack/react-form";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
-import type { PersonResource } from "@rome/api-types/people";
-import { normalizeBondLevel } from "@rome/api-types/identities";
+import {
+  ASSIGNABLE_BOND_LEVELS,
+  normalizeBondLevel,
+  type AssignableBondLevel,
+} from "@rome/api-types/identities";
+import type { LinkConflict, PersonResource } from "@rome/api-types/people";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -18,18 +21,24 @@ import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { cn } from "@/lib/utils";
 import { UnknownRow } from "./rows";
 import { levelLabelKey } from "./rows";
+import { TransferConfirm } from "./transfer";
+import { usePeopleWrites } from "./use-writes";
 import type { PeopleRow } from "./people-model";
 
-// Placing an account that nobody has decided about: create a person for it,
-// link it onto one that exists, or dismiss it.
+// Placing an account that nobody has decided about, and taking one back.
 //
-// These are the page's one set of write gestures, and they are carried forward
-// rather than rebuilt: they still post to the legacy `/api/persons/*` routes,
-// and repointing them onto the /people contract — where they become one "move"
-// along the ladder, from a row menu — is rome-os/rome#67. What this module owes
-// the rebuild is the row they hang off, which is the new one.
-
-const BOND_FORM_OPTIONS = ["inner-circle", "acquaintance", "other"] as const;
+// What the union page called one "move" is several verbs of the /people
+// contract (`./writes.ts`), because they are several different writes: placing
+// a sender creates a person or links onto one, dismissing it is a decision
+// about the account, and the dismissed end of the ladder has a way back.
+// Dismissal is a state an account is in rather than a merge into a sentinel, so
+// there is no target list to enumerate and nothing here has to know which moves
+// a row admits.
+//
+// A gesture names the account by the pair the contract says is its identity,
+// never by one of the addresses it answers to: the server folds a WhatsApp
+// contact's phone jid and `@lid` jid into one account, so one call already
+// covers every address the row stands for.
 
 /**
  * A submit label that swaps to a busy phrasing while the request is in flight.
@@ -53,37 +62,6 @@ export function BusyLabel({ idle, busy, isBusy }: { idle: string; busy: string; 
   );
 }
 
-/**
- * POST a person mutation and reduce whatever comes back to "it worked" or a
- * message worth showing. Never throws — the callers are event handlers, where
- * an unhandled rejection would leave the row silent.
- *
- * Only a 4xx body is treated as copy. These routes answer a rejected request
- * with an `{ error }` naming the missing field, which is exactly what the
- * guardian needs. A 5xx body carries the same shape but not the same meaning:
- * the API error handler serializes an unhandled exception as
- * `{ error: err.message }`, so trusting it would put a raw SQLite or repository
- * message on screen.
- */
-export async function postPersonMutation(
-  url: string,
-  body: unknown,
-  t: TFunction<"people">,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(body),
-  }).catch(() => null);
-
-  if (!res) return { ok: false, error: t("errors.network") };
-  if (res.ok) return { ok: true };
-  if (res.status >= 500) return { ok: false, error: t("errors.requestFailed") };
-  const payload = (await res.json().catch(() => null)) as { error?: string } | null;
-  return { ok: false, error: payload?.error || t("errors.requestFailed") };
-}
-
 /** Why the last write failed, sitting at the left end of a button row. */
 export function MutationError({ message }: { message: string | null }) {
   if (!message) return null;
@@ -104,19 +82,15 @@ function CreateProfileForm({
    *  likely to be created under, and never a linked person's. */
   defaultName: string;
   error: string | null;
-  onSubmit: (data: { displayName: string; bondLevel: string; relation: string }) => Promise<void>;
+  onSubmit: (data: { displayName: string; bondLevel: AssignableBondLevel }) => Promise<void>;
   onCancel: () => void;
 }) {
   const { t } = useTranslation("people");
   const uid = useId();
   const form = useForm({
-    defaultValues: { displayName: defaultName, bondLevel: "acquaintance", relation: "" },
+    defaultValues: { displayName: defaultName, bondLevel: "acquaintance" as AssignableBondLevel },
     onSubmit: async ({ value }) => {
-      await onSubmit({
-        displayName: value.displayName,
-        bondLevel: value.bondLevel,
-        relation: value.relation,
-      });
+      await onSubmit({ displayName: value.displayName, bondLevel: value.bondLevel });
     },
   });
 
@@ -150,12 +124,15 @@ function CreateProfileForm({
               <FieldLabel htmlFor={`${uid}-bond-level`}>
                 {t("createForm.bondLevelLabel")}
               </FieldLabel>
-              <Select value={field.state.value} onValueChange={field.handleChange}>
+              <Select
+                value={field.state.value}
+                onValueChange={(value) => field.handleChange(value as AssignableBondLevel)}
+              >
                 <SelectTrigger id={`${uid}-bond-level`} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {BOND_FORM_OPTIONS.map((value) => (
+                  {ASSIGNABLE_BOND_LEVELS.map((value) => (
                     <SelectItem key={value} value={value}>
                       {t(levelLabelKey(value))}
                     </SelectItem>
@@ -166,21 +143,6 @@ function CreateProfileForm({
           )}
         </form.Field>
       </div>
-      <form.Field name="relation">
-        {(field) => (
-          <Field>
-            <FieldLabel htmlFor={`${uid}-relation`}>{t("createForm.relationLabel")}</FieldLabel>
-            <Input
-              id={`${uid}-relation`}
-              type="text"
-              value={field.state.value}
-              onChange={(e) => field.handleChange(e.target.value)}
-              onBlur={field.handleBlur}
-              placeholder={t("createForm.relationPlaceholder")}
-            />
-          </Field>
-        )}
-      </form.Field>
       <form.Subscribe<{ isSubmitting: boolean; displayName: string }>
         selector={(s) => ({ isSubmitting: s.isSubmitting, displayName: s.values.displayName })}
       >
@@ -290,26 +252,29 @@ function LinkForm({
 /**
  * One unplaced account, with the gestures that place it.
  *
- * The row is the rebuild's; the gestures are the page's existing ones, which
- * still name an account by the pair (channel, channelUserId) the contract says
- * is its identity. A dismissal is confirmed first: it writes a permanent
- * mapping the dashboard cannot reverse.
+ * Nothing is handed back to a parent to refresh: every verb here settles by
+ * invalidating the reads and resolves once they have landed, so the row stands
+ * until the listing that no longer holds it has arrived.
  */
 export function UnknownEntry({
   row,
   people,
-  onSettled,
 }: {
   row: PeopleRow;
   /** The people a link can land on — the listing's own rows. */
   people: PersonResource[];
-  onSettled: () => void;
 }) {
   const { t } = useTranslation("people");
+  const writes = usePeopleWrites();
   const [action, setAction] = useState<"create" | "link" | null>(null);
   const [acting, setActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmingStranger, setConfirmingStranger] = useState(false);
+  const [confirmingDismiss, setConfirmingDismiss] = useState(false);
+  // A refused link, with the person it would be taken from. Held rather than
+  // acted on: the transfer is a second thing to ask for.
+  const [transfer, setTransfer] = useState<{ conflict: LinkConflict; personId: string } | null>(
+    null,
+  );
   const account = row.accounts[0];
   const name = row.displayName || account?.channelUserId || "";
 
@@ -319,66 +284,51 @@ export function UnknownEntry({
     setAction(next);
   }
 
-  async function handleCreate(data: { displayName: string; bondLevel: string; relation: string }) {
+  async function handleCreate(data: { displayName: string; bondLevel: AssignableBondLevel }) {
     if (!account) return;
     setError(null);
-    const res = await postPersonMutation(
-      "/api/persons/create",
-      { ...data, channel: account.channel, channelUserId: account.channelUserId },
-      t,
-    );
-    if (!res.ok) {
-      setError(res.error);
+    const result = await writes.place(account, data);
+    if (result.ok) {
+      setAction(null);
       return;
     }
-    setAction(null);
-    onSettled();
+    // A create cannot transfer — the contract has no `transferFrom` on it — so
+    // a held account is reported in the words the route refused in, and the
+    // guardian links onto the holder instead.
+    setError("conflict" in result ? result.conflict.error : result.message);
   }
 
-  async function handleLink(personId: string) {
+  async function handleLink(personId: string, transferFrom?: string) {
     if (!account) return;
     setError(null);
-    const res = await postPersonMutation(
-      "/api/persons/link",
-      {
-        channel: account.channel,
-        channelUserId: account.channelUserId,
-        existingPersonId: personId,
-        displayName: row.displayName,
-      },
-      t,
-    );
-    if (!res.ok) {
-      setError(res.error);
+    const result = await writes.link(personId, account, transferFrom);
+    if (result.ok) {
+      setTransfer(null);
+      setAction(null);
       return;
     }
-    setAction(null);
-    onSettled();
+    if ("conflict" in result && result.conflict.linkedPersonId) {
+      setTransfer({ conflict: result.conflict, personId });
+      return;
+    }
+    setTransfer(null);
+    setError("conflict" in result ? result.conflict.error : result.message);
   }
 
-  async function handleMarkStranger() {
+  async function handleDismiss() {
     if (!account) return;
     // The row's own trigger names the running operation, so the dialog steps out
     // of the way the moment the write starts rather than sitting there disabled
     // with nothing to say.
-    setConfirmingStranger(false);
+    setConfirmingDismiss(false);
     setActing(true);
     setError(null);
     try {
-      const res = await postPersonMutation(
-        "/api/persons/mark-stranger",
-        {
-          channel: account.channel,
-          channelUserId: account.channelUserId,
-          displayName: row.displayName,
-        },
-        t,
-      );
+      const result = await writes.dismiss(account);
       // A write that didn't land leaves the account exactly where it was. Say
       // so — closing the dialog silently reads as success, which is the
       // opposite of what this confirmation exists to do.
-      if (res.ok) onSettled();
-      else setError(res.error);
+      if (!result.ok) setError("conflict" in result ? result.conflict.error : result.message);
     } finally {
       setActing(false);
     }
@@ -412,7 +362,7 @@ export function UnknownEntry({
                 type="button"
                 variant="destructive"
                 size="sm"
-                onClick={() => setConfirmingStranger(true)}
+                onClick={() => setConfirmingDismiss(true)}
                 disabled={acting}
               >
                 <BusyLabel
@@ -446,13 +396,13 @@ export function UnknownEntry({
         <LinkForm
           people={people}
           error={error}
-          onSubmit={handleLink}
+          onSubmit={(personId) => handleLink(personId)}
           onCancel={() => openAction(null)}
         />
       )}
 
       <RomeConfirmDialog
-        open={confirmingStranger}
+        open={confirmingDismiss}
         destructive
         title={t("strangerConfirm.title", { name })}
         // A dismissal does not take the account off the directory — it moves it
@@ -466,9 +416,72 @@ export function UnknownEntry({
         // confirm and the button that carries it out promise the same thing.
         confirmLabel={t("actions.markStranger")}
         cancelLabel={t("actions.cancel")}
-        onCancel={() => setConfirmingStranger(false)}
-        onConfirm={() => void handleMarkStranger()}
+        onCancel={() => setConfirmingDismiss(false)}
+        onConfirm={() => void handleDismiss()}
       />
+
+      {transfer && (
+        <TransferConfirm
+          conflict={transfer.conflict}
+          busy={acting}
+          onCancel={() => setTransfer(null)}
+          onConfirm={() =>
+            void handleLink(transfer.personId, transfer.conflict.linkedPersonId ?? undefined)
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * An account the guardian dismissed, with the gesture that undoes it.
+ *
+ * The same dense row the Unknown view uses, because the decision runs on the
+ * same evidence: a restore is worth making on what the sender actually sent,
+ * not on a name in a roster. No confirmation — a restore only puts the account
+ * back where a decision is still owed.
+ */
+export function DismissedEntry({ row }: { row: PeopleRow }) {
+  const { t } = useTranslation("people");
+  const writes = usePeopleWrites();
+  const [acting, setActing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const account = row.accounts[0];
+
+  async function handleRestore() {
+    if (!account) return;
+    setActing(true);
+    setError(null);
+    try {
+      const result = await writes.restore(account);
+      if (!result.ok) setError("conflict" in result ? result.conflict.error : result.message);
+    } finally {
+      setActing(false);
+    }
+  }
+
+  return (
+    <div>
+      <UnknownRow
+        row={row}
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={acting}
+            onClick={() => void handleRestore()}
+          >
+            <BusyLabel idle={t("actions.restore")} busy={t("actions.restoring")} isBusy={acting} />
+          </Button>
+        }
+      />
+      {error && (
+        <div className="flex justify-end px-2 pb-2">
+          <MutationError message={error} />
+        </div>
+      )}
     </div>
   );
 }

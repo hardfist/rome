@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { TimelineEntry } from "@rome/api-types/identities";
-import type { PersonResource } from "@rome/api-types/people";
+import {
+  countPeople,
+  linkConflict,
+  sliceAccountDirectory,
+  type DirectoryAccount,
+  type PersonResource,
+} from "@rome/api-types/people";
 import i18n from "@/i18n";
 import PersonDetailPage from "./PersonDetailPage";
 
@@ -73,9 +79,54 @@ const ENTRIES: TimelineEntry[] = [
   },
 ];
 
+/** A duplicate of the person, for the merge picker to land on. */
+const DUPLICATE: PersonResource = {
+  id: "wei-c",
+  displayName: "W. Chen",
+  bondLevel: "other",
+  accounts: [],
+  messageCount: 2,
+  latest: null,
+};
+
+const UNPLACED: DirectoryAccount = {
+  channel: "whatsapp",
+  channelUserId: "6591234472@s.whatsapp.net",
+  addresses: ["6591234472", "6591234472@s.whatsapp.net"],
+  displayName: "Rachel Lim",
+  state: "unlinked",
+  personId: null,
+  personName: null,
+  latest: { source: "whatsapp", timestamp: NOW - 7_200, preview: "Are you free Saturday?" },
+  messageCount: 12,
+};
+
+const HELD_BY_ANOTHER: DirectoryAccount = {
+  channel: "telegram",
+  channelUserId: "990014422",
+  addresses: ["990014422"],
+  displayName: "mira_c",
+  state: "linked",
+  personId: "mira",
+  personName: "Mira Chen",
+  latest: { source: "telegram", timestamp: NOW - 3_600, preview: "sent" },
+  messageCount: 4,
+};
+
+/** Whatever a write put on the wire, read back for assertions. */
+interface WriteBody {
+  displayName?: string;
+  bondLevel?: string;
+  channel?: string;
+  channelUserId?: string;
+  transferFrom?: string;
+  from?: string;
+}
+
 interface FetchCall {
   url: string;
   method: string;
+  body?: WriteBody;
 }
 
 function mockApi(
@@ -84,17 +135,54 @@ function mockApi(
     entries?: TimelineEntry[] | "fail";
     nextCursor?: string | null;
     older?: TimelineEntry[];
+    people?: PersonResource[];
+    accounts?: DirectoryAccount[];
+    writes?: "fail";
   } = {},
 ) {
   const calls: FetchCall[] = [];
+  const person = typeof options.person === "object" ? { ...options.person } : { ...PERSON };
   vi.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
     const url = String(input);
-    calls.push({ url, method: (init?.method ?? "GET").toUpperCase() });
-    const json = (body: unknown, status = 200) =>
-      ({ ok: status < 400, status, json: async () => body }) as Response;
+    const method = (init?.method ?? "GET").toUpperCase();
+    const body = (typeof init?.body === "string" ? JSON.parse(init.body) : undefined) as
+      | WriteBody
+      | undefined;
+    calls.push({ url, method, body });
+    const path = new URL(url, "http://localhost").pathname;
+    const json = (payload: unknown, status = 200) =>
+      ({ ok: status < 400, status, json: async () => payload }) as Response;
+
+    if (method !== "GET") {
+      if (options.writes === "fail") return json({ error: "write refused" }, 500);
+      if (path.endsWith("/accounts")) {
+        const held = (options.accounts ?? []).find(
+          (account) =>
+            account.channel === body?.channel && account.channelUserId === body?.channelUserId,
+        );
+        // Compare-and-swap on the current owner: taking an account from another
+        // person needs `transferFrom` naming them exactly.
+        if (held?.state === "linked" && body?.transferFrom !== held.personId) {
+          return json(
+            linkConflict(held, { id: held.personId ?? "", displayName: held.personName ?? "" }),
+            409,
+          );
+        }
+        return json(person);
+      }
+      if (path.endsWith("/merge")) {
+        const into = (options.people ?? []).find((p) => `/api/people/${p.id}/merge` === path);
+        return into ? json(into) : json({ error: "Unknown person" }, 404);
+      }
+      if (method === "PATCH") {
+        if (body?.bondLevel) person.bondLevel = body.bondLevel;
+        return json(person);
+      }
+      return json({ error: "Unknown route" }, 404);
+    }
 
     if (url.includes("/messages")) {
       if (options.entries === "fail") return json({ error: "timeline unavailable" }, 500);
@@ -105,10 +193,18 @@ function mockApi(
         nextCursor: options.nextCursor ?? null,
       });
     }
+    if (url.includes("/api/accounts")) {
+      return json(sliceAccountDirectory(options.accounts ?? []));
+    }
+    if (path === "/api/people") {
+      const listing = options.people ?? [];
+      return json({ people: listing, counts: countPeople(listing) });
+    }
     if (url.includes("/api/people/")) {
       if (options.person === "missing") return json({ error: "Unknown person" }, 404);
       if (options.person === "fail") return json({ error: "person store unavailable" }, 500);
-      return json(options.person ?? PERSON);
+      const merged = (options.people ?? []).find((p) => path === `/api/people/${p.id}`);
+      return json(merged ?? person);
     }
     return json({});
   }) as typeof fetch);
@@ -293,5 +389,113 @@ describe("PersonDetailPage", () => {
     await user.click(screen.getByRole("button", { name: "People" }));
 
     expect(await screen.findByText("people page")).toBeTruthy();
+  });
+});
+
+describe("PersonDetailPage management", () => {
+  // The write half of the dossier: the bond, the accounts that resolve here,
+  // and absorbing a duplicate. Every one of them is a /people verb.
+
+  it("changes the bond with a patch that names only the bond", async () => {
+    const user = userEvent.setup();
+    const calls = mockApi();
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("combobox", { name: "Bond" }));
+    await user.click(await screen.findByRole("option", { name: "Inner circle" }));
+
+    const patch = await waitFor(() => {
+      const call = calls.find((c) => c.method === "PATCH");
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect(patch.url).toBe("/api/people/wei-chen");
+    // An omitted field is one the update leaves alone, so a bond change must
+    // not carry a name and blank it.
+    expect(patch.body).toEqual({ bondLevel: "inner-circle" });
+  });
+
+  it("links an account the directory holds onto this person", async () => {
+    const user = userEvent.setup();
+    const calls = mockApi({ accounts: [UNPLACED] });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("button", { name: "Link account…" }));
+    await user.click(await screen.findByRole("button", { name: /Rachel Lim/ }));
+
+    const link = await waitFor(() => {
+      const call = calls.find((c) => c.url === "/api/people/wei-chen/accounts");
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect(link.method).toBe("POST");
+    // One call, and it names the account by the pair the contract says is its
+    // identity — every address it answers to travels with it.
+    expect(link.body).toEqual({
+      channel: "whatsapp",
+      channelUserId: "6591234472@s.whatsapp.net",
+    });
+  });
+
+  it("names who holds an account, and transfers it only on a second confirmation", async () => {
+    const user = userEvent.setup();
+    const calls = mockApi({ accounts: [HELD_BY_ANOTHER] });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("button", { name: "Link account…" }));
+    await user.click(await screen.findByRole("button", { name: /mira_c/ }));
+
+    // The refusal names the owner rather than reading as a failed write.
+    const confirm = await screen.findByRole("dialog", { name: "Move this account?" });
+    expect(confirm.textContent).toContain("Mira Chen");
+    expect(calls.filter((c) => c.body?.transferFrom)).toHaveLength(0);
+
+    await user.click(within(confirm).getByRole("button", { name: "Move it here" }));
+
+    // A transfer re-attributes the account's whole history, so it is a second
+    // request the guardian asked for by name.
+    await waitFor(() =>
+      expect(calls.find((c) => c.body?.transferFrom)?.body).toEqual({
+        channel: "telegram",
+        channelUserId: "990014422",
+        transferFrom: "mira",
+      }),
+    );
+  });
+
+  it("merges this person into the one picked, and lands on the survivor", async () => {
+    const user = userEvent.setup();
+    const calls = mockApi({ people: [DUPLICATE] });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("button", { name: "Merge into another person…" }));
+    await user.click(await screen.findByRole("button", { name: /W\. Chen/ }));
+
+    const merge = await waitFor(() => {
+      const call = calls.find((c) => c.url.endsWith("/merge"));
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    // The survivor is named in the path and the duplicate in the body, so the
+    // page that had the duplicate open is the one that goes away.
+    expect(merge.url).toBe("/api/people/wei-c/merge");
+    expect(merge.body).toEqual({ from: "wei-chen" });
+    expect(await screen.findByRole("heading", { name: "W. Chen" })).toBeTruthy();
+  });
+
+  it("says a refused write failed rather than showing the change as saved", async () => {
+    const user = userEvent.setup();
+    mockApi({ writes: "fail" });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("combobox", { name: "Bond" }));
+    await user.click(await screen.findByRole("option", { name: "Inner circle" }));
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
   });
 });

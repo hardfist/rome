@@ -33,8 +33,9 @@ import { DirectoryRow, StreamRow, UnknownRow, levelLabelKey } from "@/pages/peop
 // after the page stopped, which is the one thing a live note exists to prevent.
 //
 // What is written here is only what the page does not carry yet: the `⋯` menu
-// and the bulk bar, whose every item is a write, and the writes move onto the
-// /people contract in rome-os/rome#67.
+// and the bulk bar. The page's writes are on the /people contract, and those
+// two are the surfaces still ahead of it — a bulk gesture is N writes with one
+// confirmation, which the contract's verbs do not answer on their own.
 
 const NOW = Math.floor(Date.now() / 1000);
 const MINUTE = 60;
@@ -93,10 +94,12 @@ export function ChannelGlyphSet() {
  * The row menu the design gives every actionable row: a move to each level the
  * row is not already at, then merge.
  *
- * Written here rather than imported, because it is the one piece of the design
- * the page does not carry yet — every item is a write, and the writes move onto
- * the /people contract in rome-os/rome#67. When they land, this comes out and
- * the specimen renders the shipped menu.
+ * Written here rather than imported, because it is a piece of the design the
+ * page does not carry yet. The gestures behind it exist — a level on a person
+ * is `PATCH /api/people/:id`, and the unplaced ends of the ladder are the
+ * account's own verbs — but they reach the page from the row and the dossier
+ * rather than from one menu that enumerates targets. When a menu lands, this
+ * comes out and the specimen renders the shipped one.
  */
 function RowMenu({ row: subject }: { row: PeopleRow }) {
   const { t } = useTranslation("people");
@@ -333,8 +336,9 @@ export function DirectoryDemo() {
           ))}
         </div>
       ))}
-      {/* The bulk bar is the other half of #67: one choice applied to every
-          selected row, so its targets are the intersection across them. */}
+      {/* The bulk bar is still ahead: one choice applied to every selected
+          row, so its targets are the intersection across them — and N writes
+          behind one confirmation, which no single verb answers. */}
       {selected.length > 0 && (
         <div className="mt-2 flex items-center justify-between rounded-8 bg-primary/10 px-3 py-2">
           <span className="text-aux text-foreground">

@@ -12,8 +12,8 @@ import { getApiErrorMessage } from "@/lib/api-error";
 import { fetchJson } from "@/lib/fetch-json";
 import { peopleRows, type PeopleRow } from "./people-model";
 
-// The People page's reads, and nothing else — the writes are still the legacy
-// `/api/persons/*` routes and move in rome-os/rome#67.
+// The People page's reads, and nothing else — the writes are `./writes.ts`,
+// and `./use-writes.ts` is what settles these queries after one lands.
 //
 // Named for the roster rather than for people: `@/hooks/use-people` is the one
 // shared people cache the composer's mention list reads, and these are this
@@ -30,9 +30,13 @@ import { peopleRows, type PeopleRow } from "./people-model";
 // happened to arrive would report no waiting senders whenever placed people
 // filled page one.
 
-const PEOPLE_KEY = "people";
-const ACCOUNTS_KEY = "accounts";
-const TIMELINE_KEY = "person-timeline";
+// The roots every query here is keyed under, exported so a write can invalidate
+// them by prefix rather than restating the variants each read is cached in —
+// which is what makes settling a write independent of how many chips, terms and
+// pages happen to be cached at the time.
+export const PEOPLE_KEY = "people";
+export const ACCOUNTS_KEY = "accounts";
+export const TIMELINE_KEY = "person-timeline";
 
 const ROSTER_POLL_MS = 30_000;
 
@@ -177,6 +181,34 @@ export function usePeopleRoster(params: PeopleRosterParams) {
 }
 
 export type PeopleRoster = ReturnType<typeof usePeopleRoster>;
+
+/**
+ * The accounts a picker can name, as the server answers the term typed.
+ *
+ * Every state, not only the unlinked ones. A picker that hid the accounts
+ * another person already holds would hide the one gesture that can take one
+ * back, and the contract answers that attempt with a conflict the caller
+ * surfaces rather than with a silent re-point.
+ *
+ * Server-side, because the directory is an address book rather than a curated
+ * listing: a filter over the page that happened to load would answer "no such
+ * account" for a contact the mirror holds.
+ */
+export function useAccountSearch(search: string, options: { enabled: boolean }) {
+  const { t } = useTranslation("people");
+  const fallback = t("errors.loadFailedFallback");
+  const term = useDebounced(search.trim(), SEARCH_DEBOUNCE_MS);
+  return useQuery<AccountDirectory>({
+    queryKey: [ACCOUNTS_KEY, "picker", term],
+    enabled: options.enabled,
+    placeholderData: keepPreviousData,
+    queryFn: ({ signal }) => {
+      const query = new URLSearchParams({ includeSilent: "true" });
+      if (term) query.set("q", term);
+      return fetchJson<AccountDirectory>(`/api/accounts?${query.toString()}`, { signal, fallback });
+    },
+  });
+}
 
 /**
  * One person by id — what lets the dossier open a person the roster has not

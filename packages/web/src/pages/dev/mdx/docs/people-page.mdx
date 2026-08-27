@@ -85,19 +85,24 @@ page. A row here exists to get you to a conversation.
 
 The Unknown chip keeps dense rows: channel pill, number or handle, message count,
 preview, and the `⋯` menu. The placement decision runs on that evidence, so all of it
-is on the row rather than a click away. A move updates the row in place and decrements
-the chip's count.
+is on the row rather than a click away. Placing a sender takes it off the view, and
+the chip's count drops because the next read says so.
 
 <Specimen title="Unknown rows">
   <UnknownDemo />
 </Specimen>
 
+Stranger keeps the same dense row and offers `Restore`. A restore is decided on the
+evidence a placement is decided on — what the sender actually sent — so it gets the
+row rather than a roster line with a button on it.
+
 <Invariant>
-  Unknown and Stranger are positions on one ladder. Placing a sender, promoting a
-  friend and dismissing spam are the same gesture — a **move** — so the row's `⋯` menu
-  is generated from its current level rather than written per group.
-  `moveTargetsFor(row)` is the only place that enumerates targets, and the row menu,
-  the bulk bar and the dossier select all read it.
+  Unknown and Stranger are positions on one ladder, and they are still not one
+  gesture. Placing a sender creates a person or links onto one; dismissing is a state
+  the *account* is in, so it names no target and its way back is `restore` rather than
+  a move off a sentinel. The union page generated a row's targets from its level
+  because one verb served them all — the contract has a verb per decision, and a row
+  asks for the one its position admits.
 </Invariant>
 
 ---
@@ -125,6 +130,12 @@ would otherwise have no way back on screen.
 `/people/:personId` is the dossier: identity card with bond select, linked accounts
 as neutral glyph + id pills, `Link account…` and `Merge into…`. The merged timeline
 grouped by day sits below it, and a sticky composer sits at the bottom.
+
+Both pickers offer more than what would succeed. `Link account…` lists the accounts
+another person already holds, because taking one back is a gesture the guardian has
+and the refusal is what makes it explicit. `Merge into…` names the survivor, so the
+person whose page is open is the one absorbed — which is why it ends on the survivor's
+page rather than on a route that now answers 404.
 
 <Specimen title="Dossier">
   <PersonPageDemo />
@@ -157,15 +168,30 @@ would be a second, contradictory color vocabulary on the same row.
 
 ## Writes
 
+Every gesture is a verb of the contract, and the union's single "move" decomposes into
+them: `POST /api/people` places a sender and links the account it came from in one
+request, `POST /api/people/:id/accounts` links onto somebody who already exists,
+`dismiss` and `restore` decide about an account, `POST /api/people/:id/merge` absorbs a
+duplicate, and `PATCH /api/people/:id` changes a bond.
+
 | Rule | Why |
 | --- | --- |
-| Settle by invalidation, never by patching cached rows | Where a row lands is the server's answer, and a hand-merged level disagrees the moment a move implies anything else |
-| A write holds its identities until the cache catches up | `planMove` reads a row's current id shape, so a second write against an identity the first is still reshaping plans from a shape that has already changed |
-| Placing or dismissing fans out over every channel the row stands for | A consolidated WhatsApp contact is one row under both its phone jid and its `@lid` jid, so acting on one would leave the rest to resurface as their own Unknown rows |
+| Settle by invalidation, never by patching cached rows | Where a row lands is the server's answer, and a client that edited its own copy is rendering a guess the next read contradicts — the chip counts are the clearest case, since they describe the whole roster and not the page in hand |
+| A write holds its rows until the refetch lands, not until the request returns | A gesture that reports itself done at the response leaves the row it acted on standing for as long as the read takes, which reads as a write that did nothing |
+| One call covers every address the row stands for | A WhatsApp contact answers to both its phone jid and its `@lid` jid; which of those are one account is the server's answer, given once in `addresses`, so the client names the account and the fold travels with it |
 
-The fan-out is best-effort past the first call: the first call **is** the move and has
-already committed, so a failed follow-up must not report a saved change as a failed
-one.
+The last one is what replaced a client-side fan-out. The union page acted per channel
+and made the follow-up calls best-effort, because the first call had already committed
+and a failed second one must not report a saved change as a failed one. There is no
+follow-up now: the account is one thing, and the write either landed on it or did not.
+
+<Invariant>
+  A transfer is asked for twice. Linking an account another person holds is refused
+  with a `409` naming the holder, and only a request carrying `transferFrom` — that
+  holder, by id — goes through. A transfer re-attributes the account's whole message
+  history, so it is never the side effect of a retry, and the page never re-points an
+  account silently the way the union page did.
+</Invariant>
 
 ---
 
@@ -177,3 +203,6 @@ one.
   from it.
 - Only WhatsApp can send. Other channels appear in the composer's select, disabled,
   until a send path exists.
+- The `⋯` row menu and the bulk bar are drawn in the specimens and not on the page. A
+  bulk gesture is N writes behind one confirmation, and the contract has no verb that
+  answers that — what a partial failure leaves behind has to be decided first.

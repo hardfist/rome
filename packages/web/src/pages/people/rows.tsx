@@ -76,9 +76,9 @@ export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void
  * evidence — which channel, which number, how much they have said — so all of
  * it is on the row rather than a click away.
  *
- * `actions` is whatever gesture the page offers for placing it. The gestures
- * themselves are the write half of this surface (rome-os/rome#67); the row only
- * says where they go.
+ * `actions` is whatever gesture the page offers for the position it is in:
+ * placing it, or taking a dismissal back. The gestures themselves are
+ * `people/triage.tsx`; the row only says where they go.
  */
 export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.ReactNode }) {
   const { t } = useTranslation("people");
@@ -137,8 +137,8 @@ export function DirectoryRow({
   selected?: boolean;
   onOpen?: () => void;
   /** Given, the avatar becomes the selection control. Omitted — as the page
-   *  leaves it until the bulk bar lands (rome-os/rome#67) — the avatar is an
-   *  ornament and the row carries no selection state. */
+   *  leaves it until the bulk bar lands — the avatar is an ornament and the row
+   *  carries no selection state. */
   onToggleSelect?: () => void;
   actions?: React.ReactNode;
 }) {

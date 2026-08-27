@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, CircleAlert } from "lucide-react";
-import { normalizeBondLevel, type TimelineEntry } from "@rome/api-types/identities";
+import type { TimelineEntry } from "@rome/api-types/identities";
 import { formatWhatsAppPhone } from "@rome/api-types/identities";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { PageShell, PageBody } from "@/shell/PageShell";
 import { Avatar } from "./people/avatar";
 import { ChannelPill } from "./people/channel-meta";
 import { clockTime, dayLabel, navigatorLocale, startOfDay } from "./people/format";
-import { levelLabelKey } from "./people/rows";
+import { PersonManagement } from "./people/manage";
 import { usePerson, usePersonTimeline } from "./people/use-roster";
 
 /**
@@ -21,16 +21,16 @@ import { usePerson, usePersonTimeline } from "./people/use-roster";
  * Timeline entries are generic, so a channel Rome learns about later shows up
  * here without a change to this page.
  *
- * A read. `GET /api/people/:id` and `GET /api/people/:id/messages` are the
- * whole page: one request for the person, one for the history across every
- * account they hold. Which stores that history is merged from is the server's
- * business, and a client that merged per-channel reads itself would have to
- * re-derive the ordering the cursor is written against — and would disagree
- * with it at every page boundary.
+ * Two reads own it. `GET /api/people/:id` and `GET /api/people/:id/messages`:
+ * one request for the person, one for the history across every account they
+ * hold. Which stores that history is merged from is the server's business, and
+ * a client that merged per-channel reads itself would have to re-derive the
+ * ordering the cursor is written against — and would disagree with it at every
+ * page boundary.
  *
  * The management gestures the design puts on this card — the bond select, Link
- * account…, Merge into… — are the write half of the surface and land with
- * rome-os/rome#67.
+ * account…, Merge into… — are `people/manage.tsx`, and each settles by
+ * invalidating those reads.
  */
 
 /**
@@ -101,8 +101,6 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
     );
   }
 
-  const level = normalizeBondLevel(person.bondLevel);
-
   return (
     <PageShell>
       <PageBody>
@@ -134,11 +132,13 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
               )}
             </div>
           </div>
-          {/* The stored bond, read: changing it is a write, and the writes move
-              onto this contract in rome-os/rome#67. */}
-          <p className="text-aux text-muted-foreground sm:text-right">
-            {t("detail.bond")}: {t(levelLabelKey(level))}
-          </p>
+          {/* A merge ends with this person gone, so the page that had them open
+              follows the account history to the survivor rather than sitting on
+              a route that now 404s. */}
+          <PersonManagement
+            person={person}
+            onMerged={(survivorId) => navigate(`/people/${encodeURIComponent(survivorId)}`)}
+          />
         </div>
 
         <section>

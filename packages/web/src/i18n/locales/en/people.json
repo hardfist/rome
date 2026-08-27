@@ -75,7 +75,10 @@
     "creating": "Creating…",
     "linkSubmit": "Link",
     "linking": "Linking…",
-    "markingStranger": "Marking…"
+    "markingStranger": "Marking…",
+    "restore": "Restore",
+    "restoring": "Restoring…",
+    "transfer": "Move it here"
   },
   "bulk": {
     "selected": "selected",
@@ -163,16 +166,21 @@
   },
   "createForm": {
     "nameLabel": "Name",
-    "bondLevelLabel": "Bond level",
-    "relationLabel": "Relation",
-    "relationPlaceholder": "How do you know them?"
+    "bondLevelLabel": "Bond level"
   },
   "linkForm": {
     "label": "Link to existing person",
     "selectPlaceholder": "Select a person…"
   },
+  "linkPicker": {
+    "heldBy": "now {{owner}}'s"
+  },
   "strangerConfirm": {
     "title": "Treat {{name}} as a stranger?",
-    "description": "Rome will treat messages from {{name}} as coming from a stranger, and they will no longer appear under {{section}}. You can't undo this from the dashboard."
+    "description": "Rome will treat messages from {{name}} as coming from a stranger, and they will no longer appear under {{section}}. You can restore them from the Stranger view."
+  },
+  "transfer": {
+    "title": "Move this account?",
+    "description": "{{account}} resolves to {{owner}} today. Moving it re-attributes every message on it, and {{owner}} keeps whatever else they hold."
   }
 }

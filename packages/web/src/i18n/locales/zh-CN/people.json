@@ -75,7 +75,10 @@
     "creating": "创建中…",
     "linkSubmit": "关联",
     "linking": "关联中…",
-    "markingStranger": "标记中…"
+    "markingStranger": "标记中…",
+    "restore": "恢复",
+    "restoring": "恢复中…",
+    "transfer": "移到这里"
   },
   "bulk": {
     "selected": "已选择",
@@ -163,16 +166,21 @@
   },
   "createForm": {
     "nameLabel": "姓名",
-    "bondLevelLabel": "亲密度",
-    "relationLabel": "关系",
-    "relationPlaceholder": "你和他们是什么关系？"
+    "bondLevelLabel": "亲密度"
   },
   "linkForm": {
     "label": "关联到已有人物",
     "selectPlaceholder": "选择一位人物…"
   },
+  "linkPicker": {
+    "heldBy": "当前属于 {{owner}}"
+  },
   "strangerConfirm": {
     "title": "将 {{name}} 视为陌生人？",
-    "description": "Rome 会把来自 {{name}} 的消息当作陌生人发来的，并且他们将不再出现在“{{section}}”中。此操作无法在面板中撤销。"
+    "description": "Rome 将把来自 {{name}} 的消息视为陌生人发送，他们也不再出现在{{section}}中。你可以在“陌生人”视图中恢复。"
+  },
+  "transfer": {
+    "title": "移动这个账号？",
+    "description": "{{account}} 目前解析到 {{owner}}。移动后其上的所有消息都会重新归属，{{owner}} 仍保留其余账号。"
   }
 }
