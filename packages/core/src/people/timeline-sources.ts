@@ -208,7 +208,7 @@ export function sentinelLogSource(db: DrizzleDb): TimelineSource {
  * asking about a directory of people must not pay for one read per row.
  */
 export async function timelineAccounts(
-  deps: { whatsAppAccounts: TalkAccounts },
+  deps: { whatsAppAccounts: AddressBook },
   groups: readonly (readonly ChannelMapping[])[],
 ): Promise<TimelineAccount[][]> {
   const channels = new Set(groups.flatMap((group) => group.map((mapping) => mapping.channel)));
@@ -221,9 +221,13 @@ interface ChannelMapping {
   channelUserId: string;
 }
 
-/** Every address a channel folds onto an account, grouped by the account —
- *  the address map read the way the fold needs it, inverted once per request
- *  rather than re-scanned per person.
+/** The listing half of a channel's address book: the accounts, each carrying
+ *  every address it answers to. A separate address map is not asked for — the
+ *  listing already says which addresses are one account. */
+type AddressBook = Omit<TalkAccounts, "listAddresses">;
+
+/** Each channel's accounts, indexed the two ways the fold reads them: which
+ *  account an address belongs to, and every address of that account.
  *
  *  Read only for the channels the mappings name, since a plane costs a full
  *  address-book read. LinkedIn has a plane too but is deliberately absent: it
@@ -231,27 +235,33 @@ interface ChannelMapping {
  *  buy a whole mirror read and change no answer. It joins here when it starts
  *  storing a second addressing. */
 async function readAddressBooks(
-  deps: { whatsAppAccounts: TalkAccounts },
+  deps: { whatsAppAccounts: AddressBook },
   channels: ReadonlySet<string>,
-): Promise<Map<string, AddressBook>> {
-  const planes = new Map<string, TalkAccounts>([["whatsapp", deps.whatsAppAccounts]]);
-  const books = new Map<string, AddressBook>();
+): Promise<Map<string, FoldedBook>> {
+  const planes = new Map<string, AddressBook>([["whatsapp", deps.whatsAppAccounts]]);
+  const books = new Map<string, FoldedBook>();
   for (const [channel, accounts] of planes) {
     if (!channels.has(channel)) continue;
-    const addresses = await accounts.listAddresses();
-    const byAccount = new Map<string, string[]>();
-    for (const [address, accountId] of addresses) {
-      const folded = byAccount.get(accountId);
-      if (folded) folded.push(address);
-      else byAccount.set(accountId, [address]);
+    // One page big enough to hold the listing: its order is stable but the
+    // listing under it is not, so walking cursors across a live mirror would
+    // skip or repeat an account as an inbound message reordered it.
+    const { accounts: listing } = await accounts.listAccounts({ limit: WHOLE_LISTING });
+    const of = new Map<string, string>();
+    const folded = new Map<string, string[]>();
+    for (const account of listing) {
+      // The id among them, whether or not the channel spelled it out as an
+      // address: it is a form the account answers to.
+      const addresses = [...new Set([account.id as string, ...account.addresses])];
+      folded.set(account.id, addresses);
+      for (const address of addresses) of.set(address, account.id);
     }
-    books.set(channel, { of: addresses, folded: byAccount });
+    books.set(channel, { of, folded });
   }
   return books;
 }
 
-/** One channel's address map, and the same map read the other way round. */
-interface AddressBook {
+/** One channel's listing, indexed by address and by account. */
+interface FoldedBook {
   /** Which account each address belongs to. */
   of: Map<string, string>;
   /** Every address of each account. */
@@ -259,7 +269,7 @@ interface AddressBook {
 }
 
 function foldAccounts(
-  books: Map<string, AddressBook>,
+  books: Map<string, FoldedBook>,
   mappings: readonly ChannelMapping[],
 ): TimelineAccount[] {
   const byAccount = new Map<string, TimelineAccount>();
@@ -275,6 +285,10 @@ function foldAccounts(
   }
   return [...byAccount.values()];
 }
+
+/** One page big enough to hold any listing — what `TalkAccounts.listAccounts`
+ *  says to ask for when a caller needs every account exactly once. */
+const WHOLE_LISTING = Number.MAX_SAFE_INTEGER;
 
 /** The line a stored agent message renders as: its text parts, joined.
  *  Non-text parts (cards, recaps, errors) carry no conversation, and content

@@ -61,9 +61,18 @@ export function mirrorRegistry<T>(deps: {
   return { whatsapp: deps.whatsAppAccounts, linkedin: deps.linkedInAccounts };
 }
 
-/** A channel that answers both halves of its address book: who it can reach,
- *  and what was last said to each of them. */
-export type MirrorPlane = TalkAccounts & TalkAccountActivity;
+/**
+ * A channel that answers both halves of its address book: who it can reach,
+ * and what was last said to each of them.
+ *
+ * The listing half is read as the listing gives it — each account carrying its
+ * own addressing set — so the whole address book arrives as accounts rather
+ * than as a map of addresses a caller has to invert back into them. A separate
+ * address map is deliberately not part of what a plane owes here: it is a
+ * second answer to a question the listing already answers, and two sources of
+ * one truth is how they drift.
+ */
+export type MirrorPlane = Omit<TalkAccounts, "listAddresses"> & TalkAccountActivity;
 
 export type MirrorPlanes = Readonly<Record<string, MirrorPlane>>;
 
@@ -234,28 +243,16 @@ async function readPlane(
 ): Promise<{ accounts: MirrorAccount[]; byAddress: Map<string, MirrorAccount> }> {
   // Every read this channel owes, issued in one batch so the plane serves them
   // all from a single fold of its address book. The stored addresses are
-  // resolved without waiting to learn which of them the address map already
-  // covers: a channel can accept an address it stores no row for — LinkedIn
-  // derives a member id from a profile URL naming it — and asking after the map
+  // resolved without waiting to learn which of them the listing already covers:
+  // a channel can accept an address it stores no row for — LinkedIn derives a
+  // member id from a profile URL naming it — and asking after the listing
   // arrived would fall outside the shared read and cost a second fold of the
   // whole address book.
-  const [listing, activity, addresses, resolved] = await Promise.all([
+  const [listing, activity, resolved] = await Promise.all([
     plane.listAccounts({ limit: WHOLE_LISTING }),
     plane.listActivity(),
-    plane.listAddresses(),
     Promise.all(stored.map((address) => plane.resolve(address.channelUserId))),
   ]);
-
-  // The addressing set of each account, which is the address map read the other
-  // way round. An account carries all of them because a search reads them: an
-  // omitted address is a contact the guardian cannot reach by the phone number
-  // they know.
-  const aliasesOf = new Map<string, string[]>();
-  for (const [address, accountId] of addresses) {
-    const group = aliasesOf.get(accountId);
-    if (group) group.push(address);
-    else aliasesOf.set(accountId, [address]);
-  }
 
   const accounts: MirrorAccount[] = [];
   const byAddress = new Map<string, MirrorAccount>();
@@ -265,7 +262,13 @@ async function readPlane(
     const mirrored: MirrorAccount = {
       channel,
       channelUserId: account.id,
-      aliases: (aliasesOf.get(account.id) ?? [account.id]).sort(compareCodePoints),
+      // The account's own addressing set, as the channel gave it. An account
+      // carries all of them because a search reads them: an omitted address is
+      // a contact the guardian cannot reach by the phone number they know. An
+      // account the channel holds no address for still answers to its id.
+      aliases: (account.addresses.length > 0 ? [...account.addresses] : [account.id]).sort(
+        compareCodePoints,
+      ),
       name: account.name,
       latest:
         seen == null
@@ -278,12 +281,12 @@ async function readPlane(
     for (const alias of mirrored.aliases) byAddress.set(addressKey(channel, alias), mirrored);
   }
 
-  // A stored address the channel's address map did not cover. Left unfolded, a
-  // mapping written in that form is a second account for someone the caller
-  // already lists, and half their history hangs off it. The address stays as
-  // the caller gave it: this is the fold, not a new alias to publish.
+  // A stored address no listed account named. Left unfolded, a mapping written
+  // in that form is a second account for someone the caller already lists, and
+  // half their history hangs off it. The address stays as the caller gave it:
+  // this is the fold, not a new alias to publish.
   stored.forEach((address, i) => {
-    if (addresses.has(address.channelUserId)) return;
+    if (byAddress.has(addressKey(channel, address.channelUserId))) return;
     const found = resolved[i];
     const account = found && byId.get(found.id);
     if (account) byAddress.set(addressKey(channel, address.channelUserId), account);
