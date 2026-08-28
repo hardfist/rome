@@ -4,21 +4,9 @@
  * channel can reach, and which of the identifiers a channel hands out name one
  * and the same account.
  *
- * The four invariants below are the contract. The types cannot carry them, and
- * every implementation owes all four:
- *
- * - **I1 Uniqueness.** Exactly one {@link Account} per real account. The same
- *   `id` means the same account. Callers never fold aliases themselves.
- * - **I2 Stability.** `id` does not change for the life of the account — not
- *   across a restart, a re-sync, a message arriving on a different addressing,
- *   or a change to any identifier the account is reachable on.
- * - **I3 Opacity.** Callers never parse or construct an `id`. This is what lets
- *   a channel change its canonical form later without touching a consumer.
- * - **I4 Total resolution.** Every identifier the channel can receive a message
- *   on resolves to that account's `id`.
- *
- * An account answers *who*. What happened — a last message, a count, a preview
- * — is a separate read, keyed by {@link AccountId}, and does not belong here.
+ * An account answers *who*. What was said to it — a last message, a count, a
+ * preview — is a separate read over the same addresses, and it belongs to
+ * `Messages` (messages.ts) rather than here.
  */
 
 /** Opaque provider-owned account address. Callers may persist and round-trip
@@ -27,6 +15,19 @@ export type AccountId = string & { readonly __brand: "AccountId" };
 
 export interface Account {
   id: AccountId;
+  /**
+   * Every address the account answers to, `id` among them.
+   *
+   * The addressing set a channel folds onto one account: a WhatsApp contact
+   * answers to both a phone JID and a `@lid` JID, and history hangs off
+   * either. A caller that has to show or match every form an account can be
+   * reached at reads them here rather than asking the channel a second time.
+   *
+   * The addresses the channel holds, which is not every address it accepts. A
+   * form absent here may still resolve — a LinkedIn profile URL naming a
+   * member id — and {@link Accounts.resolve} is what takes it.
+   */
+  addresses: string[];
   /**
    * What the platform calls the account, or null when it holds no name for it.
    *
@@ -47,6 +48,46 @@ export interface Account {
   identifiers: Record<string, string>;
 }
 
+/**
+ * Who a channel can reach.
+ *
+ * The four invariants below are the contract. The types cannot carry them, and
+ * every implementation owes all four:
+ *
+ * - **I1 Uniqueness.** Exactly one {@link Account} per real account. The same
+ *   `id` means the same account. Callers never fold aliases themselves.
+ * - **I2 Stability.** `id` does not change for the life of the account — not
+ *   across a restart, a re-sync, a message arriving on a different addressing,
+ *   or a change to any identifier the account is reachable on.
+ * - **I3 Opacity.** Callers never parse or construct an `id`. This is what lets
+ *   a channel change its canonical form later without touching a consumer.
+ * - **I4 Total resolution.** Every identifier the channel can receive a message
+ *   on resolves to that account's `id`.
+ */
+export interface Accounts {
+  /**
+   * One page of the channel's accounts, in a stable order. `query` matches the
+   * name and the identifier values. `cursor` is opaque and comes from a prior
+   * page. A missing `nextCursor` means the listing is exhausted.
+   *
+   * The order is stable, the listing underneath it is not. A channel may order
+   * by activity, so an account can move between two pages and be skipped or
+   * repeated. A caller that needs every account exactly once asks for one page
+   * large enough to hold the listing.
+   */
+  list(input: {
+    query?: string;
+    cursor?: string;
+    limit: number;
+  }): Promise<{ accounts: Account[]; nextCursor?: string }>;
+
+  /** The account an address belongs to, or null. Accepts any address the
+   *  channel can receive on — and an {@link AccountId}, which round-trips. */
+  resolve(address: string): Promise<Account | null>;
+}
+
+/** The address book behind the account directory and the fold. Every
+ *  implementation owes {@link Accounts}' four invariants. */
 export interface TalkAccounts {
   /**
    * One page of the channel's accounts, in a stable order. `query` matches the

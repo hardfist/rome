@@ -205,7 +205,11 @@ function toAccount(id: AccountId, group: WhatsAppContactRow[]): Account {
     pick((row) => row.verifiedName) ??
     pick((row) => row.chatName);
 
-  return { id, name, identifiers };
+  // The id first: it is derived from the account's digits, so it is an address
+  // the account answers to whether or not a row spells it out.
+  const addresses = [...new Set([id as string, ...group.flatMap((row) => row.aliases)])];
+
+  return { id, addresses, name, identifiers };
 }
 
 /** Every index key the account answers to, including its own id. */
