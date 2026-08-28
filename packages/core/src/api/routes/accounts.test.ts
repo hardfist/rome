@@ -138,14 +138,29 @@ describe("Accounts API", () => {
     }
   });
 
-  it("previews the newest thing on a stream row", async () => {
-    const tina = find(await fetchStream(), `whatsapp:${TALKING_JID}`)!;
+  it("previews the newest thing on a stream row, and says nothing else about it", async () => {
+    const stream = await fetchStream();
+    const tina = find(stream, `whatsapp:${TALKING_JID}`)!;
     expect(tina.latest).toEqual({
       source: "whatsapp",
       timestamp: Math.floor(new Date("2026-08-17T10:00:00Z").getTime() / 1000),
       preview: "hello from tina",
     });
-    expect(tina.messageCount).toBeGreaterThan(0);
+    // The preview is the whole of what a stream row says about a history. No
+    // count rides beside it: none is read on this surface, so a client cannot
+    // start rendering one.
+    for (const account of stream.accounts) {
+      expect(Object.keys(account).sort()).toEqual([
+        "addresses",
+        "channel",
+        "channelUserId",
+        "displayName",
+        "latest",
+        "personId",
+        "personName",
+        "state",
+      ]);
+    }
   });
 
   it("keeps an account nothing has happened on off the stream", async () => {

@@ -92,8 +92,12 @@ export interface PeopleRow {
    * Only the stream renders it.
    */
   latest: IdentityDynamic | null;
-  /** How much is on record for the row. Zero on a directory account row, for
-   *  the reason {@link PeopleRow.latest} is null there. */
+  /**
+   * How much is on record for the row. Zero on every account row: a person's
+   * count is the length of the timeline their dossier pages, and neither
+   * account read answers that question — the directory carries no activity at
+   * all, and the stream carries a preview and nothing beside it.
+   */
   messageCount: number;
 }
 
@@ -107,9 +111,7 @@ export interface PeopleRow {
 function accountActivity(
   account: DirectoryAccount | StreamAccount,
 ): Pick<PeopleRow, "latest" | "messageCount"> {
-  return "latest" in account
-    ? { latest: account.latest, messageCount: account.messageCount }
-    : { latest: null, messageCount: 0 };
+  return { latest: "latest" in account ? account.latest : null, messageCount: 0 };
 }
 
 /**

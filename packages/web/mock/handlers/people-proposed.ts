@@ -55,8 +55,7 @@ import { buildTimeline, proposedApiStore } from "./people";
  * `accountPresentation`, and no /api/people route addresses the sentinel.
  */
 
-const { persons, sentinelSenders, whatsappContacts, ownerOf, nextPersonId, summarize } =
-  proposedApiStore;
+const { persons, sentinelSenders, whatsappContacts, ownerOf, nextPersonId } = proposedApiStore;
 
 type PersonFixture = (typeof persons)[number];
 type AccountRef = { channel: string; channelUserId: string };
@@ -71,15 +70,6 @@ function accountDisplayName(channel: string, channelUserId: string): string {
     (s) => s.channel === channel && s.channelUserId === channelUserId,
   );
   return (contact ? whatsAppDisplayName(contact) : null) ?? sender?.displayName ?? channelUserId;
-}
-
-function messageCountFor(channel: string, channelUserId: string): number {
-  if (channel === "whatsapp" && whatsappContacts.some((c) => c.jid === channelUserId)) {
-    return summarize(channelUserId).messageCount;
-  }
-  return sentinelSenders
-    .filter((s) => s.channel === channel && s.channelUserId === channelUserId)
-    .reduce((total, s) => total + (s.reply ? 2 : 1), 0);
 }
 
 function personResource(person: PersonFixture): PersonResource {
@@ -118,13 +108,7 @@ function streamRow(ref: AccountRef): StreamAccount | null {
   const latest = latestDynamic(
     buildTimeline(channelIdentityId(ref.channel, ref.channelUserId)) ?? [],
   );
-  return latest == null
-    ? null
-    : {
-        ...directoryRow(ref),
-        latest,
-        messageCount: messageCountFor(ref.channel, ref.channelUserId),
-      };
+  return latest == null ? null : { ...directoryRow(ref), latest };
 }
 
 /** Every account the three sources name, once each — what both account reads

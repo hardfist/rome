@@ -14,22 +14,18 @@
 
 import {
   accountPresentation,
+  latestDynamic,
   type DirectoryAccount,
   type StreamAccount,
 } from "@rome/api-types/people";
 import { compareCodePoints } from "@rome/api-types/identities";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import type { AccountNames } from "../channels/account-names.js";
-import {
-  foldAccountRecords,
-  foldAccounts,
-  mirrorRegistry,
-  type AccountFold,
-  type AccountRecords,
-  type MirrorPlane,
-} from "../channels/account-fold.js";
+import { foldAccounts, mirrorRegistry, type MirrorPlane } from "../channels/account-fold.js";
+import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
+import { latestPerAccount, personMessageStores } from "./message-stores.js";
 
 export interface AccountDirectoryDeps {
   whatsAppAccounts: MirrorPlane;
@@ -37,6 +33,9 @@ export interface AccountDirectoryDeps {
   personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings">;
   sentinelLogRepo: Pick<SentinelLogRepository, "listSenderActivity">;
   accountNames: Pick<AccountNames, "displayNames">;
+  /** Where the message stores live. Read by the stream alone — the contacts
+   *  list never reaches a history. */
+  db: DrizzleDb;
 }
 
 /** The link an account carries, before {@link accountPresentation} decides how
@@ -64,7 +63,7 @@ interface AccountLink {
 export async function readAccountDirectory(
   deps: AccountDirectoryDeps,
 ): Promise<DirectoryAccount[]> {
-  return (await observeAccounts(deps, { activity: false })).accounts;
+  return observeAccounts(deps);
 }
 
 /**
@@ -76,14 +75,26 @@ export async function readAccountDirectory(
  * and without the accounts that have none. An address-book contact nobody has
  * ever heard from has no position in an order made of timestamps, so it is
  * absent rather than listed last.
+ *
+ * The dynamic comes from the message stores, claimed in the precedence
+ * `personMessageStores` states — the stores and the order a person's timeline
+ * is read from. So a row previews the entry the page beneath it opens on, and
+ * being on the stream at all means those stores answered something: silence is
+ * `latest` answering nothing rather than a flag any producer sets.
+ *
+ * One round of reads, not one per row: every account is asked about before any
+ * answer is awaited, so each store serves the whole stream in a single pass.
  */
 export async function readAccountStream(deps: AccountDirectoryDeps): Promise<StreamAccount[]> {
-  const { accounts, fold } = await observeAccounts(deps, { activity: true });
-  return accounts.flatMap((account) => {
-    const record = fold.recordFor(account.channel, account.channelUserId);
-    return record.latest == null
-      ? []
-      : [{ ...account, latest: record.latest, messageCount: record.messageCount }];
+  const accounts = await observeAccounts(deps);
+  const latest = await latestPerAccount(
+    personMessageStores(deps),
+    accounts.map(({ channel, addresses }) => ({ channel, addresses })),
+  );
+  return accounts.flatMap((account, i) => {
+    const newest = latest[i];
+    const dynamic = latestDynamic(newest ? [newest] : []);
+    return dynamic === null ? [] : [{ ...account, latest: dynamic }];
   });
 }
 
@@ -91,26 +102,15 @@ export async function readAccountStream(deps: AccountDirectoryDeps): Promise<Str
  * Which accounts there are, what each is called, and who holds it — the join
  * both reads share, so the two can never disagree about which accounts exist.
  *
- * `activity` decides how much is read, not what is answered: with it the fold
- * carries each account's history and the caller can ask, without it no message
- * store is touched at all.
+ * No history is read here, for either caller. What each account last did is the
+ * stream's own second read, over the message stores.
  */
-async function observeAccounts(
-  deps: AccountDirectoryDeps,
-  options: { activity: true },
-): Promise<{ accounts: DirectoryAccount[]; fold: AccountRecords }>;
-async function observeAccounts(
-  deps: AccountDirectoryDeps,
-  options: { activity: false },
-): Promise<{ accounts: DirectoryAccount[]; fold: AccountFold }>;
-async function observeAccounts(
-  deps: AccountDirectoryDeps,
-  options: { activity: boolean },
-): Promise<{ accounts: DirectoryAccount[]; fold: AccountFold }> {
+async function observeAccounts(deps: AccountDirectoryDeps): Promise<DirectoryAccount[]> {
   const [senders, persons] = await Promise.all([
     // The triage record, for the senders it is the only source of: a channel
     // Rome mirrors no address book for has no other row saying the account
-    // exists. What each of them said is read off this only by the stream.
+    // exists. Only that it saw them is read here; what they said is a message
+    // store's answer.
     deps.sentinelLogRepo.listSenderActivity(),
     // One statement, so an account moving between two people mid-read cannot
     // land under both of them.
@@ -120,10 +120,7 @@ async function observeAccounts(
   const mappings = persons.flatMap((person) =>
     person.channelMappings.map((mapping) => ({ ...mapping, person })),
   );
-  const stored = [...senders, ...mappings];
-  const fold = options.activity
-    ? await foldAccountRecords(mirrorRegistry(deps), { senders, stored })
-    : await foldAccounts(mirrorRegistry(deps), { stored });
+  const fold = await foldAccounts(mirrorRegistry(deps), { stored: [...senders, ...mappings] });
 
   /** Who holds each account, decided once before any row is built. */
   const linkOf = new Map<string, AccountLink>();
@@ -166,14 +163,11 @@ async function observeAccounts(
   // and only where a mirror left a name unanswered.
   const names = await deps.accountNames.displayNames(rows.map(([, account]) => account));
 
-  return {
-    fold,
-    accounts: rows.map(([key, account], i) => ({
-      ...account,
-      displayName: names[i],
-      ...accountPresentation(linkOf.get(key)),
-    })),
-  };
+  return rows.map(([key, account], i) => ({
+    ...account,
+    displayName: names[i],
+    ...accountPresentation(linkOf.get(key)),
+  }));
 }
 
 /**

@@ -217,15 +217,16 @@ export interface DirectoryAccount {
  * absent rather than present with an empty preview.
  */
 export interface StreamAccount extends DirectoryAccount {
-  /** The newest thing on record for this account. */
-  latest: AccountDynamic;
   /**
-   * Every record the producers hold for this account — not every line a
-   * timeline renders. A reaction counts, and so does a message Rome sent, so
-   * this is not the length of a {@link TimelinePage} and a client that treats
-   * it as one will disagree with the timeline it paged.
+   * The newest thing on record for this account, which is exactly the first
+   * entry of the {@link TimelinePage} this row opens onto.
+   *
+   * The one message-derived fact either account surface carries. How much is
+   * behind it is deliberately not here: a count is a second question about the
+   * same history, asked of every row of a whole listing, and a row that showed
+   * one would be reporting a number nothing beneath it renders.
    */
-  messageCount: number;
+  latest: AccountDynamic;
 }
 
 /** How many accounts sit in each state. */
