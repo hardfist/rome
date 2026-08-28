@@ -7,12 +7,27 @@
 // reaches them at. Which of them fold together is the channel's own answer,
 // read once through `AccountFold` (../channels/account-fold.ts), so nothing
 // here is channel-specific and adding a mirror changes nothing in this file.
+//
+// Two reads, because the two surfaces ask two questions — "who does Rome know"
+// and "who has something new". They fold the same address books to decide which
+// addressings are one account, and only the stream goes on to read a history.
 
-import { accountPresentation, type DirectoryAccount } from "@rome/api-types/people";
+import {
+  accountPresentation,
+  type DirectoryAccount,
+  type StreamAccount,
+} from "@rome/api-types/people";
 import { compareCodePoints } from "@rome/api-types/identities";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import type { AccountNames } from "../channels/account-names.js";
-import { foldAccounts, mirrorRegistry, type MirrorPlane } from "../channels/account-fold.js";
+import {
+  foldAccountRecords,
+  foldAccounts,
+  mirrorRegistry,
+  type AccountFold,
+  type AccountRecords,
+  type MirrorPlane,
+} from "../channels/account-fold.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 
@@ -39,11 +54,63 @@ interface AccountLink {
  * account needs every address book entire, and an account past a channel's own
  * cutoff is one the guardian cannot find and no count includes. The cost is one
  * read of each address book for the fold and one more to name what it found.
+ *
+ * A contacts list's rows: who each account is, and nothing about what anyone
+ * said. No message store is read — not a mirror's history and not the triage
+ * record's — because the directory orders by name and previews nothing, so
+ * every message-derived fact would be work no reader of this read ever renders.
+ * {@link readAccountStream} is the read that does.
  */
 export async function readAccountDirectory(
   deps: AccountDirectoryDeps,
 ): Promise<DirectoryAccount[]> {
+  return (await observeAccounts(deps, { activity: false })).accounts;
+}
+
+/**
+ * Every account something has happened on, unordered and unfiltered — the whole
+ * stream a page is cut out of (`sliceAccountStream`).
+ *
+ * The same accounts as {@link readAccountDirectory} over the same sources,
+ * projected the other way: with the dynamic the stream orders and previews by,
+ * and without the accounts that have none. An address-book contact nobody has
+ * ever heard from has no position in an order made of timestamps, so it is
+ * absent rather than listed last.
+ */
+export async function readAccountStream(deps: AccountDirectoryDeps): Promise<StreamAccount[]> {
+  const { accounts, fold } = await observeAccounts(deps, { activity: true });
+  return accounts.flatMap((account) => {
+    const record = fold.recordFor(account.channel, account.channelUserId);
+    return record.latest == null
+      ? []
+      : [{ ...account, latest: record.latest, messageCount: record.messageCount }];
+  });
+}
+
+/**
+ * Which accounts there are, what each is called, and who holds it — the join
+ * both reads share, so the two can never disagree about which accounts exist.
+ *
+ * `activity` decides how much is read, not what is answered: with it the fold
+ * carries each account's history and the caller can ask, without it no message
+ * store is touched at all.
+ */
+async function observeAccounts(
+  deps: AccountDirectoryDeps,
+  options: { activity: true },
+): Promise<{ accounts: DirectoryAccount[]; fold: AccountRecords }>;
+async function observeAccounts(
+  deps: AccountDirectoryDeps,
+  options: { activity: false },
+): Promise<{ accounts: DirectoryAccount[]; fold: AccountFold }>;
+async function observeAccounts(
+  deps: AccountDirectoryDeps,
+  options: { activity: boolean },
+): Promise<{ accounts: DirectoryAccount[]; fold: AccountFold }> {
   const [senders, persons] = await Promise.all([
+    // The triage record, for the senders it is the only source of: a channel
+    // Rome mirrors no address book for has no other row saying the account
+    // exists. What each of them said is read off this only by the stream.
     deps.sentinelLogRepo.listSenderActivity(),
     // One statement, so an account moving between two people mid-read cannot
     // land under both of them.
@@ -53,10 +120,10 @@ export async function readAccountDirectory(
   const mappings = persons.flatMap((person) =>
     person.channelMappings.map((mapping) => ({ ...mapping, person })),
   );
-  const fold = await foldAccounts(mirrorRegistry(deps), {
-    senders,
-    stored: [...senders, ...mappings],
-  });
+  const stored = [...senders, ...mappings];
+  const fold = options.activity
+    ? await foldAccountRecords(mirrorRegistry(deps), { senders, stored })
+    : await foldAccounts(mirrorRegistry(deps), { stored });
 
   /** Who holds each account, decided once before any row is built. */
   const linkOf = new Map<string, AccountLink>();
@@ -99,12 +166,14 @@ export async function readAccountDirectory(
   // and only where a mirror left a name unanswered.
   const names = await deps.accountNames.displayNames(rows.map(([, account]) => account));
 
-  return rows.map(([key, account], i) => ({
-    ...account,
-    displayName: names[i],
-    ...accountPresentation(linkOf.get(key)),
-    ...fold.recordFor(account.channel, account.channelUserId),
-  }));
+  return {
+    fold,
+    accounts: rows.map(([key, account], i) => ({
+      ...account,
+      displayName: names[i],
+      ...accountPresentation(linkOf.get(key)),
+    })),
+  };
 }
 
 /**

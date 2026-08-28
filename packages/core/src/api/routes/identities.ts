@@ -16,7 +16,7 @@ import {
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import {
   addressKey,
-  foldAccounts,
+  foldAccountRecords,
   mirrorRegistry,
   newer,
   type AccountRecord,
@@ -88,7 +88,7 @@ async function buildIdentityUnion(deps: ApiDeps): Promise<IdentityRow[]> {
   ]);
   const persons = unsorted.sort((a, b) => compareCodePoints(a.id, b.id));
 
-  const fold = await foldAccounts(mirrorRegistry<MirrorPlane>(deps), {
+  const fold = await foldAccountRecords(mirrorRegistry<MirrorPlane>(deps), {
     senders,
     stored: [...senders, ...persons.flatMap((person) => person.channelMappings)],
   });

@@ -46,8 +46,6 @@ const ACCOUNT: DirectoryAccount = {
   state: "dismissed",
   personId: null,
   personName: null,
-  latest: null,
-  messageCount: 12,
 };
 
 const REF = { channel: "whatsapp", channelUserId: "6591234472@s.whatsapp.net" };

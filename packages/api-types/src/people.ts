@@ -5,6 +5,7 @@
 //   GET    /api/people/:id          -> PersonResource
 //   GET    /api/people/:id/messages -> TimelinePage
 //   GET    /api/accounts            -> AccountDirectory
+//   GET    /api/accounts/stream     -> AccountStream
 //   POST   /api/people              -> PersonResource (201) | LinkConflict (409)
 //   POST   /api/people/:id/accounts -> PersonResource | LinkConflict (409)
 //   DELETE /api/people/:id/accounts/:channel/:channelUserId -> PersonResource
@@ -29,9 +30,19 @@
 // opens, and a cursor written against one has to name a position in the
 // other. A second definition of either is a page boundary the two ends
 // disagree about.
+//
+// The account read is two reads, because two surfaces ask two questions. The
+// directory is a contacts list: every account, ordered by name, carrying
+// nothing about what anyone said — it is where a guardian looks someone up.
+// The stream is the recents surface: ordered by what happened last, carrying
+// the line to preview, and it only ever holds accounts something has happened
+// on. Each has its own row shape and its own cursor, so neither pays for the
+// other's fields and neither order can be resumed with the other's position.
 
 import {
   ASSIGNABLE_BOND_LEVELS,
+  compareCodePoints,
+  compareDisplayNames,
   compareIdentityCursors,
   encodeIdentityCursor,
   identityCursorOf,
@@ -165,6 +176,11 @@ export function accountPresentation(
  * `channel` and `channelUserId` are its identity — the pair a link, a dismissal
  * or a timeline read names. {@link accountRef} renders the pair as the single
  * token a key or a path segment needs.
+ *
+ * A contacts list's row, so it carries who the account is and nothing about
+ * what it has done — not a preview, not a count, not even whether there is
+ * anything to count. {@link StreamAccount} is the same account on the recents
+ * surface, where the activity is the point.
  */
 export interface DirectoryAccount {
   channel: string;
@@ -190,8 +206,19 @@ export interface DirectoryAccount {
   /** Never the stranger sentinel's id — see {@link accountPresentation}. */
   personId: string | null;
   personName: string | null;
-  /** The newest thing on record for this account, or null when nothing is. */
-  latest: AccountDynamic | null;
+}
+
+/**
+ * One account on the stream: the directory's account, plus the activity the
+ * stream orders and previews by.
+ *
+ * `latest` is never null. The stream is the recents surface and only carries
+ * accounts something has happened on, so an account with nothing on record is
+ * absent rather than present with an empty preview.
+ */
+export interface StreamAccount extends DirectoryAccount {
+  /** The newest thing on record for this account. */
+  latest: AccountDynamic;
   /**
    * Every record the producers hold for this account — not every line a
    * timeline renders. A reaction counts, and so does a message Rome sent, so
@@ -201,41 +228,46 @@ export interface DirectoryAccount {
   messageCount: number;
 }
 
-/**
- * An account with nothing on record that nobody has decided about: a synced
- * address-book contact and no more.
- *
- * Derived rather than carried, so no producer can report an account as silent
- * while its own `latest` says otherwise. A link or a dismissal is a decision
- * the guardian made about the account, and a decided account is never held
- * back — the directory's toggle hides the address book, not the guardian's own
- * work.
- */
-export function isSilentAccount(account: DirectoryAccount): boolean {
-  return account.latest === null && account.state === "unlinked";
-}
-
 /** How many accounts sit in each state. */
 export interface AccountCounts extends Record<AccountState, number> {}
 
 /**
- * One page of the account directory, newest activity first.
+ * One page of the account directory, by display name.
  *
- * `counts` and `silentTotal` describe the whole directory the query and the
- * silent toggle admit, never the page — so every number a client renders is the
- * server's, and no chip collapses as the client pages.
+ * `counts` describes the whole directory the query admits, never the page — so
+ * every number a client renders is the server's, and no chip collapses as the
+ * client pages.
  */
 export interface AccountDirectory {
   accounts: DirectoryAccount[];
   /** Opaque, and null on the last page. */
   nextCursor: string | null;
-  /** Per state, over everything the query and the silent toggle admit and
-   *  before `state` narrows the page — so each chip's number is the size of the
-   *  listing that chip shows. */
+  /**
+   * Per state, over everything the query admits and before `state` narrows the
+   * page — so each chip's number is the size of the listing that chip shows.
+   *
+   * Every account, the whole mirrored address book included: the directory is
+   * a contacts list and holds nothing back, so "unlinked" here counts everyone
+   * Rome has not placed rather than the senders waiting on a decision. The
+   * stream's own counts answer that narrower question, over the accounts
+   * something has actually happened on.
+   */
   counts: AccountCounts;
-  /** Every matching silent account, whether or not the toggle let them onto the
-   *  page — the number the toggle itself offers. */
-  silentTotal: number;
+}
+
+/**
+ * One page of the account stream, newest activity first.
+ *
+ * `counts` describes every account with activity the query admits, before
+ * `state` narrows the page — which is what makes the Unknown chip's number the
+ * senders actually waiting on a decision rather than the size of an address
+ * book.
+ */
+export interface AccountStream {
+  accounts: StreamAccount[];
+  /** Opaque, and null on the last page. */
+  nextCursor: string | null;
+  counts: AccountCounts;
 }
 
 /**
@@ -271,34 +303,65 @@ export function accountMatchesQuery(account: DirectoryAccount, query: string): b
 }
 
 /**
- * Where one account sits in the directory's order: the tuple the ordering
- * reads, and nothing else. A cursor carries this rather than a ref, so resuming
- * needs a position rather than an account that still exists.
+ * Where one account sits in the directory's order: the name it is filed under,
+ * and its ref to settle a tie.
  *
- * The identity stream's position, over an account's ref — one activity order
- * and one encoding of it, so the reasons it is a tuple rather than a row id and
- * the reasons every part is escaped hold in one place
- * ({@link encodeIdentityCursor}) rather than two that can be fixed apart.
+ * Not the stream's tuple. The directory is a contacts list — ordered by name,
+ * carrying no activity at all — so a cursor naming a timestamp would name a
+ * position this order does not have, and a page boundary the two ends of the
+ * cursor disagree about.
+ *
+ * A position rather than a row id: between two requests an account is linked,
+ * dismissed or renamed, and a cursor that had to find that row again would
+ * answer the next page empty and truncate the listing.
  */
-export type AccountCursor = IdentityCursor;
-
-export const compareAccountCursors = compareIdentityCursors;
-export const encodeAccountCursor = encodeIdentityCursor;
-export const parseAccountCursor = parseIdentityCursor;
+export interface AccountCursor {
+  displayName: string;
+  /** {@link accountRef} of the account the page ended on. */
+  ref: string;
+}
 
 export function accountCursorOf(account: DirectoryAccount): AccountCursor {
-  return {
-    timestamp: account.latest?.timestamp ?? null,
-    displayName: account.displayName,
-    id: accountRef(account),
-  };
+  return { displayName: account.displayName, ref: accountRef(account) };
 }
 
 /**
- * The directory's order: newest activity first, accounts that have never done
- * anything last, ties broken by name and then ref so the sequence is total —
- * which is what lets a cursor resume it.
+ * The directory's order: by display name, ties broken by ref so the sequence is
+ * total — which is what lets a cursor resume it.
+ *
+ * {@link compareDisplayNames} rather than a collation, for the reason it
+ * states: the dashboard's mock orders in a browser and the route orders in
+ * Node, and a cursor written by one is read by the other.
  */
+export function compareAccountCursors(a: AccountCursor, b: AccountCursor): number {
+  const byName = compareDisplayNames(a.displayName, b.displayName);
+  return byName !== 0 ? byName : compareCodePoints(a.ref, b.ref);
+}
+
+/** Encode the position a page ended at. Both parts are escaped: a display name
+ *  is whatever a platform calls the account, and a ref carries a jid, so
+ *  neither can be trusted to leave the separator alone. */
+export function encodeAccountCursor(cursor: AccountCursor): string {
+  return [cursor.displayName, cursor.ref].map((part) => encodeURIComponent(part)).join("|");
+}
+
+/** Decode an {@link encodeAccountCursor}, or null when it is not one. */
+export function parseAccountCursor(raw: string | undefined | null): AccountCursor | null {
+  if (!raw) return null;
+  const parts = raw.split("|");
+  if (parts.length !== 2) return null;
+  let decoded: string[];
+  try {
+    decoded = parts.map(decodeURIComponent);
+  } catch {
+    return null;
+  }
+  const [displayName, ref] = decoded;
+  if (!ref) return null;
+  return { displayName, ref };
+}
+
+/** {@link compareAccountCursors} over the accounts themselves. */
 export function compareAccounts(a: DirectoryAccount, b: DirectoryAccount): number {
   return compareAccountCursors(accountCursorOf(a), accountCursorOf(b));
 }
@@ -307,6 +370,40 @@ export function compareAccounts(a: DirectoryAccount, b: DirectoryAccount): numbe
  *  i.e. belongs on a later page than the one that cursor ended. */
 export function isAfterAccountCursor(account: DirectoryAccount, cursor: AccountCursor): boolean {
   return compareAccountCursors(cursor, accountCursorOf(account)) < 0;
+}
+
+/**
+ * Where one account sits in the stream's order.
+ *
+ * The identity stream's position, so the recents surface and a person's own
+ * history are one order and one encoding of it, and the reasons every part is
+ * escaped hold in one place ({@link encodeIdentityCursor}) rather than two that
+ * can be fixed apart.
+ */
+export type StreamCursor = IdentityCursor;
+
+export const compareStreamCursors = compareIdentityCursors;
+export const encodeStreamCursor = encodeIdentityCursor;
+export const parseStreamCursor = parseIdentityCursor;
+
+export function streamCursorOf(account: StreamAccount): StreamCursor {
+  return {
+    timestamp: account.latest.timestamp,
+    displayName: account.displayName,
+    id: accountRef(account),
+  };
+}
+
+/** The stream's order: newest activity first, ties broken by name and then ref
+ *  so the sequence is total. */
+export function compareStreamAccounts(a: StreamAccount, b: StreamAccount): number {
+  return compareStreamCursors(streamCursorOf(a), streamCursorOf(b));
+}
+
+/** Whether an account falls after a cursor in {@link compareStreamAccounts}
+ *  order — i.e. belongs on a later page than the one that cursor ended. */
+export function isAfterStreamCursor(account: StreamAccount, cursor: StreamCursor): boolean {
+  return compareStreamCursors(cursor, streamCursorOf(account)) < 0;
 }
 
 /** How many accounts one page carries when the caller names no limit, and the
@@ -331,10 +428,10 @@ export function accountPageLimit(raw: string | number | null | undefined): numbe
  * the page alone, so a client filtered to one chip still reads every chip's
  * number, and a client on page four reads the same numbers it read on page one.
  *
- * A query reaches silent accounts whatever the toggle says. The toggle keeps a
- * 9,000-contact address book out of a browsing view, and a guardian typing a
- * name or a number is not browsing — a lookup that answered "no such account"
- * for a contact the mirror holds would be a worse answer than a long list.
+ * Every account the query matches is on the listing. A contacts app holds
+ * nobody back: a lookup that answered "no such account" for a contact the
+ * mirror holds is a worse answer than a long list, and paging is what a long
+ * list is for.
  */
 export function sliceAccountDirectory(
   directory: readonly DirectoryAccount[],
@@ -343,23 +440,18 @@ export function sliceAccountDirectory(
     state?: AccountState | null;
     cursor?: AccountCursor | null;
     limit?: number | null;
-    /** Whether the page carries silent accounts. Off by default. */
-    includeSilent?: boolean;
   } = {},
 ): AccountDirectory {
   const query = options.query?.trim() ?? "";
   const matching = query ? directory.filter((a) => accountMatchesQuery(a, query)) : directory;
-  const silentTotal = matching.filter(isSilentAccount).length;
 
-  const admitted =
-    options.includeSilent || query !== "" ? matching : matching.filter((a) => !isSilentAccount(a));
   const counts: AccountCounts = { unlinked: 0, linked: 0, dismissed: 0 };
-  for (const account of admitted) counts[account.state] += 1;
+  for (const account of matching) counts[account.state] += 1;
 
   // The sort key is built once per account rather than once per comparison: it
   // renders a ref and a directory is thousands of rows, so a comparator that
   // rebuilds it pays for that on every one of N log N comparisons.
-  const ordered = admitted
+  const ordered = matching
     .map((account) => ({ account, at: accountCursorOf(account) }))
     .sort((a, b) => compareAccountCursors(a.at, b.at))
     .map((entry) => entry.account);
@@ -373,7 +465,53 @@ export function sliceAccountDirectory(
   const nextCursor =
     remaining.length > accounts.length && last ? encodeAccountCursor(accountCursorOf(last)) : null;
 
-  return { accounts, nextCursor, counts, silentTotal };
+  return { accounts, nextCursor, counts };
+}
+
+/**
+ * Cut one page out of the stream, with the counts that describe the whole of
+ * it.
+ *
+ * Takes every account something has happened on, in any order — the ordering is
+ * this function's, as the directory's is {@link sliceAccountDirectory}'s. An
+ * account with nothing on record never reaches here: it has no position in an
+ * order made of timestamps, and no reader of a recents surface is asking after
+ * it.
+ *
+ * `query` scopes the counts as well as the page, and `state` and the cursor
+ * scope the page alone — the same split the directory makes, and for the same
+ * reason: a client filtered to one chip still renders every chip's number.
+ */
+export function sliceAccountStream(
+  stream: readonly StreamAccount[],
+  options: {
+    query?: string | null;
+    state?: AccountState | null;
+    cursor?: StreamCursor | null;
+    limit?: number | null;
+  } = {},
+): AccountStream {
+  const query = options.query?.trim() ?? "";
+  const matching = query ? stream.filter((a) => accountMatchesQuery(a, query)) : stream;
+
+  const counts: AccountCounts = { unlinked: 0, linked: 0, dismissed: 0 };
+  for (const account of matching) counts[account.state] += 1;
+
+  const ordered = matching
+    .map((account) => ({ account, at: streamCursorOf(account) }))
+    .sort((a, b) => compareStreamCursors(a.at, b.at))
+    .map((entry) => entry.account);
+  const state = options.state;
+  const scoped = state ? ordered.filter((a) => a.state === state) : ordered;
+  const cursor = options.cursor;
+  const remaining = cursor ? scoped.filter((a) => isAfterStreamCursor(a, cursor)) : scoped;
+
+  const accounts = remaining.slice(0, accountPageLimit(options.limit));
+  const last = accounts.at(-1);
+  const nextCursor =
+    remaining.length > accounts.length && last ? encodeStreamCursor(streamCursorOf(last)) : null;
+
+  return { accounts, nextCursor, counts };
 }
 
 /**

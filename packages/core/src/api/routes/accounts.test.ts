@@ -1,16 +1,24 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
-import { accountRef, type AccountDirectory, type DirectoryAccount } from "@rome/api-types/people";
+import {
+  accountRef,
+  type AccountDirectory,
+  type AccountStream,
+  type DirectoryAccount,
+  type StreamAccount,
+} from "@rome/api-types/people";
 import { accountsRoutes } from "./accounts.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 
-// GET /accounts is the account directory: every account Rome has observed —
-// linked, dismissed, or nobody's decision yet — from the links, the sentinel
-// log and the channel mirrors. These tests pin what the union answers, what
-// each filter narrows, and that the sentinel a dismissal is filed under never
-// reaches a client.
+// The two account reads over one set of sources — the links, the sentinel log
+// and the channel mirrors. GET /accounts is the contacts list: every account
+// Rome has observed, by name, carrying nothing about what anyone said. GET
+// /accounts/stream is the recents surface: the accounts something has happened
+// on, newest first, with the line to preview. These tests pin what each
+// answers, what each filter narrows, and that the sentinel a dismissal is filed
+// under never reaches a client.
 
 const SILENT_JID = "15550001111@s.whatsapp.net";
 const TALKING_JID = "15550002222@s.whatsapp.net";
@@ -95,7 +103,13 @@ describe("Accounts API", () => {
     return (await res.json()) as AccountDirectory;
   }
 
-  const find = (page: AccountDirectory, ref: string): DirectoryAccount | undefined =>
+  async function fetchStream(query = ""): Promise<AccountStream> {
+    const res = await app.request(`/accounts/stream${query}`);
+    expect(res.status).toBe(200);
+    return (await res.json()) as AccountStream;
+  }
+
+  const find = <T extends DirectoryAccount>(page: { accounts: T[] }, ref: string): T | undefined =>
     page.accounts.find((account) => accountRef(account) === ref);
 
   it("lists an observed account nobody has placed, named by its platform", async () => {
@@ -104,12 +118,44 @@ describe("Accounts API", () => {
     expect(tina.personId).toBeNull();
     expect(tina.personName).toBeNull();
     expect(tina.displayName).toBe("Talky Tina");
+  });
+
+  it("says nothing about activity on a directory row", async () => {
+    const page = await fetchPage();
+    // Not merely unrendered: the contacts list carries no message-derived field
+    // at all, so a client cannot start showing one and a read cannot start
+    // computing one for it.
+    for (const account of page.accounts) {
+      expect(Object.keys(account).sort()).toEqual([
+        "addresses",
+        "channel",
+        "channelUserId",
+        "displayName",
+        "personId",
+        "personName",
+        "state",
+      ]);
+    }
+  });
+
+  it("previews the newest thing on a stream row", async () => {
+    const tina = find(await fetchStream(), `whatsapp:${TALKING_JID}`)!;
     expect(tina.latest).toEqual({
       source: "whatsapp",
       timestamp: Math.floor(new Date("2026-08-17T10:00:00Z").getTime() / 1000),
       preview: "hello from tina",
     });
     expect(tina.messageCount).toBeGreaterThan(0);
+  });
+
+  it("keeps an account nothing has happened on off the stream", async () => {
+    const stream = await fetchStream();
+    expect(find(stream, `whatsapp:${SILENT_JID}`)).toBeUndefined();
+    // Including under a search: an account with no dynamic has no position in
+    // an order made of timestamps, whatever was typed.
+    expect((await fetchStream("?q=silent%20sam")).accounts).toEqual([]);
+    // The contacts list is where that contact is looked up.
+    expect(find(await fetchPage("?q=silent%20sam"), `whatsapp:${SILENT_JID}`)).toBeDefined();
   });
 
   it("names the person a linked account belongs to, and keeps the platform's own name", async () => {
@@ -123,7 +169,7 @@ describe("Accounts API", () => {
   });
 
   it("serializes a dismissal as a state, never as the sentinel it is filed under", async () => {
-    const page = await fetchPage("?includeSilent=true");
+    const page = await fetchPage();
     const dismissed = find(page, `telegram:${DISMISSED_SENDER}`)!;
     expect(dismissed.state).toBe("dismissed");
     expect(dismissed.personId).toBeNull();
@@ -147,6 +193,7 @@ describe("Accounts API", () => {
 
     const res = await app.request("/accounts?state=archived");
     expect(res.status).toBe(400);
+    expect((await app.request("/accounts/stream?state=archived")).status).toBe(400);
   });
 
   it("counts every state over the whole directory, not over the page", async () => {
@@ -162,39 +209,31 @@ describe("Accounts API", () => {
     );
   });
 
-  it("keeps silent contacts off the default page and counts them there anyway", async () => {
-    const hidden = await fetchPage();
-    expect(find(hidden, `whatsapp:${SILENT_JID}`)).toBeUndefined();
-    // The offer to show them is made from the view that hides them, so the
-    // number has to be right in that view.
-    expect(hidden.silentTotal).toBe(1);
-
-    const shown = await fetchPage("?includeSilent=true");
-    const silent = find(shown, `whatsapp:${SILENT_JID}`)!;
+  it("carries a contact nobody has ever heard from, like a contacts app", async () => {
+    const page = await fetchPage();
+    const silent = find(page, `whatsapp:${SILENT_JID}`)!;
     expect(silent.displayName).toBe("Silent Sam");
-    expect(silent.latest).toBeNull();
-    expect(shown.silentTotal).toBe(1);
-    expect(shown.counts.unlinked).toBe(hidden.counts.unlinked + 1);
+    // The whole address book is the listing, so the unlinked count is everyone
+    // Rome has not placed rather than the senders waiting on a decision. The
+    // stream's counts answer that narrower question.
+    expect(page.counts.unlinked).toBe(
+      page.accounts.filter((account) => account.state === "unlinked").length,
+    );
+    expect((await fetchStream()).counts.unlinked).toBeLessThan(page.counts.unlinked);
   });
 
-  it("never hides an account the guardian has decided about", async () => {
-    // A dismissed sender whose only message the log holds is still a decision,
-    // and a linked account on a channel with no history is one too. Neither is
-    // an address-book row waiting to be triaged.
+  it("lists an account on a channel with no history at all", async () => {
     const linkedSilent = await deps.personMappingRepo.create({
       displayName: "Quiet Link",
       bondLevel: "other",
       approved: true,
       channelMappings: [{ channel: "signal", channelUserId: "sig-quiet" }],
     });
-    const page = await fetchPage();
-    const account = find(page, "signal:sig-quiet")!;
-    expect(account.latest).toBeNull();
+    const account = find(await fetchPage(), "signal:sig-quiet")!;
     expect(account.personId).toBe(linkedSilent);
-    expect(page.silentTotal).toBe(1);
   });
 
-  it("reaches a silent contact by search whether or not the toggle asked", async () => {
+  it("finds an account by name, by number, and by the person holding it", async () => {
     const byName = await fetchPage("?q=silent%20sam");
     expect(byName.accounts.map(accountRef)).toEqual([`whatsapp:${SILENT_JID}`]);
 
@@ -207,7 +246,7 @@ describe("Accounts API", () => {
   });
 
   it("excludes group chats — a group is not an account", async () => {
-    const page = await fetchPage("?includeSilent=true");
+    const page = await fetchPage();
     expect(page.accounts.some((account) => account.channelUserId.includes(GROUP_JID))).toBe(false);
   });
 
@@ -228,12 +267,17 @@ describe("Accounts API", () => {
       action: "ignored",
     });
 
-    const page = await fetchPage("?includeSilent=true");
+    const page = await fetchPage();
     const split = page.accounts.filter((account) => account.addresses.includes(lidJid));
     expect(split).toHaveLength(1);
     expect(accountRef(split[0])).toBe(`whatsapp:${phoneJid}`);
     expect(split[0].addresses).toEqual([phoneJid, lidJid].sort());
-    expect(split[0].latest?.preview).toBe("from the lid address");
+    // And one row on the stream too, previewing what the other address said.
+    const streamed = (await fetchStream()).accounts.filter((account) =>
+      account.addresses.includes(lidJid),
+    );
+    expect(streamed).toHaveLength(1);
+    expect(streamed[0].latest.preview).toBe("from the lid address");
   });
 
   it("pages by an opaque cursor that visits every account exactly once", async () => {
@@ -242,7 +286,7 @@ describe("Accounts API", () => {
     let pages = 0;
     do {
       const page: AccountDirectory = await fetchPage(
-        `?includeSilent=true&limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+        `?limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
       );
       expect(page.accounts.length).toBeGreaterThan(0);
       seen.push(...page.accounts.map(accountRef));
@@ -253,20 +297,33 @@ describe("Accounts API", () => {
 
     expect(pages).toBeGreaterThan(1);
     expect(new Set(seen).size).toBe(seen.length);
-    const whole = await fetchPage("?includeSilent=true&limit=500");
-    expect(seen.sort()).toEqual(whole.accounts.map(accountRef).sort());
+    const whole = await fetchPage("?limit=500");
+    // The pages are the whole listing, in the listing's own order.
+    expect(seen).toEqual(whole.accounts.map(accountRef));
   });
 
   it("rejects a cursor that names no position rather than answering the first page", async () => {
-    const res = await app.request("/accounts?cursor=not-a-cursor");
-    expect(res.status).toBe(400);
+    expect((await app.request("/accounts?cursor=not-a-cursor")).status).toBe(400);
+    expect((await app.request("/accounts/stream?cursor=not-a-cursor")).status).toBe(400);
+    // The two orders are different orders: a position in one names none in the
+    // other, and resuming with the wrong one would skip or repeat rows.
+    const streamCursor = (await fetchStream("?limit=1")).nextCursor!;
+    expect((await app.request(`/accounts?cursor=${encodeURIComponent(streamCursor)}`)).status).toBe(
+      400,
+    );
   });
 
-  it("orders by newest activity, silent accounts last", async () => {
-    const page = await fetchPage("?includeSilent=true");
-    const timestamps = page.accounts.map((account) => account.latest?.timestamp ?? null);
-    const active = timestamps.filter((at): at is number => at !== null);
-    expect(active).toEqual([...active].sort((a, b) => b - a));
-    expect(timestamps.slice(active.length).every((at) => at === null)).toBe(true);
+  it("orders the directory by display name", async () => {
+    const page = await fetchPage();
+    const names = page.accounts.map((account) => account.displayName);
+    expect(names).toEqual(
+      [...names].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())),
+    );
+  });
+
+  it("orders the stream by newest activity", async () => {
+    const stream: AccountStream = await fetchStream();
+    const timestamps = stream.accounts.map((account: StreamAccount) => account.latest.timestamp);
+    expect(timestamps).toEqual([...timestamps].sort((a, b) => b - a));
   });
 });

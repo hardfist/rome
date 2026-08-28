@@ -97,8 +97,6 @@ const UNPLACED: DirectoryAccount = {
   state: "unlinked",
   personId: null,
   personName: null,
-  latest: { source: "whatsapp", timestamp: NOW - 7_200, preview: "Are you free Saturday?" },
-  messageCount: 12,
 };
 
 const HELD_BY_ANOTHER: DirectoryAccount = {
@@ -109,8 +107,6 @@ const HELD_BY_ANOTHER: DirectoryAccount = {
   state: "linked",
   personId: "mira",
   personName: "Mira Chen",
-  latest: { source: "telegram", timestamp: NOW - 3_600, preview: "sent" },
-  messageCount: 4,
 };
 
 /** Whatever a write put on the wire, read back for assertions. */

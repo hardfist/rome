@@ -122,8 +122,14 @@ export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.R
 
 /**
  * A directory row is identity only: avatar, name, and the identifier the person
- * is recognized by. Clicking a person opens their dossier; an account has none
- * to open until it is placed on somebody.
+ * is recognized by. Nothing about what anyone said — the directory read carries
+ * none of it, which is what makes this a contacts list rather than a second
+ * stream. Clicking a person opens their dossier; an account has none to open
+ * until it is placed on somebody.
+ *
+ * `actions` is whatever gesture the row's position admits: placing an account
+ * nobody has decided about, or taking a dismissal back. The gestures themselves
+ * are `people/triage.tsx`; the row only says where they go.
  */
 export function DirectoryRow({
   row,
@@ -152,8 +158,6 @@ export function DirectoryRow({
       <span className="block truncate text-aux text-muted-foreground">
         {fixed ? (
           t("guardian.meta")
-        ) : row.silent ? (
-          <span className="italic">{t("row.neverMessaged")}</span>
         ) : (
           <span className="font-mono tabular-nums">{handle ?? ""}</span>
         )}

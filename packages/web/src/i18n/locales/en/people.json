@@ -48,17 +48,11 @@
   "row": {
     "messageCount_one": "{{count}} message",
     "messageCount_other": "{{count}} messages",
-    "neverMessaged": "No activity yet — synced from your address book",
     "noPreview": "No text in this one",
     "noActivity": "No activity yet"
   },
   "guardian": {
     "meta": "That is you. Full access to every surface."
-  },
-  "unknown": {
-    "includeSilent": "Include never-messaged contacts",
-    "includeSilentCount_one": "Include never-messaged contacts ({{count}})",
-    "includeSilentCount_other": "Include never-messaged contacts ({{count}})"
   },
   "actions": {
     "select": "Select {{name}}",

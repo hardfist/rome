@@ -377,9 +377,9 @@ const whatsappContacts: WhatsAppContactRow[] = [
   },
   {
     // Two contacts nobody has ever said anything to, and nobody has ever heard
-    // from: the address book's silent thousands, in miniature. They stay out of
-    // the stream and out of the directory until the toggle asks for them, and
-    // the search box reaches them either way.
+    // from: the address book's quiet thousands, in miniature. They stay out of
+    // the stream, which carries only the accounts something has happened on,
+    // and the contacts list holds them like any other account.
     jid: QUIET_JID,
     phoneNumber: "6598023311",
     name: "Jonas Tan",

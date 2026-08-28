@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AccountActivity } from "./account-activity.js";
-import { foldAccounts, type MirrorPlane } from "./account-fold.js";
+import { foldAccountRecords, foldAccounts, type MirrorPlane } from "./account-fold.js";
 import type { Account, AccountId } from "./accounts.js";
 import type { SentinelSenderActivity } from "../db/repositories/sentinel-log.js";
 
@@ -35,6 +35,7 @@ const sender = (
  */
 class FakePlane implements MirrorPlane {
   listings = 0;
+  activityReads = 0;
   readonly resolved: string[] = [];
 
   constructor(
@@ -61,6 +62,7 @@ class FakePlane implements MirrorPlane {
   }
 
   async listActivity(): Promise<Map<AccountId, AccountActivity>> {
+    this.activityReads++;
     return (this.options.activity ?? new Map()) as Map<AccountId, AccountActivity>;
   }
 }
@@ -73,7 +75,7 @@ describe("foldAccounts", () => {
   it("takes an account's addressing set from the account itself", async () => {
     const whatsapp = new FakePlane([account(ada, [ada, adaLid], "Ada")]);
 
-    const fold = await foldAccounts({ whatsapp }, { senders: [], stored: [] });
+    const fold = await foldAccounts({ whatsapp }, { stored: [] });
 
     expect(fold.accounts).toEqual([
       {
@@ -81,8 +83,6 @@ describe("foldAccounts", () => {
         channelUserId: ada,
         aliases: [ada, adaLid].sort(),
         name: "Ada",
-        latest: null,
-        messageCount: 0,
       },
     ]);
     // Both addressings name the one account, whichever one a caller holds.
@@ -92,10 +92,23 @@ describe("foldAccounts", () => {
     expect(whatsapp.listings).toBe(1);
   });
 
+  it("asks no channel for a history", async () => {
+    const whatsapp = new FakePlane([account(ada, [ada, adaLid], "Ada")]);
+    const linkedin = new FakePlane([account("ACoAAAda0001")]);
+
+    await foldAccounts({ whatsapp, linkedin }, { stored: [] });
+
+    // The contacts list is the reason this fold exists apart from
+    // `foldAccountRecords`: it names who is one account and reads no message
+    // store to do it.
+    expect(whatsapp.activityReads).toBe(0);
+    expect(linkedin.activityReads).toBe(0);
+  });
+
   it("leaves an account the channel holds one address for addressing itself", async () => {
     const linkedin = new FakePlane([account("ACoAAAda0001")]);
 
-    const fold = await foldAccounts({ linkedin }, { senders: [], stored: [] });
+    const fold = await foldAccounts({ linkedin }, { stored: [] });
 
     expect(fold.accounts[0]?.aliases).toEqual(["ACoAAAda0001"]);
     expect(fold.canonical("linkedin", "ACoAAAda0001")).toBe("ACoAAAda0001");
@@ -108,7 +121,7 @@ describe("foldAccounts", () => {
 
     const fold = await foldAccounts(
       { linkedin },
-      { senders: [], stored: [{ channel: "linkedin", channelUserId: profileUrl }] },
+      { stored: [{ channel: "linkedin", channelUserId: profileUrl }] },
     );
 
     expect(linkedin.resolved).toEqual([profileUrl]);
@@ -128,7 +141,7 @@ describe("foldAccounts", () => {
 
     const fold = await foldAccounts(
       { whatsapp },
-      { senders: [], stored: [{ channel: "whatsapp", channelUserId: adaLid }] },
+      { stored: [{ channel: "whatsapp", channelUserId: adaLid }] },
     );
 
     expect(fold.canonical("whatsapp", adaLid)).toBe(ada);
@@ -141,7 +154,7 @@ describe("foldAccounts", () => {
       ]),
     });
 
-    const fold = await foldAccounts(
+    const fold = await foldAccountRecords(
       { whatsapp },
       {
         senders: [
@@ -167,7 +180,6 @@ describe("foldAccounts", () => {
     const fold = await foldAccounts(
       { whatsapp, linkedin },
       {
-        senders: [],
         stored: [
           { channel: "whatsapp", channelUserId: adaLid },
           { channel: "whatsapp", channelUserId: adaLid },

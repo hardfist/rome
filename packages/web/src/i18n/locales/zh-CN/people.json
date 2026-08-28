@@ -48,17 +48,11 @@
   "row": {
     "messageCount_one": "{{count}} 条消息",
     "messageCount_other": "{{count}} 条消息",
-    "neverMessaged": "暂无动态 — 由通讯录同步而来",
     "noPreview": "这条没有文字内容",
     "noActivity": "暂无动态"
   },
   "guardian": {
     "meta": "这是你本人，拥有所有界面的完整权限。"
-  },
-  "unknown": {
-    "includeSilent": "包含从未联系的联系人",
-    "includeSilentCount_one": "包含从未联系的联系人（{{count}}）",
-    "includeSilentCount_other": "包含从未联系的联系人（{{count}}）"
   },
   "actions": {
     "select": "选择 {{name}}",

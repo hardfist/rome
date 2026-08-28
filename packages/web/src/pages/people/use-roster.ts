@@ -4,13 +4,14 @@ import { useTranslation } from "react-i18next";
 import type {
   AccountDirectory,
   AccountState,
+  AccountStream,
   PeopleList,
   PersonResource,
 } from "@rome/api-types/people";
 import type { TimelinePage } from "@rome/api-types/identities";
 import { getApiErrorMessage } from "@/lib/api-error";
 import { fetchJson } from "@/lib/fetch-json";
-import { peopleRows, type PeopleRow } from "./people-model";
+import { peopleRows, type PeopleRow, type PeopleView } from "./people-model";
 
 // The People page's reads, and nothing else — the writes are `./writes.ts`,
 // and `./use-writes.ts` is what settles these queries after one lands.
@@ -20,10 +21,17 @@ import { peopleRows, type PeopleRow } from "./people-model";
 // page's own paged reads. Two hooks with one name would be read as one.
 //
 // Two reads compose the roster: `GET /api/people` for the people the guardian
-// has placed, `GET /api/accounts` for every account Rome has observed. They are
-// separate queries rather than one, because they page differently: curated
-// people are entered one at a time by hand and the listing is bounded, while a
-// synced address book is thousands of rows and pages by cursor.
+// has placed, and one of the two account reads for the accounts beside them.
+// They are separate queries rather than one, because they page differently:
+// curated people are entered one at a time by hand and the listing is bounded,
+// while a synced address book is thousands of rows and pages by cursor.
+//
+// Which account read is the view's own question. The directory is a contacts
+// list and reads `GET /api/accounts`: every account, by name, carrying nothing
+// about what anyone said. The stream is the recents surface and reads `GET
+// /api/accounts/stream`: what happened last, with the line to preview. Neither
+// view pays for the other's fields, and a cursor from one never resumes the
+// other — they are different orders.
 //
 // Every number a chip or a heading shows comes back with these reads and
 // describes the whole roster the query admits. A tally over the rows that
@@ -57,10 +65,9 @@ function useDebounced<T>(value: T, delayMs: number): T {
 
 export interface PeopleRosterParams {
   search: string;
-  /** Whether the account directory carries the contacts nobody has ever
-   *  messaged. The toggle governs browsing; a search reaches them either way,
-   *  which is the endpoint's own rule. */
-  includeSilent: boolean;
+  /** Which account read the view is about — the contacts list, or the recents
+   *  surface. */
+  view: PeopleView;
   /**
    * Which state of account the view is about, when one narrows it.
    *
@@ -118,11 +125,15 @@ export function usePeopleRoster(params: PeopleRosterParams) {
     },
   });
 
-  // The directory pages; the people listing does not. Its cursor is opaque and
-  // names a position rather than a row, so a page boundary survives an account
-  // being linked or dismissed between two requests.
-  const accounts = useInfiniteQuery<AccountDirectory>({
-    queryKey: [ACCOUNTS_KEY, search, params.includeSilent, accountState],
+  // The account read pages; the people listing does not. Its cursor is opaque
+  // and names a position rather than a row, so a page boundary survives an
+  // account being linked or dismissed between two requests.
+  //
+  // The view is part of the key, not just of the URL: the two reads are two
+  // orders with two cursors, and a page of one is not a page of the other.
+  const path = params.view === "directory" ? "/api/accounts" : "/api/accounts/stream";
+  const accounts = useInfiniteQuery<AccountDirectory | AccountStream>({
+    queryKey: [ACCOUNTS_KEY, params.view, search, accountState],
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
     refetchInterval: ROSTER_POLL_MS,
@@ -131,10 +142,9 @@ export function usePeopleRoster(params: PeopleRosterParams) {
       const query = new URLSearchParams();
       if (search) query.set("q", search);
       if (accountState) query.set("state", accountState);
-      if (params.includeSilent) query.set("includeSilent", "true");
       if (pageParam) query.set("cursor", String(pageParam));
       const suffix = query.toString();
-      return fetchJson<AccountDirectory>(`/api/accounts${suffix ? `?${suffix}` : ""}`, {
+      return fetchJson<AccountDirectory | AccountStream>(`${path}${suffix ? `?${suffix}` : ""}`, {
         signal,
         fallback,
       });
@@ -161,9 +171,6 @@ export function usePeopleRoster(params: PeopleRosterParams) {
       other: 0,
     },
     accountCounts: head?.counts ?? { unlinked: 0, linked: 0, dismissed: 0 },
-    /** Every matching silent account, whether or not the toggle let them onto
-     *  the page — the number the toggle itself offers. */
-    silentTotal: head?.silentTotal ?? 0,
     /** The term these rows answer. A caller filtering or labelling them reads
      *  this rather than what is in the box, or it applies a term the rows were
      *  not fetched for and empties the view for exactly the quiet contacts only
@@ -185,7 +192,8 @@ export type PeopleRoster = ReturnType<typeof usePeopleRoster>;
 /**
  * The accounts a picker can name, as the server answers the term typed.
  *
- * Every state, not only the unlinked ones. A picker that hid the accounts
+ * The contacts list, so every account Rome has observed is offerable — and
+ * every state, not only the unlinked ones. A picker that hid the accounts
  * another person already holds would hide the one gesture that can take one
  * back, and the contract answers that attempt with a conflict the caller
  * surfaces rather than with a silent re-point.
@@ -203,9 +211,13 @@ export function useAccountSearch(search: string, options: { enabled: boolean }) 
     enabled: options.enabled,
     placeholderData: keepPreviousData,
     queryFn: ({ signal }) => {
-      const query = new URLSearchParams({ includeSilent: "true" });
+      const query = new URLSearchParams();
       if (term) query.set("q", term);
-      return fetchJson<AccountDirectory>(`/api/accounts?${query.toString()}`, { signal, fallback });
+      const suffix = query.toString();
+      return fetchJson<AccountDirectory>(`/api/accounts${suffix ? `?${suffix}` : ""}`, {
+        signal,
+        fallback,
+      });
     },
   });
 }

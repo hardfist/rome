@@ -30,7 +30,6 @@ function row(over: Partial<PeopleRow> = {}): PeopleRow {
     addresses: ["418820113"],
     latest: null,
     messageCount: 0,
-    silent: false,
     ...over,
   };
 }
@@ -41,10 +40,12 @@ describe("DirectoryRow", () => {
     expect(screen.getByText("418820113")).toBeTruthy();
   });
 
-  it("says an address-book contact has never said anything, where a handle would sit", () => {
-    render(<DirectoryRow row={row({ kind: "account", silent: true })} />);
-    expect(screen.getByText("No activity yet — synced from your address book")).toBeTruthy();
-    expect(screen.queryByText("418820113")).toBeNull();
+  it("says the same thing about a contact nobody has heard from as about anyone else", () => {
+    // The directory read carries nothing about what was said, so there is
+    // nothing to distinguish these rows by — and a contacts list has no reason
+    // to.
+    render(<DirectoryRow row={row({ kind: "account" })} />);
+    expect(screen.getByText("418820113")).toBeTruthy();
   });
 
   it("makes the avatar the selection control, and exposes the state as state", async () => {
