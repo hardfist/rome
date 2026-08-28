@@ -1,0 +1,301 @@
+// The SQL half of `Messages`: a store that lives in this database becomes one
+// by describing its rows as timeline entries once, and this module scopes,
+// orders, pages and — the part that is not just plumbing — groups the calls
+// made against it.
+//
+// Grouping is the point. The People surface reads a whole directory at once:
+// one `latest` and one `count` per row, all issued together. Served one query
+// each, a directory of a thousand people is a thousand passes over the same
+// mirror. Served here, it is one, the way the WhatsApp account plane already
+// answers concurrent `resolve` calls from a single shared load.
+
+import { sql, type SQL } from "drizzle-orm";
+import type { TimelineEntry } from "@rome/api-types/people";
+import type { DrizzleDb } from "../db/index.js";
+import type { MessageAccount, MessageRead, Messages } from "./messages.js";
+
+/**
+ * A store's rows as timeline entries: a SELECT producing exactly the columns
+ * `source`, `address`, `at`, `outbound`, `ref`, `body`.
+ *
+ * - `source` is the channel an entry arrived on, and `address` an address of
+ *   the account it belongs to — one of the addresses the view was given.
+ * - `at` is epoch seconds, `outbound` is 1 for something Rome said and 0 for
+ *   something it was told, `body` is the line to render or NULL.
+ * - `ref` must be unique across everything the store can put on one person's
+ *   timeline. Ids unique only within a conversation (a WhatsApp message id, a
+ *   LinkedIn message id) are qualified by the conversation.
+ *
+ * A row may repeat one message under several addresses — a LinkedIn thread
+ * carrying two member ids of the same person answers under both. The reads
+ * below fold those together, so a view is free to attribute rather than choose.
+ */
+export type MessageViewSql = SQL;
+
+export interface SqlMessagesOptions {
+  /** The channel this store serves. Accounts on any other are out of its
+   *  scope, however their addresses read. */
+  channel: string;
+  db: DrizzleDb;
+  /**
+   * The store's rows, scoped to `addresses` — every address of every account
+   * a batch of calls named, deduplicated.
+   *
+   * Null when the request can hold nothing, and the store then answers empty
+   * without a query.
+   */
+  view(addresses: readonly string[]): MessageViewSql | null;
+}
+
+/**
+ * `Messages` over one SQL view.
+ *
+ * Every call — `read`, `count`, `latest` — is one job on one queue, and the
+ * jobs raised in a tick are answered by a single statement. What differs
+ * between them is only the shape of the job:
+ *
+ * - `read` asks for a page and takes the entries.
+ * - `latest` asks for a page of one and takes its head.
+ * - `count` asks for no page at all and takes the length the statement reports
+ *   alongside it.
+ *
+ * So the law messages.ts states holds by construction rather than by three
+ * queries agreeing: the count is the length of the history the page walks,
+ * because both are read off the same ranking of the same rows.
+ */
+export function sqlMessages(options: SqlMessagesOptions): Messages {
+  const submit = batched<Job, JobResult>((jobs) => runBatch(options, jobs));
+
+  const job = (accounts: readonly MessageAccount[], after: TimelineEntry | null, limit: number) =>
+    submit({ addresses: addressesOn(accounts, options.channel), after, limit });
+
+  return {
+    async read(request: MessageRead) {
+      const limit = Math.max(1, Math.floor(request.limit));
+      return (await job(request.accounts, request.after ?? null, limit)).entries;
+    },
+
+    async count(accounts) {
+      return (await job(accounts, null, COUNT_ONLY)).total;
+    },
+
+    async latest(accounts) {
+      return (await job(accounts, null, 1)).entries[0] ?? null;
+    },
+  };
+}
+
+/** Every address of every account on `channel`, each once. `(channel,
+ *  address)` is matched as a pair — an address on one channel must never
+ *  select a row another channel stores under the same string. */
+function addressesOn(accounts: readonly MessageAccount[], channel: string): string[] {
+  return [
+    ...new Set(
+      accounts
+        .filter((account) => account.channel === channel)
+        .flatMap((account) => account.addresses),
+    ),
+  ];
+}
+
+/** One call, as the batch sees it. `limit` of {@link COUNT_ONLY} is a job that
+ *  wants the length of a history and none of it. */
+interface Job {
+  addresses: readonly string[];
+  after: TimelineEntry | null;
+  limit: number;
+}
+
+interface JobResult {
+  entries: TimelineEntry[];
+  /** The length of the job's whole history — meaningful for a job with no
+   *  cursor, which is every job `count` raises. */
+  total: number;
+}
+
+const COUNT_ONLY = 0;
+
+/** A history the store holds none of. Built per job rather than shared: the
+ *  entries are the caller's array to do as it likes with. */
+const nothing = (): JobResult => ({ entries: [], total: 0 });
+
+/**
+ * One statement for a whole batch.
+ *
+ * The jobs enter the query as two tables of their own — which addresses each
+ * asked about, and where each wants to resume and how much of the history it
+ * wants — so the rows are scoped, ranked and cut per job inside a single pass
+ * rather than once per job.
+ */
+async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobResult[]> {
+  const asked = jobs.flatMap((job, index) => job.addresses.map((address) => ({ index, address })));
+  if (asked.length === 0) return jobs.map(nothing);
+
+  const rows = options.view([...new Set(asked.map((entry) => entry.address))]);
+  if (rows === null) return jobs.map(nothing);
+
+  const scope = sql.join(
+    asked.map((entry) => sql`(${entry.index}, ${entry.address})`),
+    sql`, `,
+  );
+  const ask = sql.join(
+    jobs.map((job, index) => askRow(index, job)),
+    sql`, `,
+  );
+
+  const answered = (await options.db.all(sql`
+    WITH scope(rq, address) AS (VALUES ${scope}),
+    ask(rq, cap, has_cursor, c_at, c_outbound, c_source, c_ref) AS (VALUES ${ask}),
+    -- One row per (job, message). DISTINCT because a view may attribute one
+    -- message to several of a job's addresses — a LinkedIn thread carrying two
+    -- member ids of the same person — and a person's history shows a message
+    -- once however many ways they are named on it.
+    scoped AS (
+      SELECT DISTINCT
+        scope.rq AS rq,
+        held.source AS source,
+        held.at AS at,
+        held.outbound AS outbound,
+        held.ref AS ref,
+        held.body AS body
+      FROM (${rows}) held
+      JOIN scope ON scope.address = held.address
+    ),
+    -- Each job's own history, ranked and measured in one pass. One named
+    -- window rather than two inline ones: SQLite shares a partition pass only
+    -- between windows spelled the same way, and two spellings sort every job's
+    -- history twice.
+    --
+    -- The frame is explicit because the window's ORDER BY would otherwise make
+    -- count(*) a running total — the length of the history above each row
+    -- rather than the length of the history.
+    ranked AS (
+      SELECT
+        scoped.rq AS rq,
+        scoped.source AS source,
+        scoped.at AS at,
+        scoped.outbound AS outbound,
+        scoped.ref AS ref,
+        scoped.body AS body,
+        ask.cap AS cap,
+        row_number() OVER w AS position,
+        count(*) OVER w AS total
+      FROM scoped
+      JOIN ask ON ask.rq = scoped.rq
+      WHERE ${AFTER_CURSOR}
+      WINDOW w AS (
+        PARTITION BY scoped.rq
+        ORDER BY scoped.at DESC, scoped.outbound DESC, scoped.source ASC, scoped.ref ASC
+        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+      )
+    )
+    -- Never fewer than one row per job: a job that asked for no page still has
+    -- to be told how long the history it did not ask for is.
+    SELECT rq, source, at, outbound, ref, body, position, total
+    FROM ranked
+    WHERE position <= max(cap, 1)
+    ORDER BY rq ASC, position ASC
+  `)) as Array<Record<string, unknown>>;
+
+  const results = jobs.map(nothing);
+  for (const row of answered) {
+    const rq = Number(row.rq);
+    const result = results[rq];
+    const job = jobs[rq];
+    if (!result || !job) continue;
+    result.total = Number(row.total);
+    // The head of a history is answered whether or not the job asked for a
+    // page, so a job that only wanted the length discards the row it read it
+    // off.
+    if (Number(row.position) <= job.limit) result.entries.push(toEntry(row));
+  }
+  return results;
+}
+
+/** A job as a row of the `ask` table: how much of its history it wants, and
+ *  the cursor it resumes from, spread across columns so the comparison below
+ *  can be written once for the whole batch. */
+function askRow(index: number, job: Job): SQL {
+  const after = job.after;
+  if (after === null) return sql`(${index}, ${job.limit}, 0, 0, 0, '', '')`;
+  const outbound = after.direction === "outbound" ? 1 : 0;
+  return sql`(${index}, ${job.limit}, 1, ${after.timestamp}, ${outbound}, ${after.source}, ${after.ref})`;
+}
+
+/**
+ * The rows that fall strictly after a job's cursor, in the order the window's
+ * ORDER BY imposes — which is `compareTimelineEntries` read as SQL.
+ *
+ * The whole tuple, not `at < c_at`: a second holds more than one entry, and
+ * resuming from the bare timestamp drops the rest of that second.
+ *
+ * The two text comparisons ride SQLite's BINARY collation, which orders UTF-8
+ * by byte and therefore by code point — the same answer `compareCodePoints`
+ * gives, which is what makes a cursor mean one position on both ends.
+ */
+const AFTER_CURSOR = sql`
+  ask.has_cursor = 0
+  OR scoped.at < ask.c_at
+  OR (scoped.at = ask.c_at
+      AND (scoped.outbound < ask.c_outbound
+           OR (scoped.outbound = ask.c_outbound
+               AND (scoped.source > ask.c_source
+                    OR (scoped.source = ask.c_source AND scoped.ref > ask.c_ref)))))`;
+
+function toEntry(row: Record<string, unknown>): TimelineEntry {
+  return {
+    source: String(row.source),
+    timestamp: Number(row.at),
+    direction: Number(row.outbound) === 1 ? "outbound" : "inbound",
+    ref: String(row.ref),
+    body: (row.body as string | null) ?? null,
+  };
+}
+
+/**
+ * `run` over every call raised in one tick, each caller answered with the
+ * result at its own position.
+ *
+ * A microtask rather than a timer, so "together" means what a caller means by
+ * it: the calls of one `Promise.all` batch, and a call awaited before the next
+ * is made does not. Nothing is held across a turn, so no answer is ever older
+ * than the call that asked for it.
+ */
+function batched<J, R>(run: (jobs: J[]) => Promise<R[]>): (job: J) => Promise<R> {
+  type Waiting = { job: J; settle: (result: R) => void; fail: (error: unknown) => void };
+  let pending: Waiting[] | null = null;
+
+  return (job) =>
+    new Promise<R>((settle, fail) => {
+      if (pending === null) {
+        const batch: Waiting[] = [];
+        pending = batch;
+        queueMicrotask(() => {
+          pending = null;
+          run(batch.map((waiting) => waiting.job)).then(
+            (results) =>
+              batch.forEach((waiting, index) => {
+                const result = results[index];
+                if (result === undefined) waiting.fail(new Error("the batch answered no result"));
+                else waiting.settle(result);
+              }),
+            (error) => {
+              for (const waiting of batch) waiting.fail(error);
+            },
+          );
+        });
+      }
+      pending.push({ job, settle, fail });
+    });
+}
+
+/** `column IN (…)` over `values`, or null when there is nothing to match —
+ *  `IN ()` is not SQL, and a caller that emitted it would fail the whole read
+ *  rather than answer the empty page an empty scope means. */
+export function inList(column: SQL, values: readonly string[]): SQL | null {
+  if (values.length === 0) return null;
+  return sql`${column} IN (${sql.join(
+    values.map((value) => sql`${value}`),
+    sql`, `,
+  )})`;
+}

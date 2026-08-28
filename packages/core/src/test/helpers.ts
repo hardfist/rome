@@ -123,6 +123,30 @@ export function createTestDb(): TestDb {
   };
 }
 
+// countingDb — a database that records how many passes are made over it
+
+/**
+ * `db` with every read counted, for a test that asserts how many times a store
+ * was walked rather than what it answered.
+ *
+ * Only `all` is counted, which is the one verb a read-only SQL adapter uses.
+ * Everything else — the inserts a test seeds with, the schema it seeds into —
+ * passes through untouched and uncounted.
+ */
+export function countingDb(db: DrizzleDb): { db: DrizzleDb; passes: () => number } {
+  let passes = 0;
+  const counted = new Proxy(db, {
+    get(target, property, receiver) {
+      if (property !== "all") return Reflect.get(target, property, receiver);
+      return (...args: Parameters<DrizzleDb["all"]>) => {
+        passes += 1;
+        return target.all(...args);
+      };
+    },
+  });
+  return { db: counted as DrizzleDb, passes: () => passes };
+}
+
 // MockModelProvider — returns predetermined AgentMessage sequences
 
 export class MockModelProvider implements ModelProvider {

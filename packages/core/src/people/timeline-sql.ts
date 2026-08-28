@@ -4,6 +4,7 @@
 
 import { sql, type SQL } from "drizzle-orm";
 import { compareTimelineEntries, type TimelineEntry } from "@rome/api-types/people";
+import { inList } from "../channels/messages-sql.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { AccountDigest, TimelineAccount, TimelineSource, TimelineRead } from "./timeline.js";
 
@@ -166,16 +167,10 @@ function afterCursor(cursor: TimelineEntry | null): SQL {
                       OR (source = ${cursor.source} AND ref > ${cursor.ref})))))`;
 }
 
-/** `column IN (…)` over `values`, or null when there is nothing to match —
- *  `IN ()` is not SQL, and a caller that emitted it would fail the whole read
- *  rather than answer the empty page an empty scope means. */
-export function inList(column: SQL, values: readonly string[]): SQL | null {
-  if (values.length === 0) return null;
-  return sql`${column} IN (${sql.join(
-    values.map((value) => sql`${value}`),
-    sql`, `,
-  )})`;
-}
+// `column IN (…)` is the same clause on both sides of the migration, so it has
+// one definition — the channel-side one — rather than a copy here that could
+// answer an empty scope differently.
+export { inList };
 
 /** Every address of every account, for a store that serves one channel. */
 export function addressesOn(accounts: readonly TimelineAccount[], channel: string): string[] {
