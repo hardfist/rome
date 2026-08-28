@@ -22,7 +22,8 @@ import {
 } from "@rome/api-types/people";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import type { AccountNames } from "../channels/account-names.js";
-import { foldAccounts, mirrorRegistry, type MirrorPlane } from "../channels/account-fold.js";
+import { foldAccounts, mirrorRegistry } from "../channels/account-fold.js";
+import type { Accounts } from "../channels/accounts.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
@@ -30,8 +31,8 @@ import { assignAccountHeads } from "./timeline.js";
 import { personMessageStores } from "./timeline-sources.js";
 
 export interface AccountDirectoryDeps {
-  whatsAppAccounts: MirrorPlane;
-  linkedInAccounts: MirrorPlane;
+  whatsAppAccounts: Accounts;
+  linkedInAccounts: Accounts;
   personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings">;
   sentinelLogRepo: Pick<SentinelLogRepository, "listSenderActivity">;
   accountNames: Pick<AccountNames, "displayNames">;

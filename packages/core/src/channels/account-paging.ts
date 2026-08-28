@@ -1,7 +1,7 @@
 import type { Account } from "./accounts.js";
 
 /**
- * The in-memory half of `TalkAccounts.listAccounts`, for channels that mirror
+ * The in-memory half of `Accounts.listAccounts`, for channels that mirror
  * the whole address book locally and page over it here. A channel whose
  * provider paginates server-side pages there and does not use this.
  */

@@ -20,77 +20,15 @@ import type { MessageAccount, Messages } from "../channels/messages.js";
  * history hangs off either. A store that reads only the identifier the person
  * mapping happens to name would answer an empty timeline for a conversation
  * that plainly exists.
+ *
+ * A {@link MessageAccount} by shape, and read as one: this is what
+ * `timelineAccounts` folds a person's mappings into, and what the stores below
+ * are then scoped by.
  */
 export interface TimelineAccount {
   channel: string;
   /** Non-empty. Order carries no meaning. */
   addresses: string[];
-}
-
-export interface TimelineRead {
-  /** Only accounts this source holds — see {@link TimelineSource.holds}. */
-  accounts: readonly TimelineAccount[];
-  cursor: TimelineEntry | null;
-  limit: number;
-}
-
-/** One account's history as a store summarizes it — see
- *  {@link TimelineSource.digest}. */
-export interface AccountDigest {
-  /** The element of the `accounts` the store was given, not a copy of it. */
-  account: TimelineAccount;
-  /** The newest entry, first in {@link compareTimelineEntries} order. */
-  latest: TimelineEntry;
-  /** Every entry the store holds for the account. */
-  messageCount: number;
-}
-
-/**
- * One message store, as a person's timeline used to read it.
- *
- * Superseded by `Messages`: the merge below reads stores through that
- * interface, and nothing calls `holds`, `digest` or this `read` any more. The
- * declaration and its SQL implementations survive only until the account
- * directory moves too, and go with them.
- *
- * @deprecated Read a store as {@link Messages}.
- */
-export interface TimelineSource {
-  /** Stable, for tests and logs. Never {@link TimelineEntry.source}, which
-   *  names the channel an entry arrived on — one store serves several. */
-  readonly name: string;
-
-  /** Which of `accounts` this store holds any entry for. Order and identity of
-   *  the returned accounts are the caller's own; a store returns the elements
-   *  it was given. */
-  holds(accounts: readonly TimelineAccount[]): Promise<TimelineAccount[]>;
-
-  /**
-   * The same timeline {@link read} pages, summarized: the newest entry of each
-   * account, and how many entries it has in all.
-   *
-   * One read for a whole listing rather than one per person, and the newest
-   * entry is picked under {@link read}'s own ordering — so a directory row
-   * previews exactly the entry its dossier opens on, and its count is the
-   * length of exactly the history the dossier pages.
-   *
-   * Asked only about accounts {@link holds} has already given this store, so
-   * an account it holds nothing for is a person with no history rather than
-   * one whose history the next store down should have answered for.
-   */
-  digest(accounts: readonly TimelineAccount[]): Promise<AccountDigest[]>;
-
-  /**
-   * This store's newest entries for `accounts`, at most `limit` of them, every
-   * one strictly after `cursor`, in {@link compareTimelineEntries} order.
-   *
-   * "Strictly after `cursor`" is the store's own obligation and not the
-   * merge's: a store that answered its newest `limit` entries and left the
-   * filtering above it would spend that budget on entries the caller has
-   * already seen, and the entries it dropped to make room are the ones no page
-   * ever shows.
-   */
-  read(request: TimelineRead): Promise<TimelineEntry[]>;
 }
 
 /**

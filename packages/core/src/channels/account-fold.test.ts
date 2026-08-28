@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { AccountActivity } from "./account-activity.js";
-import { foldAccountRecords, foldAccounts, type MirrorPlane } from "./account-fold.js";
-import type { Account, AccountId } from "./accounts.js";
-import type { SentinelSenderActivity } from "../db/repositories/sentinel-log.js";
+import { foldAccounts } from "./account-fold.js";
+import type { Account, AccountId, Accounts } from "./accounts.js";
 
 const account = (id: string, addresses: string[] = [id], name: string | null = null): Account => ({
   id: id as AccountId,
@@ -11,37 +9,22 @@ const account = (id: string, addresses: string[] = [id], name: string | null = n
   identifiers: {},
 });
 
-const sender = (
-  channel: string,
-  channelUserId: string,
-  row: Partial<SentinelSenderActivity> = {},
-): SentinelSenderActivity => ({
-  channel,
-  channelUserId,
-  displayName: null,
-  lastMessage: null,
-  lastMessageAt: null,
-  messageCount: 1,
-  ...row,
-});
-
 /**
- * A channel that answers only what the fold is allowed to ask: a listing whose
- * accounts carry their own addressing sets, `resolve` for an address the
- * listing does not carry, and the activity half.
+ * A channel answering the whole of what a fold may ask it: a listing whose
+ * accounts carry their own addressing sets, and `resolve` for an address the
+ * listing does not carry.
  *
- * It holds no separate address map, so a fold that reaches for one fails here
- * rather than quietly reading a second source of the same answer.
+ * It is an `Accounts` and nothing more — no address map and no history — so a
+ * fold reaching for a second source of either fails here rather than quietly
+ * reading one.
  */
-class FakePlane implements MirrorPlane {
+class FakePlane implements Accounts {
   listings = 0;
-  activityReads = 0;
   readonly resolved: string[] = [];
 
   constructor(
     private readonly accounts: readonly Account[],
     private readonly options: {
-      activity?: Map<string, AccountActivity>;
       /** Addresses the listing does not carry, and the account each names. */
       resolves?: Map<string, Account>;
     } = {},
@@ -59,11 +42,6 @@ class FakePlane implements MirrorPlane {
       this.accounts.find((candidate) => candidate.addresses.includes(address)) ??
       null
     );
-  }
-
-  async listActivity(): Promise<Map<AccountId, AccountActivity>> {
-    this.activityReads++;
-    return (this.options.activity ?? new Map()) as Map<AccountId, AccountActivity>;
   }
 }
 
@@ -90,19 +68,6 @@ describe("foldAccounts", () => {
     expect(fold.canonical("whatsapp", ada)).toBe(ada);
     expect(fold.mirrorFor("whatsapp", adaLid)?.name).toBe("Ada");
     expect(whatsapp.listings).toBe(1);
-  });
-
-  it("asks no channel for a history", async () => {
-    const whatsapp = new FakePlane([account(ada, [ada, adaLid], "Ada")]);
-    const linkedin = new FakePlane([account("ACoAAAda0001")]);
-
-    await foldAccounts({ whatsapp, linkedin }, { stored: [] });
-
-    // The contacts list is the reason this fold exists apart from
-    // `foldAccountRecords`: it names who is one account and reads no message
-    // store to do it.
-    expect(whatsapp.activityReads).toBe(0);
-    expect(linkedin.activityReads).toBe(0);
   });
 
   it("leaves an account the channel holds one address for addressing itself", async () => {
@@ -145,32 +110,6 @@ describe("foldAccounts", () => {
     );
 
     expect(fold.canonical("whatsapp", adaLid)).toBe(ada);
-  });
-
-  it("files a triage row under the account, whichever address it named", async () => {
-    const whatsapp = new FakePlane([account(ada, [ada, adaLid], "Ada")], {
-      activity: new Map([
-        [ada, { lastMessageAt: 100, lastMessagePreview: "from the mirror", messageCount: 3 }],
-      ]),
-    });
-
-    const fold = await foldAccountRecords(
-      { whatsapp },
-      {
-        senders: [
-          sender("whatsapp", adaLid, { lastMessageAt: 200, lastMessage: "seen by triage" }),
-        ],
-        stored: [],
-      },
-    );
-
-    expect(fold.sendersFor("whatsapp", ada)).toHaveLength(1);
-    expect(fold.recordFor("whatsapp", adaLid)).toEqual({
-      latest: { source: "whatsapp", timestamp: 200, preview: "seen by triage" },
-      // The mirror's own count stands: a mirrored message and the triage row
-      // that saw it are one message.
-      messageCount: 3,
-    });
   });
 
   it("reads each channel once, whatever it is asked afterwards", async () => {

@@ -79,48 +79,20 @@ describe("WhatsAppAccounts", () => {
     expect((await accounts.resolve("99900099999@lid"))!.id).toBe("15550009999@s.whatsapp.net");
   });
 
-  it("maps every stored address, and the derived id, onto the one account", async () => {
+  it("carries every stored address, and the derived id, on the one account", async () => {
     await repo.upsertContacts([
       { jid: "15550009999@s.whatsapp.net", name: "Split Contact" },
       { jid: "99900099999@lid", phoneNumber: "15550009999" },
     ]);
 
-    const addresses = await accounts.listAddresses();
-    expect([...addresses.entries()].sort()).toEqual([
-      ["15550009999@s.whatsapp.net", "15550009999@s.whatsapp.net"],
-      ["99900099999@lid", "15550009999@s.whatsapp.net"],
+    // The listing is where a caller learns which addressings fold together, so
+    // the account has to carry all of them — the derived id among them, whether
+    // or not a row spelled it out.
+    const page = await accounts.listAccounts({ limit: 50 });
+    expect([...page.accounts[0].addresses].sort()).toEqual([
+      "15550009999@s.whatsapp.net",
+      "99900099999@lid",
     ]);
-  });
-
-  it("sums activity across both addressings of one account", async () => {
-    await repo.upsertContacts([
-      { jid: PHONE, phoneNumber: "15550007777", name: "One Contact" },
-      { jid: LID, phoneNumber: "15550007777" },
-    ]);
-    await repo.upsertMessages([
-      message("a", PHONE, "2026-08-20T10:00:00Z", "on phone"),
-      message("b", LID, "2026-08-21T10:00:00Z", "on lid"),
-    ]);
-
-    const activity = await accounts.listActivity();
-    expect(activity.size).toBe(1);
-    const seen = activity.get((await accounts.resolve(PHONE))!.id)!;
-    expect(seen.lastMessagePreview).toBe("on lid");
-    expect(seen.lastMessageAt).toBe(Date.parse("2026-08-21T10:00:00Z") / 1000);
-    expect(seen.messageCount).toBe(2);
-  });
-
-  it("leaves an account nothing was ever said to out of the activity read", async () => {
-    // Absent, not present and zeroed: a caller testing "silent" has one
-    // condition to read rather than two that can disagree.
-    await repo.upsertContacts([
-      { jid: PHONE, phoneNumber: "15550007777", name: "One Contact" },
-      { jid: "15550008888@s.whatsapp.net", phoneNumber: "15550008888", name: "Never Spoke" },
-    ]);
-    await repo.upsertMessages([message("a", PHONE, "2026-08-20T10:00:00Z", "hi")]);
-
-    const activity = await accounts.listActivity();
-    expect([...activity.keys()]).toEqual([PHONE]);
   });
 
   it("holds no name for an unnamed account, and still carries its number", async () => {
@@ -131,9 +103,10 @@ describe("WhatsAppAccounts", () => {
     expect(page.accounts[0].identifiers.phone).toBe("15550007777");
   });
 
-  it("answers a listing, its addresses and its activity from one read", async () => {
-    // The three are joined by the caller, so they must describe the same
-    // mirror — and a page of the People union should not cost three scans.
+  it("answers a listing and a resolve from one read", async () => {
+    // The two are joined by the caller — a fold lists the book and resolves the
+    // addresses it already holds — so they must describe the same mirror, and a
+    // whole directory should not cost a scan per call.
     await repo.upsertContacts([{ jid: PHONE, phoneNumber: "15550007777", name: "One Contact" }]);
     let reads = 0;
     const listContacts = repo.listContacts.bind(repo);
@@ -142,15 +115,11 @@ describe("WhatsAppAccounts", () => {
       return listContacts(opts);
     };
 
-    await Promise.all([
-      accounts.listAccounts({ limit: 50 }),
-      accounts.listActivity(),
-      accounts.listAddresses(),
-    ]);
+    await Promise.all([accounts.listAccounts({ limit: 50 }), accounts.resolve(PHONE)]);
     expect(reads).toBe(1);
 
     // The sharing lasts exactly as long as the read: a later caller sees a
-    // contact the first three could not have.
+    // contact the first two could not have.
     await repo.upsertContacts([{ jid: LID, phoneNumber: "15550008888", name: "Later" }]);
     expect((await accounts.listAccounts({ limit: 50 })).accounts).toHaveLength(2);
   });

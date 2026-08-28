@@ -71,11 +71,13 @@ describe("LinkedInAccounts", () => {
     expect(await accounts.resolve("ACoAASelf0003")).toBeNull();
   });
 
-  it("lists the member ids it holds, the guardian's own excluded", async () => {
-    expect([...(await accounts.listAddresses()).entries()]).toEqual([
-      ["ACoAAAda0001", "ACoAAAda0001"],
-      ["ACoAAGrace002", "ACoAAGrace002"],
-    ]);
+  it("addresses each member by its member id and nothing else", async () => {
+    // A member is stored under its member id alone; the profile URL that also
+    // names it is derived on sight, so `resolve` takes one and the listing
+    // never publishes it as an address.
+    const page = await accounts.listAccounts({ limit: 50 });
+
+    expect(page.accounts.map((a) => a.addresses)).toEqual([["ACoAAAda0001"], ["ACoAAGrace002"]]);
   });
 
   it("returns null for an unknown identifier", async () => {
@@ -95,69 +97,5 @@ describe("LinkedInAccounts", () => {
 
     const byName = await accounts.listAccounts({ limit: 50, query: "hopper" });
     expect(byName.accounts.map((a) => a.id)).toEqual(["ACoAAGrace002"]);
-  });
-
-  describe("activity", () => {
-    beforeEach(async () => {
-      // `t1` from the outer setup already holds Ada, Grace and the guardian, so
-      // it is a group by membership. Ada gets a 1:1 alongside it.
-      await repo.upsertThreads([
-        {
-          threadId: "t-direct",
-          threadUrl: "https://www.linkedin.com/messaging/thread/t-direct/",
-          personName: "Ada Lovelace",
-          unread: false,
-        },
-      ]);
-      await repo.upsertThreadParticipants("t-direct", [ada, self]);
-      await repo.upsertMessages([
-        {
-          messageId: "m-1",
-          threadId: "t-direct",
-          sentAt: new Date("2026-08-19T10:00:00Z"),
-          senderName: "Ada Lovelace",
-          senderProfileUrl: "https://www.linkedin.com/in/ACoAAAda0001/",
-          senderHeadline: null,
-          senderType: "member",
-          senderIsSelf: false,
-          text: "See you Thursday",
-          subject: null,
-          reactionCount: null,
-        },
-        {
-          messageId: "m-2",
-          threadId: "t1",
-          sentAt: new Date("2026-08-20T10:00:00Z"),
-          senderName: "Grace Hopper",
-          senderProfileUrl: "https://www.linkedin.com/in/ACoAAGrace002/",
-          senderHeadline: null,
-          senderType: "member",
-          senderIsSelf: false,
-          text: "hello everyone",
-          subject: null,
-          reactionCount: null,
-        },
-      ]);
-    });
-
-    it("reports what a member's direct threads carried", async () => {
-      const activity = await accounts.listActivity();
-
-      expect(activity.get("ACoAAAda0001" as never)).toEqual({
-        lastMessageAt: Math.floor(Date.parse("2026-08-19T10:00:00Z") / 1000),
-        lastMessagePreview: "See you Thursday",
-        messageCount: 1,
-      });
-    });
-
-    it("leaves a member Rome only shares a group with absent, not zeroed", async () => {
-      // The contract's "silent" is one condition to test, and a group message is
-      // nobody's: a `TimelineEntry` names no sender.
-      const activity = await accounts.listActivity();
-
-      expect(activity.has("ACoAAGrace002" as never)).toBe(false);
-      // Still an account, though — silence is not absence from the address book.
-      expect((await accounts.resolve("ACoAAGrace002"))!.name).toBe("Grace Hopper");
-    });
   });
 });

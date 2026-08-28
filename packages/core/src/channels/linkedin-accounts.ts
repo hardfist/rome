@@ -1,5 +1,4 @@
-import type { Account, AccountId, TalkAccounts } from "./accounts.js";
-import type { AccountActivity, TalkAccountActivity } from "./account-activity.js";
+import type { Account, AccountId, Accounts } from "./accounts.js";
 import { pageAccounts } from "./account-paging.js";
 import { sharedRead } from "./account-snapshot.js";
 import { linkedInMemberIdFromProfileUrl } from "./linkedin-sync.js";
@@ -9,7 +8,7 @@ import type {
 } from "../db/repositories/linkedin-store.js";
 
 /**
- * `TalkAccounts` over the LinkedIn inbox mirror (`linkedin_participants`).
+ * `Accounts` over the LinkedIn inbox mirror (`linkedin_participants`).
  *
  * LinkedIn hands out two identifiers for one member — the bare member id
  * (`ACoAA…`) and the profile URL that contains it — and the second folds onto
@@ -21,7 +20,7 @@ import type {
  * The guardian's own `isSelf` row is not an account: it names the viewer, not
  * someone the channel reaches.
  */
-export class LinkedInAccounts implements TalkAccounts, TalkAccountActivity {
+export class LinkedInAccounts implements Accounts {
   constructor(private readonly store: LinkedInStoreRepository) {}
 
   async listAccounts(input: {
@@ -38,36 +37,6 @@ export class LinkedInAccounts implements TalkAccounts, TalkAccountActivity {
     if (!memberId) return null;
     const { byId } = await this.load();
     return byId.get(memberId) ?? null;
-  }
-
-  async listAddresses(): Promise<Map<string, AccountId>> {
-    // A member is stored under its member id and nothing else; the profile URL
-    // that also names it is derived on sight, not held, so `resolve` is what
-    // takes one.
-    const { accounts } = await this.load();
-    const addresses = new Map<string, AccountId>();
-    for (const account of accounts) addresses.set(account.id, account.id);
-    return addresses;
-  }
-
-  /**
-   * What the mirror holds on each member's *direct* threads, and nothing from
-   * the group ones — see `DIRECT_THREADS` in the store for why a room of ten
-   * people is nobody's history. A member Rome only shares group threads with is
-   * absent here rather than zeroed, which is the contract's own "silent".
-   */
-  async listActivity(): Promise<Map<AccountId, AccountActivity>> {
-    const { rows } = await this.load();
-    const activity = new Map<AccountId, AccountActivity>();
-    for (const row of rows) {
-      if (row.lastMessageAt == null) continue;
-      activity.set(row.participantId as AccountId, {
-        lastMessageAt: row.lastMessageAt,
-        lastMessagePreview: row.lastMessagePreview,
-        messageCount: row.messageCount,
-      });
-    }
-    return activity;
   }
 
   /**

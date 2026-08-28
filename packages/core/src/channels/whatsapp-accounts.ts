@@ -1,5 +1,4 @@
-import type { Account, AccountId, TalkAccounts } from "./accounts.js";
-import type { AccountActivity, TalkAccountActivity } from "./account-activity.js";
+import type { Account, AccountId, Accounts } from "./accounts.js";
 import { pageAccounts } from "./account-paging.js";
 import { sharedRead } from "./account-snapshot.js";
 import type {
@@ -42,7 +41,7 @@ function firstNonEmpty(...values: Array<string | null>): string | null {
 }
 
 /**
- * `TalkAccounts` over the WhatsApp address-book mirror (`wa_contacts`).
+ * `Accounts` over the WhatsApp address-book mirror (`wa_contacts`).
  *
  * WhatsApp addresses one person two ways — the phone-number JID
  * (`<pn>@s.whatsapp.net`) and the privacy LID (`<lid>@lid`) — and the mirror
@@ -66,7 +65,7 @@ function firstNonEmpty(...values: Array<string | null>): string | null {
  *   then a phone-number row for the same person is a second `Account` (I1).
  *   Nothing links the two but the name, and names are not identity.
  */
-export class WhatsAppAccounts implements TalkAccounts, TalkAccountActivity {
+export class WhatsAppAccounts implements Accounts {
   constructor(private readonly store: WhatsAppStoreRepository) {}
 
   async listAccounts(input: {
@@ -86,41 +85,6 @@ export class WhatsAppAccounts implements TalkAccounts, TalkAccountActivity {
       if (hit) return hit;
     }
     return null;
-  }
-
-  async listAddresses(): Promise<Map<string, AccountId>> {
-    const { grouped } = await this.load();
-    const addresses = new Map<string, AccountId>();
-    for (const [id, group] of grouped) {
-      // The id first: it is derived from the account's digits, so it is an
-      // address the account answers to whether or not a row spells it out.
-      addresses.set(id, id);
-      for (const row of group) {
-        for (const alias of row.aliases) addresses.set(alias, id);
-      }
-    }
-    return addresses;
-  }
-
-  async listActivity(): Promise<Map<AccountId, AccountActivity>> {
-    const { grouped } = await this.load();
-    const activity = new Map<AccountId, AccountActivity>();
-    for (const [id, group] of grouped) {
-      // A conversation usually sits on one addressing, but history split across
-      // both is two rows here, so the newest wins and the counts add.
-      const newest = group.reduce(
-        (best, row) => ((row.lastMessageAt ?? -1) > (best.lastMessageAt ?? -1) ? row : best),
-        group[0],
-      );
-      const messageCount = group.reduce((n, row) => n + row.messageCount, 0);
-      if (newest.lastMessageAt == null) continue;
-      activity.set(id, {
-        lastMessageAt: newest.lastMessageAt,
-        lastMessagePreview: newest.lastMessagePreview,
-        messageCount,
-      });
-    }
-    return activity;
   }
 
   /**

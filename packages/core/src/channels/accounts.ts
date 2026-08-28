@@ -74,8 +74,13 @@ export interface Accounts {
    * by activity, so an account can move between two pages and be skipped or
    * repeated. A caller that needs every account exactly once asks for one page
    * large enough to hold the listing.
+   *
+   * Each account carries its own {@link Account.addresses}, so this is also how
+   * a caller learns which addressings fold together. There is no separate
+   * address map to ask for: a second answer to a question the listing already
+   * answers is a second answer to disagree with.
    */
-  list(input: {
+  listAccounts(input: {
     query?: string;
     cursor?: string;
     limit: number;
@@ -84,43 +89,4 @@ export interface Accounts {
   /** The account an address belongs to, or null. Accepts any address the
    *  channel can receive on — and an {@link AccountId}, which round-trips. */
   resolve(address: string): Promise<Account | null>;
-}
-
-/** The address book behind the account directory and the fold. Every
- *  implementation owes {@link Accounts}' four invariants. */
-export interface TalkAccounts {
-  /**
-   * One page of the channel's accounts, in a stable order. `query` matches the
-   * name and the identifier values. `cursor` is opaque and comes from a prior
-   * page. A missing `nextCursor` means the listing is exhausted.
-   *
-   * The order is stable, the listing underneath it is not. A channel may order
-   * by activity, so an account can move between two pages and be skipped or
-   * repeated. A caller that needs every account exactly once asks for one page
-   * large enough to hold the listing.
-   */
-  listAccounts(input: {
-    query?: string;
-    cursor?: string;
-    limit: number;
-  }): Promise<{ accounts: Account[]; nextCursor?: string }>;
-
-  /** The account an identifier belongs to, or null. Accepts any identifier the
-   *  channel can receive on — and an {@link AccountId}, which round-trips. */
-  resolve(identifier: string): Promise<Account | null>;
-
-  /**
-   * Every address the channel stores, mapped to the account that owns it — I4
-   * read whole instead of one identifier at a time.
-   *
-   * For a caller folding a stored table of identifiers onto accounts: a channel
-   * that mirrors its address book locally answers `resolve` from a full read,
-   * so resolving a table row by row costs one full read per row. The same map
-   * inverted is the addressing set of an account, which a caller needs whenever
-   * it must show or match every form an account can be reached at.
-   *
-   * The addresses are the ones the channel holds. A lone identifier that misses
-   * here may still be a form the channel accepts — `resolve` is what takes it.
-   */
-  listAddresses(): Promise<Map<string, AccountId>>;
 }

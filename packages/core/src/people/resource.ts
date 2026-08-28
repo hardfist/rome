@@ -12,7 +12,7 @@
 import type { PersonResource } from "@rome/api-types/people";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import type { AccountNames } from "../channels/account-names.js";
-import type { TalkAccounts } from "../channels/accounts.js";
+import type { Accounts } from "../channels/accounts.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { readPeopleActivity } from "./activity.js";
@@ -21,7 +21,7 @@ import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
 export interface PeopleReadDeps {
   db: DrizzleDb;
   personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings" | "findById">;
-  whatsAppAccounts: TalkAccounts;
+  whatsAppAccounts: Accounts;
   accountNames: Pick<AccountNames, "displayNames">;
 }
 

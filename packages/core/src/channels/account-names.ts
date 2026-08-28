@@ -1,4 +1,4 @@
-// What every platform calls its accounts, behind one call. `TalkAccounts`
+// What every platform calls its accounts, behind one call. `Accounts`
 // (accounts.ts) is one channel's address book; this is the display-name half of
 // all of them folded together, so a caller holding a (channel, channelUserId)
 // pair — the identity of an account, per docs/concepts/identity.md — never
@@ -7,18 +7,18 @@
 
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { mirrorRegistry } from "./account-fold.js";
-import type { TalkAccounts } from "./accounts.js";
+import type { Accounts } from "./accounts.js";
 
 /**
  * What to call an account, on any channel.
  *
- * A channel joins by implementing `TalkAccounts`, which is what a channel that
+ * A channel joins by implementing `Accounts`, which is what a channel that
  * mirrors an address book owes anyway. A channel Rome only ever sees senders on
  * implements nothing and falls through to the names those senders sent.
  */
 export class AccountNames {
   constructor(
-    private readonly providers: Readonly<Record<string, Pick<TalkAccounts, "resolve">>>,
+    private readonly providers: Readonly<Record<string, Pick<Accounts, "resolve">>>,
     private readonly senderNames: Pick<SentinelLogRepository, "listLatestDisplayNames">,
   ) {}
 
@@ -74,11 +74,11 @@ export class AccountNames {
 /** A provider joins the directory by taking an entry in {@link mirrorRegistry},
  *  and every caller keeps asking the same one question. */
 export function createAccountNames(deps: {
-  whatsAppAccounts: TalkAccounts;
-  linkedInAccounts: TalkAccounts;
+  whatsAppAccounts: Accounts;
+  linkedInAccounts: Accounts;
   sentinelLogRepo: SentinelLogRepository;
 }): AccountNames {
-  return new AccountNames(mirrorRegistry<TalkAccounts>(deps), deps.sentinelLogRepo);
+  return new AccountNames(mirrorRegistry<Accounts>(deps), deps.sentinelLogRepo);
 }
 
 const key = (account: { channel: string; channelUserId: string }) =>

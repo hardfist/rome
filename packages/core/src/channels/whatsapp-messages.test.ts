@@ -1,16 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { countingDb, createTestDb, type TestDb } from "../test/helpers.js";
 import { waMessages } from "../db/schema.js";
-import { whatsAppMirrorSource } from "../people/timeline-sources.js";
 import { testMessagesContract, WHOLE_HISTORY } from "./messages-contract.js";
 import { whatsAppMessages } from "./whatsapp-messages.js";
 import type { MessageAccount } from "./messages.js";
 
 // `wa_messages` as a `Messages` store. What it must answer is the contract
-// suite's; what it must leave out is the mirror's own scoping, which this
-// checks against the `TimelineSource` the store is moving off — the two read
-// the same mirror, so an answer they disagree about is a message a person's
-// timeline gains or loses in the move.
+// suite's; what it must leave out is the mirror's own scoping — a group thread,
+// a reaction, another contact — which is what the cases below pin.
 
 // One account, addressed both ways WhatsApp addresses a contact.
 const PHONE = "15550001@s.whatsapp.net";
@@ -19,8 +16,6 @@ const LID = "8877@lid";
 const OTHER = "15559999@s.whatsapp.net";
 const GROUP = "1200000@g.us";
 
-// Mutable `addresses`, so one scope serves both the store under test and the
-// timeline source it is checked against.
 const account = { channel: "whatsapp", addresses: [PHONE, LID] };
 const accounts = [account];
 const silent = [{ channel: "whatsapp", addresses: ["15554444@s.whatsapp.net"] }];
@@ -123,16 +118,31 @@ describe("whatsAppMessages", () => {
     expect(await messages.read({ accounts: [], limit: WHOLE_HISTORY })).toEqual([]);
   });
 
-  it("scopes exactly as the timeline source it replaces", async () => {
+  // The scope is the account's addressing set, and the three verbs answer one
+  // history over it: `count` is the length of the full read and `latest` its
+  // first entry. Per scope rather than once, because a store that scoped `read`
+  // one way and `count` another would still agree on the widest scope there is.
+  it.each([
+    {
+      scope: accounts,
+      of: "both addressings of the account",
+      refs: [`${PHONE}:e`, `${PHONE}:c`, `${LID}:d`, `${PHONE}:a`],
+    },
+    // `d` arrived on the `@lid` addressing, so a scope naming only the phone
+    // leaves it out — the addressing set is the scope, not the account.
+    {
+      scope: [{ channel: "whatsapp", addresses: [PHONE] }],
+      of: "one addressing",
+      refs: [`${PHONE}:e`, `${PHONE}:c`, `${PHONE}:a`],
+    },
+    { scope: silent, of: "a contact the mirror holds nothing for", refs: [] },
+  ])("answers read, count and latest over $of", async ({ scope, refs: expected }) => {
     const messages = whatsAppMessages(testDb.db);
-    const source = whatsAppMirrorSource(testDb.db);
-    const scopes = [accounts, [{ channel: "whatsapp", addresses: [PHONE] }], silent];
-    for (const scope of scopes) {
-      const mirrored = await source.read({ accounts: scope, cursor: null, limit: WHOLE_HISTORY });
-      expect(await messages.read({ accounts: scope, limit: WHOLE_HISTORY })).toEqual(mirrored);
-      expect(await messages.count(scope)).toBe(mirrored.length);
-      expect(await messages.latest(scope)).toEqual(mirrored[0] ?? null);
-    }
+    const page = await messages.read({ accounts: scope, limit: WHOLE_HISTORY });
+
+    expect(refs(page)).toEqual(expected);
+    expect(await messages.count(scope)).toBe(page.length);
+    expect(await messages.latest(scope)).toEqual(page[0] ?? null);
   });
 
   it("serves concurrent latest and read calls from one store pass", async () => {

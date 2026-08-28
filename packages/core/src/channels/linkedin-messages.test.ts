@@ -1,15 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { countingDb, createTestDb, type TestDb } from "../test/helpers.js";
 import { linkedinMessages, linkedinThreadParticipants, linkedinThreads } from "../db/schema.js";
-import { linkedInMirrorSource } from "../people/timeline-sources.js";
 import { testMessagesContract, WHOLE_HISTORY } from "./messages-contract.js";
 import { linkedInMessages } from "./linkedin-messages.js";
 import type { MessageAccount } from "./messages.js";
 
 // `linkedin_messages` as a `Messages` store. The mirror holds group threads
 // and rooms the guardian is one of many in; a person's history is the threads
-// that are a conversation between two people, and this checks that scope
-// against the `TimelineSource` the store is moving off.
+// that are a conversation between two people, and that scope is what the cases
+// below pin.
 
 const SELF = "ACoAASELF";
 const MEMBER = "ACoAAMEMBER";
@@ -19,8 +18,6 @@ const OTHER = "ACoAAOTHER";
 const TWIN_A = "ACoAATWINA";
 const TWIN_B = "ACoAATWINB";
 
-// Mutable `addresses`, so one scope serves both the store under test and the
-// timeline source it is checked against.
 const account = { channel: "linkedin", addresses: [MEMBER] };
 const accounts = [account];
 const silent = [{ channel: "linkedin", addresses: ["ACoAASILENT"] }];
@@ -190,24 +187,42 @@ describe("linkedInMessages", () => {
     expect(await messages.read({ accounts: [], limit: WHOLE_HISTORY })).toEqual([]);
   });
 
-  it("scopes exactly as the timeline source it replaces", async () => {
-    const messages = linkedInMessages(testDb.db);
-    const source = linkedInMirrorSource(testDb.db);
-    const scopes = [
-      accounts,
-      [{ channel: "linkedin", addresses: [OTHER] }],
-      [
+  // The scope is the member ids an account answers to, and the three verbs
+  // answer one history over it: `count` is the length of the full read and
+  // `latest` its first entry. Per scope rather than once, because a store that
+  // scoped `read` one way and `count` another would still agree on the widest
+  // scope there is.
+  it.each([
+    {
+      of: "a member's direct thread",
+      scope: accounts,
+      refs: ["t-direct:e", "t-direct:c", "t-direct:d", "t-direct:b", "t-direct:a"],
+    },
+    // `t-room` is three-handed and `t-flagged` is a group, so neither is any
+    // member's direct history — only `t-other` is.
+    {
+      of: "a member reached on one direct thread",
+      scope: [{ channel: "linkedin", addresses: [OTHER] }],
+      refs: ["t-other:h"],
+    },
+    // One person holding two member ids, both on the thread: one message, not
+    // one per participant.
+    {
+      of: "one account under two member ids",
+      scope: [
         { channel: "linkedin", addresses: [TWIN_A] },
         { channel: "linkedin", addresses: [TWIN_B] },
       ],
-      silent,
-    ];
-    for (const scope of scopes) {
-      const mirrored = await source.read({ accounts: scope, cursor: null, limit: WHOLE_HISTORY });
-      expect(await messages.read({ accounts: scope, limit: WHOLE_HISTORY })).toEqual(mirrored);
-      expect(await messages.count(scope)).toBe(mirrored.length);
-      expect(await messages.latest(scope)).toEqual(mirrored[0] ?? null);
-    }
+      refs: ["t-twins:i"],
+    },
+    { of: "a member the mirror holds nothing for", scope: silent, refs: [] },
+  ])("answers read, count and latest over $of", async ({ scope, refs: expected }) => {
+    const messages = linkedInMessages(testDb.db);
+    const page = await messages.read({ accounts: scope, limit: WHOLE_HISTORY });
+
+    expect(refs(page)).toEqual(expected);
+    expect(await messages.count(scope)).toBe(page.length);
+    expect(await messages.latest(scope)).toEqual(page[0] ?? null);
   });
 
   it("serves concurrent latest and read calls from one store pass", async () => {

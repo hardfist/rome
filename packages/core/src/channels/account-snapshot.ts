@@ -2,11 +2,11 @@
  * The read-sharing half of a mirrored account plane, for a channel that folds
  * its whole address book on every call.
  *
- * A `TalkAccounts` consumer usually needs several answers about the same
- * mirror at once — a listing, its addresses, its activity — and each is its own
- * method. Wrapping the fold here makes those one read of one mirror, so the
- * answers cannot describe address books a sync moved between, and a caller that
- * asks for all three pays for one.
+ * An `Accounts` consumer usually needs several answers about the same mirror
+ * at once — a listing, and a `resolve` for each address it already holds — and
+ * each is its own call. Wrapping the fold here makes those one read of one
+ * mirror, so the answers cannot describe address books a sync moved between,
+ * and a caller that asks for all of them pays for one.
  *
  * This is not a cache. The shared window closes the moment the read settles, so
  * nothing outlives a sync and no invalidation is owed. A channel that wants to
