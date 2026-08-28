@@ -821,7 +821,24 @@ export interface PlanUpdateMessage {
   plan: AgentPlan;
 }
 
+export type AgentInputState =
+  | "queued"
+  | "submitted"
+  | "accepted"
+  | "consumed"
+  | "unknown"
+  | "cancelled"
+  | "failed";
+
+export interface InputStatusMessage {
+  type: "input_status";
+  inputId: string;
+  state: AgentInputState;
+  turnId?: string;
+}
+
 export type AgentMessage =
+  | InputStatusMessage
   | TurnStartMessage
   | TurnEndMessage
   | TextMessage

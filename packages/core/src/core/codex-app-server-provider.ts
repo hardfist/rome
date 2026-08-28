@@ -255,6 +255,8 @@ interface ActiveTurn {
   imageTracker: GeneratedImageTracker;
   romeTools: RomeDynamicTools;
   turnId: string | null;
+  initialInputId?: string;
+  completed: boolean;
   /** Usage accumulated across every model request in this Rome turn. */
   usage?: TokenUsageBreakdown;
   /** Per-request usage retained so non-linear pricing is applied correctly. */
@@ -404,6 +406,8 @@ export class CodexAppServerProvider implements ModelProvider {
     // be replaced.
     let contaminatedReason: string | null = null;
     let activeTurn: ActiveTurn | null = null;
+    let sourceStarted: Promise<void> = Promise.resolve();
+    let resolveSourceStarted: (() => void) | undefined;
     let lastCompletedTurnCheckpoint: string | undefined;
     const dynamicToolOutputs = new Map<string, unknown>();
     const usageByTurnId = new Map<
@@ -424,6 +428,18 @@ export class CodexAppServerProvider implements ModelProvider {
 
     const onItem = (item: ThreadItem, lifecycle: "started" | "completed"): void => {
       const turnSink = activeTurn?.sink ?? sink;
+      if (item.type === "userMessage" && lifecycle === "completed") {
+        const clientId = (item as { clientId?: unknown }).clientId;
+        if (typeof clientId === "string") {
+          if (
+            activeTurn?.ownerSessionId === params.sessionId &&
+            clientId === activeTurn.initialInputId
+          )
+            resolveSourceStarted?.();
+          turnSink.push({ type: "input_status", inputId: clientId, state: "consumed" });
+        }
+        return;
+      }
       const turnImageTraceCtx = activeTurn?.imageTraceCtx ?? imageTraceCtx;
       if (isAgentMessageItem(item)) {
         if (lifecycle !== "completed") return;
@@ -595,6 +611,7 @@ export class CodexAppServerProvider implements ModelProvider {
           const p = params2 as TurnCompletedNotification;
           if (activeTurn) {
             if (activeTurn.turnId && activeTurn.turnId !== p.turn?.id) return;
+            activeTurn.completed = true;
             if (p.turn?.status === "failed") {
               // `turn.error` is a structured `TurnError` object (camelCase),
               // not a string — extract the human message and classify quota
@@ -623,6 +640,7 @@ export class CodexAppServerProvider implements ModelProvider {
           const code = classification.code;
           if (activeTurn) {
             // Route the terminal through runOne (see turn/completed).
+            activeTurn.completed = true;
             activeTurn.failed = true;
             activeTurn.errorMessage = message;
             activeTurn.errorCode = code;
@@ -750,6 +768,8 @@ export class CodexAppServerProvider implements ModelProvider {
         imageTracker: runtime.imageTracker,
         romeTools: runtime.romeTools,
         turnId: null,
+        initialInputId: inputs[0]?.inputId,
+        completed: false,
         requestUsages: [],
         finalText: "",
         startedAt: Date.now(),
@@ -764,11 +784,16 @@ export class CodexAppServerProvider implements ModelProvider {
       activeTurn = turn;
       const effort = normalizeEffort(inputs.at(-1)?.reasoningEffort ?? params.reasoningEffort);
       try {
-        await this.appServerManager.requestForThread(tid, Method.turnStart, {
+        const started = (await this.appServerManager.requestForThread(tid, Method.turnStart, {
           threadId: tid,
           input: turnInput,
           effort,
-        });
+          ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
+        })) as { turn?: { id?: string } } | undefined;
+        turn.turnId ??= started?.turn?.id ?? null;
+        // turn/start can acknowledge before the native input becomes steerable.
+        // Identified chat inputs wait for their user-message confirmation.
+        if (runtime === sourceRuntime && !turn.initialInputId) resolveSourceStarted?.();
         await done;
         // Turn finished. Drain deferred image-generation trace work and the
         // filesystem backstop BEFORE the terminal block — the agent session
@@ -826,20 +851,83 @@ export class CodexAppServerProvider implements ModelProvider {
           );
         }
       } finally {
+        if (runtime === sourceRuntime) resolveSourceStarted?.();
         if (turn.turnId) usageByTurnId.delete(turn.turnId);
         activeTurn = null;
       }
     };
 
     const dispatcher = new TurnDispatcher<ModelUserInput>({
-      runOne: async (inputs) =>
-        await turnCoordinator.run(async () => await runOne(inputs, sourceRuntime)),
+      runOne: async (inputs) => {
+        try {
+          await turnCoordinator.run(async () => await runOne(inputs, sourceRuntime));
+        } finally {
+          resolveSourceStarted?.();
+        }
+      },
     });
 
     session.sendUserInput = async (input: ModelUserInput) => {
       if (closed || closing) throw new Error("ModelSession is closed");
       if (contaminatedReason) throw new Error(contaminatedReason);
-      if (input.text) dispatcher.enqueue(input);
+      if (input.text) {
+        sourceStarted = new Promise<void>((resolve) => {
+          resolveSourceStarted = resolve;
+        });
+        dispatcher.enqueue(input);
+      }
+    };
+
+    session.steerUserInput = async (input) => {
+      await sourceStarted;
+      const turn = activeTurn;
+      if (!turn || turn.completed || turn.ownerSessionId !== params.sessionId || !turn.turnId)
+        return "deferred";
+      if (closed || closing) throw new Error("ModelSession is closed");
+      if (input.injectedToolResult) return "deferred";
+      if (
+        input.reasoningEffort &&
+        normalizeEffort(input.reasoningEffort) !== normalizeEffort(params.reasoningEffort)
+      )
+        return "deferred";
+      const nativeInput = await buildTurnInput(input.text, input.images ?? []);
+      if (activeTurn !== turn || turn.completed) return "deferred";
+      const response = this.appServerManager.requestForThread(threadId!, Method.turnSteer, {
+        threadId,
+        expectedTurnId: turn.turnId,
+        clientUserMessageId: input.inputId,
+        input: nativeInput,
+      });
+      let timeout: ReturnType<typeof setTimeout>;
+      const request = Promise.race([
+        response,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("Steering acknowledgement timed out; delivery is unknown")),
+            10_000,
+          );
+          timeout.unref?.();
+        }),
+      ]).finally(() => clearTimeout(timeout));
+      // A terminal must not overtake a steering RPC's definitive rejection.
+      turn.pending.push(
+        request.then(
+          () => {},
+          () => {},
+        ),
+      );
+      try {
+        await request;
+        return "accepted";
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.name === "AppServerRpcError" &&
+          /no active turn|expected.*turn|turn.*mismatch/i.test(error.message)
+        )
+          return "deferred";
+        throw error;
+      }
     };
 
     const interruptOwnerTurn = async (ownerSessionId: string, reason?: string): Promise<void> => {

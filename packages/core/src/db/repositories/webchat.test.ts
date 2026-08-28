@@ -44,6 +44,46 @@ describe("WebChatRepository", () => {
     testDb.close();
   });
 
+  it("persists input identity, consumption binding, and uncertain recovery without replay", async () => {
+    await repo.createSession("input-session", "Inputs");
+    expect(await repo.recordUserInput("first", "input-session", "[]")).toBe(true);
+    expect(await repo.recordUserInput("first", "input-session", "[]")).toBe(false);
+    await repo.recordUserInput("second", "input-session", "[]");
+    await repo.updateUserInput("input-session", {
+      type: "input_status",
+      inputId: "first",
+      turnId: "turn-a",
+      state: "consumed",
+    });
+    await repo.updateUserInput("input-session", {
+      type: "input_status",
+      inputId: "second",
+      turnId: "turn-a",
+      state: "accepted",
+    });
+    await repo.recoverInterruptedInputs();
+    expect(await repo.getUserInput("input-session", "first")).toEqual({
+      turnId: "turn-a",
+      inputState: "consumed",
+    });
+    expect(await repo.getUserInput("input-session", "second")).toEqual({
+      turnId: "turn-a",
+      inputState: "unknown",
+    });
+    await repo.updateUserInput("input-session", {
+      type: "input_status",
+      inputId: "second",
+      turnId: "turn-b",
+      state: "consumed",
+    });
+    expect(
+      (await repo.getMessages("input-session")).map(({ id, turnId }) => ({ id, turnId })),
+    ).toEqual([
+      { id: "first", turnId: "turn-a" },
+      { id: "second", turnId: "turn-b" },
+    ]);
+  });
+
   it("lists sessions with message counts and project names", async () => {
     await repo.createSession("sess-1", "Chat A", "guardian-1");
     await repo.createSession("sess-2", "Chat B");

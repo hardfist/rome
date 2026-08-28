@@ -11,12 +11,14 @@ import {
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWebchatRuntime } from "./webchat.js";
+import { AgentInputQueue } from "../../core/agent-input-queue.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import type {
   AgentSession,
   AgentSessionInit,
+  AgentTurnHandle,
   AgentTurnInput,
   SendTurnOptions,
 } from "../../core/agent-session.js";
@@ -49,6 +51,154 @@ describe("Webchat API", () => {
       delete process.env.ROME_PROJECTS_ROOT;
     } else {
       process.env.ROME_PROJECTS_ROOT = originalProjectsRoot;
+    }
+  });
+
+  it("persists appended inputs once and keeps one stream owner", async () => {
+    let finish!: () => void;
+    const terminal = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const steerUserInput = vi.fn().mockResolvedValue("accepted" as const);
+    const start = vi.fn(
+      (): AgentTurnHandle => ({
+        turnId: "input-turn",
+        turnContext: otelContext.active(),
+        getSubmittedOutput: () => undefined,
+        events: (async function* () {
+          await terminal;
+          yield { type: "result" as const, content: "" };
+        })(),
+      }),
+    );
+    const queue = new AgentInputQueue(
+      start,
+      () => ({ steerUserInput }),
+      (error) => {
+        throw error;
+      },
+    );
+    const agent: AgentSession = {
+      key: { agentName: "main", channelThreadKey: "webchat:test" },
+      sessionId: "agent-session",
+      status: "running",
+      currentTurnId: "input-turn",
+      sendTurn: start,
+      submitInput: (input, options) => queue.submit(input, options),
+      subscribe: () => () => {},
+      onStatusChange: () => () => {},
+      interrupt: async () => {},
+      close: async () => {},
+      getSubmittedOutput: () => undefined,
+    };
+    deps.agentSessionManager = {
+      acquire: vi.fn(async () => agent),
+      peek: () => agent,
+      shutdown: async () => {},
+    };
+    const app = createWebchatRuntime(deps).routes;
+    const created = await app.request("/chat/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Inputs" }),
+    });
+    const { id } = (await created.json()) as { id: string };
+    const post = (inputId: string, text: string) =>
+      app.request(`/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ inputId, text }),
+      });
+    const a = "00000000-0000-4000-8000-000000000001";
+    const b = "00000000-0000-4000-8000-000000000002";
+    try {
+      const firstSubmissions = await Promise.all([post(a, "first"), post(a, "first")]);
+      expect(firstSubmissions.map((response) => response.status)).toEqual([200, 200]);
+      expect(start).toHaveBeenCalledOnce();
+      queue.ready("input-turn");
+      expect(await (await post(b, "second")).json()).toMatchObject({
+        inputId: b,
+        turnId: "input-turn",
+        disposition: "steering",
+      });
+      await vi.waitFor(() => expect(steerUserInput).toHaveBeenCalledOnce());
+      await queue.observe({ type: "input_status", inputId: b, state: "consumed" }, "input-turn");
+      expect((await post(b, "second")).status).toBe(200);
+      expect(steerUserInput).toHaveBeenCalledOnce();
+      expect(start).toHaveBeenCalledOnce();
+      const inputs = (await deps.webchatRepo.getMessages(id)).filter(
+        (message) => message.role === "user",
+      );
+      expect(inputs).toHaveLength(2);
+      expect(inputs.find((message) => message.id === b)).toMatchObject({
+        inputState: "consumed",
+        turnId: "input-turn",
+      });
+      expect(await (await app.request(`/chat/sessions/${id}/turns`)).json()).toHaveLength(1);
+    } finally {
+      finish();
+    }
+  });
+
+  it("refuses a queued turn's Stop without interrupting the active turn", async () => {
+    const finishers: (() => void)[] = [];
+    let sequence = 0;
+    const interrupt = vi.fn(async () => {});
+    const agent: AgentSession = {
+      key: { agentName: "main", channelThreadKey: "webchat:test" },
+      sessionId: "agent-session",
+      status: "running",
+      currentTurnId: "stop-1",
+      sendTurn: () => {
+        const turnId = `stop-${++sequence}`;
+        const terminal = new Promise<void>((resolve) => {
+          finishers.push(resolve);
+        });
+        return {
+          turnId,
+          turnContext: otelContext.active(),
+          getSubmittedOutput: () => undefined,
+          events: (async function* () {
+            await terminal;
+            yield { type: "result" as const, content: "" };
+          })(),
+        };
+      },
+      subscribe: () => () => {},
+      onStatusChange: () => () => {},
+      interrupt,
+      close: async () => {},
+      getSubmittedOutput: () => undefined,
+    };
+    deps.agentSessionManager = {
+      acquire: vi.fn(async () => agent),
+      peek: () => agent,
+      shutdown: async () => {},
+    };
+    const app = createWebchatRuntime(deps).routes;
+    const created = await app.request("/chat/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Stop" }),
+    });
+    const { id } = (await created.json()) as { id: string };
+    try {
+      for (const text of ["first", "second"])
+        await app.request(`/chat/sessions/${id}/turns`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+      expect((await app.request("/chat/turns/stop-2/interrupt", { method: "POST" })).status).toBe(
+        409,
+      );
+      expect(interrupt).not.toHaveBeenCalled();
+      expect((await app.request("/chat/turns/stop-1/interrupt", { method: "POST" })).status).toBe(
+        200,
+      );
+      expect(interrupt).toHaveBeenCalledWith("user-stop", "stop-1");
+    } finally {
+      for (const finish of finishers) finish();
     }
   });
 

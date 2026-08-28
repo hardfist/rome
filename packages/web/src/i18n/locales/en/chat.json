@@ -1,5 +1,13 @@
 {
   "title": "Rome",
+  "inputState": {
+    "queued": "Waiting to be included",
+    "submitted": "Sending to agent",
+    "accepted": "Received by agent · awaiting inclusion",
+    "unknown": "Delivery unconfirmed · not sent again",
+    "cancelled": "Cancelled",
+    "failed": "Not delivered"
+  },
   "documentTitle": "{{guardian}} & {{agent}} | Rome",
   "sidebar": {
     "newChat": "New Chat",
@@ -205,7 +213,7 @@
     "filePill": "#File {{index}}",
     "send": "Send",
     "sendTitle": "Send",
-    "queueTurnTitle": "Queue a new turn",
+    "sendWhileRunningTitle": "Send while agent is working",
     "stopGenerating": "Stop generating"
   },
   "questionCard": {

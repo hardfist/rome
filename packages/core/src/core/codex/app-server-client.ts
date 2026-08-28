@@ -37,6 +37,16 @@ interface Pending {
   reject: (err: Error) => void;
 }
 
+export class AppServerRpcError extends Error {
+  constructor(
+    message: string,
+    readonly code: number,
+  ) {
+    super(message);
+    this.name = "AppServerRpcError";
+  }
+}
+
 export class AppServerClient {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private nextId = 1;
@@ -158,7 +168,10 @@ export class AppServerClient {
       const pending = this.pending.get(msg.id);
       if (!pending) return;
       this.pending.delete(msg.id);
-      if (msg.error) pending.reject(new Error(msg.error.message || "app-server error"));
+      if (msg.error)
+        pending.reject(
+          new AppServerRpcError(msg.error.message || "app-server error", msg.error.code),
+        );
       else pending.resolve(msg.result);
       return;
     }

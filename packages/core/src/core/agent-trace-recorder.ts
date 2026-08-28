@@ -93,7 +93,7 @@ export class AgentTraceRecorder {
     startSeq = this.seq,
   ): Promise<void> {
     const blocks = messages.flatMap((msg) =>
-      msg.type === "text_delta"
+      msg.type === "text_delta" || msg.type === "input_status"
         ? []
         : [toTraceBlock(msg as TraceableAgentMessage & { agent?: string })],
     );

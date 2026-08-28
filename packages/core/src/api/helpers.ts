@@ -154,7 +154,7 @@ function timestampToIso(value: Date | number): string {
  * never persisted, so callers must filter deltas out before reaching here —
  * the compiler enforces it instead of a runtime throw.
  */
-export type TraceableAgentMessage = Exclude<AgentMessage, { type: "text_delta" }>;
+export type TraceableAgentMessage = Exclude<AgentMessage, { type: "text_delta" | "input_status" }>;
 
 export function toTraceBlock(msg: TraceableAgentMessage & { agent?: string }): TraceBlockDto {
   switch (msg.type) {

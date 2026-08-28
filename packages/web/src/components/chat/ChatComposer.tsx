@@ -1052,8 +1052,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               disabled={
                 isComposerBusy || (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
               }
-              title={isStreaming ? t("composer.queueTurnTitle") : t("composer.sendTitle")}
-              aria-label={isStreaming ? t("composer.queueTurnTitle") : t("composer.sendTitle")}
+              title={isStreaming ? t("composer.sendWhileRunningTitle") : t("composer.sendTitle")}
+              aria-label={
+                isStreaming ? t("composer.sendWhileRunningTitle") : t("composer.sendTitle")
+              }
               className="touch-target"
             >
               <ArrowUp aria-hidden />

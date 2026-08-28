@@ -8,6 +8,7 @@ import {
   primaryKey,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import type { AgentInputState } from "@rome-os/app-runtime";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
 import {
   APPROVAL_EXECUTION_STATES,
@@ -601,6 +602,7 @@ export const romeAgentMessages = sqliteTable(
     id: text("id").primaryKey(),
     sessionId: text("session_id").notNull(),
     turnId: text("turn_id"),
+    inputState: text("input_state").$type<AgentInputState>(),
     role: text("role").notNull(), // 'user' | 'assistant' | 'notification' | 'trace'
     content: text("content").notNull(), // JSON array of blocks
     platformMessageId: text("platform_message_id"),

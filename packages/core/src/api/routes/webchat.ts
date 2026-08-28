@@ -50,6 +50,7 @@ import {
 import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentMessage, MessagePart } from "../../types.js";
+import type { AgentTurnHandle } from "../../core/agent-session.js";
 import type { RomeSessionType, StreamAgentMessage } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import {
@@ -183,6 +184,7 @@ function formatFeedback(row: StoredTurnFeedback | null): TurnFeedback | null {
 }
 
 type WebchatEventName =
+  | "input_status"
   | "segment_upsert"
   | "summary_update"
   | "session_status"
@@ -2520,16 +2522,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (stream.stopRequested) {
       return c.json({ stopped: true, alreadyRequested: true });
     }
-    stream.stopRequested = true;
-    log.info("interrupt requested for turn", { turnId, sessionId: stream.sessionId });
     const channelThreadKey = stream.channelThreadKey;
     const agentSess = deps.agentSessionManager.peek({
       agentName: stream.agentName,
       channelThreadKey: channelThreadKey ?? `webchat:${stream.sessionId}`,
     });
+    if (!agentSess || agentSess.currentTurnId !== turnId) {
+      return c.json({ stopped: false, reason: "turn_not_running" }, 409);
+    }
+    stream.stopRequested = true;
+    log.info("interrupt requested for turn", { turnId, sessionId: stream.sessionId });
     if (agentSess) {
       try {
-        await agentSess.interrupt("user-stop");
+        await agentSess.interrupt("user-stop", turnId);
       } catch (err) {
         log.warn("agentSession.interrupt() rejected", {
           turnId,
@@ -2590,6 +2595,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           queue = queue.then(() => sse.writeSSE({ event, data: JSON.stringify(data) }));
         };
         const project = (message: StreamAgentMessage) => {
+          if (message.type === "input_status") {
+            write("input_status", message);
+            return;
+          }
           if (message.type === "text_delta") {
             assistantText += message.content;
             write("assistant_text", {
@@ -2665,6 +2674,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   });
 
   type SendBody = {
+    inputId?: string;
     threadId?: string;
     text?: string;
     personaId?: string;
@@ -2727,6 +2737,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         } catch {}
       }
       return {
+        inputId: getString("inputId"),
         threadId: getString("threadId"),
         text: getString("text"),
         personaId: getString("personaId"),
@@ -2745,6 +2756,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     sessionId: string | undefined,
     body: SendBody,
   ): Promise<Response> => {
+    if (
+      body.inputId &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.inputId)
+    ) {
+      return c.json({ error: "inputId must be a UUID" }, 400);
+    }
+    const inputId = body.inputId ?? randomUUID();
     const uploadedFiles = Array.isArray(body.files) ? body.files : [];
 
     // A resolution from an app interaction surface is a valid turn trigger even
@@ -2890,10 +2908,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     }
 
-    // WebChat bypasses message_handler. Acquire the AgentSession
-    // synchronously, call sendTurn synchronously to allocate turnId at the
-    // bottom of the stack, and return turnId in the POST JSON response.
-    // The actual agent run drains in the background.
+    // WebChat owns input admission and one output drain per actual run.
     const threadContext = {
       channel: "webchat",
       threadId: sessionId,
@@ -2953,20 +2968,32 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : [{ type: "text", content: displayText }];
     const userContent = JSON.stringify(userParts);
     const persistUserMessage = (turnId: string) => {
-      const messageId = randomUUID();
-      // Routes webchat around ProviderAdapter.onMessage, so the shared
-      // inbound-message log (see wrapProviderAdaptersWithSpans) must be emitted
-      // here, at the accepted-turn boundary. The active POST span context
-      // links the record to the request trace.
-      logInboundChannelMessage({
-        channel: "webchat",
-        threadId: sessionId,
-        channelUserId,
-        messageId,
-        text: displayText,
+      return deps.webchatRepo.updateUserInput(sessionId, {
+        type: "input_status",
+        inputId,
+        turnId,
+        state: "failed",
       });
-      return deps.webchatRepo.addMessage(messageId, sessionId, "user", userContent, turnId);
     };
+
+    if (!(await deps.webchatRepo.recordUserInput(inputId, sessionId, userContent))) {
+      const existing = await deps.webchatRepo.getUserInput(sessionId, inputId);
+      if (!existing) return c.json({ error: "inputId is already in use" }, 409);
+      return c.json({
+        inputId,
+        turnId: existing.turnId,
+        sessionId,
+        disposition: "queued",
+        inputState: existing.inputState,
+      });
+    }
+    logInboundChannelMessage({
+      channel: "webchat",
+      threadId: sessionId,
+      channelUserId,
+      messageId: inputId,
+      text: displayText,
+    });
 
     let agentSess;
     try {
@@ -3045,393 +3072,410 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       ? [{ context: activePostSpan.spanContext() }]
       : undefined;
 
-    // sendTurn is synchronous — turnId is allocated by AgentSession and
-    // returned immediately. turn-lock makes this safe even
-    // while a previous turn is still running on the same session.
-    const handle = agentSess.sendTurn(
-      { prompt: promptText, reasoningEffort },
-      {
-        links: turnLinks,
-        threadContext,
-        romeSessionId: sessionId,
-        romeSessionType: session.type as RomeSessionType,
-      },
-    );
-    const turnId = handle.turnId;
+    const attachTurn = async (handle: AgentTurnHandle) => {
+      const turnId = handle.turnId;
 
-    // Persist the user message tagged with the turnId so reads can group
-    // user/assistant/trace rows for the same turn together (see
-    // webchatRepo.getMessages). Without this, two POSTs racing on the same
-    // session interleave as user-A / user-B / reply-A / reply-B in the UI.
-    // Caller may supply `parts` (e.g. an `app_component_result` from a resolved
-    // inline component) — when present we trust it as the persisted content and
-    // skip the default text-only part. The model already gets `promptText` via
-    // sendTurn.
-    // persist `displayText`, not `promptText` — the per-turn
-    // `<workspace_context>` block goes to the model only.
-    await persistUserMessage(turnId);
+      const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
+      enqueueStream(sessionId, stream);
+      void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
 
-    const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
-    enqueueStream(sessionId, stream);
-    void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
-
-    const unsubscribeStatus = agentSess.onStatusChange((evt) => {
-      emitToStream(
-        stream,
-        "session_status",
-        { status: evt.status, turnId: evt.turnId, sessionId: evt.sessionId },
-        "session_status",
-      );
-    });
-    // Background: drain the per-turn events into the SSE stream, persist the
-    // trace, then send the assistant's reply via the webchat channel adapter.
-    // AgentSession.turnMutex serializes execution at the SDK layer; ordering
-    // in the UI comes from the (turn_id group anchor, createdAt) sort in
-    // webchatRepo.getMessages — we forward turnId on send_message so the
-    // adapter stamps it onto the persisted assistant row.
-    //
-    // Wrap the drain in the turn's OTel context so any post-turn spans
-    // parent under the agent's trace instead of landing on a stale one.
-    void otelContext.with(handle.turnContext, () =>
-      runOnStream(stream, "webchat send", async () => {
-        try {
-          let resultContent = "";
-          let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
-          for await (const msg of handle.events) {
-            if (stream.stopRequested && msg.type === "error") continue;
-            // Live preview of the in-flight text block. Transient — never a
-            // trace block, never persisted. The replay key is fixed so a
-            // late subscriber gets one event with the latest block's
-            // accumulated text.
-            if (msg.type === "text_delta") {
-              stream.assistantText += msg.content;
-              emitToStream(
-                stream,
-                "assistant_text",
-                { turnId, blockIx: stream.assistantBlockIx, text: stream.assistantText },
-                "assistant_text",
-              );
-              continue;
-            }
-            // Block boundary: a complete `text` block closes the in-flight
-            // preview. If the deltas didn't cover the block (non-streaming
-            // provider, or a dropped frame), emit a corrective event with the
-            // full text — this is what gives block-level previews on
-            // providers that never stream deltas. The next text block gets a
-            // fresh index; the client keeps showing this block until that
-            // block's first delta arrives (delayed fold).
-            if (msg.type === "text") {
-              // Keeps the live tail's text exactly matching the row the
-              // client dedups against (below).
-              if (stream.assistantText !== msg.content) {
-                stream.assistantText = msg.content;
+      const unsubscribeStatus = agentSess.onStatusChange((evt) => {
+        emitToStream(
+          stream,
+          "session_status",
+          { status: evt.status, turnId: evt.turnId, sessionId: evt.sessionId },
+          "session_status",
+        );
+      });
+      // Background: drain the per-turn events into the SSE stream, persist the
+      // trace, then send the assistant's reply via the webchat channel adapter.
+      // AgentSession.turnMutex serializes execution at the SDK layer; ordering
+      // in the UI comes from the (turn_id group anchor, createdAt) sort in
+      // webchatRepo.getMessages — we forward turnId on send_message so the
+      // adapter stamps it onto the persisted assistant row.
+      //
+      // Wrap the drain in the turn's OTel context so any post-turn spans
+      // parent under the agent's trace instead of landing on a stale one.
+      void otelContext.with(handle.turnContext, () =>
+        runOnStream(stream, "webchat send", async () => {
+          try {
+            let resultContent = "";
+            let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
+            for await (const msg of handle.events) {
+              if (msg.type === "input_status") continue;
+              if (stream.stopRequested && msg.type === "error") continue;
+              // Live preview of the in-flight text block. Transient — never a
+              // trace block, never persisted. The replay key is fixed so a
+              // late subscriber gets one event with the latest block's
+              // accumulated text.
+              if (msg.type === "text_delta") {
+                stream.assistantText += msg.content;
                 emitToStream(
                   stream,
                   "assistant_text",
                   { turnId, blockIx: stream.assistantBlockIx, text: stream.assistantText },
                   "assistant_text",
                 );
+                continue;
               }
-              // Model M: a completed in-turn narration block becomes its own
-              // live message, pushed so it appears in the transcript (time-
-              // ordered with any cards) as the turn streams. The client hides
-              // the matching live-tail copy by content. The final answer is not
-              // persisted here — it goes out once at turn end via send_message.
-              const isCommentary = msg.turnPhase === "commentary" && msg.content.trim().length > 0;
-              if (isCommentary) {
+              // Block boundary: a complete `text` block closes the in-flight
+              // preview. If the deltas didn't cover the block (non-streaming
+              // provider, or a dropped frame), emit a corrective event with the
+              // full text — this is what gives block-level previews on
+              // providers that never stream deltas. The next text block gets a
+              // fresh index; the client keeps showing this block until that
+              // block's first delta arrives (delayed fold).
+              if (msg.type === "text") {
+                // Keeps the live tail's text exactly matching the row the
+                // client dedups against (below).
+                if (stream.assistantText !== msg.content) {
+                  stream.assistantText = msg.content;
+                  emitToStream(
+                    stream,
+                    "assistant_text",
+                    { turnId, blockIx: stream.assistantBlockIx, text: stream.assistantText },
+                    "assistant_text",
+                  );
+                }
+                // Model M: a completed in-turn narration block becomes its own
+                // live message, pushed so it appears in the transcript (time-
+                // ordered with any cards) as the turn streams. The client hides
+                // the matching live-tail copy by content. The final answer is not
+                // persisted here — it goes out once at turn end via send_message.
+                const isCommentary =
+                  msg.turnPhase === "commentary" && msg.content.trim().length > 0;
+                if (isCommentary) {
+                  try {
+                    await deps.webchatRepo.addBackendMessage(sessionId, turnId, [
+                      { type: "text", content: msg.content, turnPhase: "commentary" },
+                    ]);
+                  } catch (err) {
+                    log.warn("failed to persist commentary message", {
+                      sessionId,
+                      turnId,
+                      error: err instanceof Error ? err.message : String(err),
+                    });
+                  }
+                }
+                stream.assistantBlockIx += 1;
+                stream.assistantText = "";
+              }
+              stream.traceBlocks.push(msg);
+              emitTraceBlock(stream, msg);
+              if (msg.type === "subagent_result") {
+                const parentRef = { sessionId, turnId, toolUseId: msg.toolUseId };
+                if (deps.activeSubagentRegistry.getLinkByParent(parentRef)) {
+                  await safePersistTrace(stream, "subagent result");
+                  deps.activeSubagentRegistry.clearByParent(parentRef);
+                }
+              }
+              if (msg.type === "result") resultContent = msg.content;
+              if (msg.type === "error") resultError = msg;
+              // Out-of-band snapshot for the routine draft card.
+              if (
+                msg.type === "tool_use" &&
+                (msg.tool === "propose_routine" || msg.tool.endsWith("__propose_routine"))
+              ) {
+                await persistRoutineDraftCard(
+                  deps.webchatRepo,
+                  deps.actionRegistry,
+                  sessionId,
+                  turnId,
+                  msg.id,
+                  msg.input,
+                );
+              }
+              // The borrowed agent relayed the guardian's verbal approval: snapshot
+              // a marker the client picks up to resolve the handback with the
+              // standing submission — the same outcome as clicking Approve. No
+              // payload travels here; the client ships the last submitted payload,
+              // so a stray confirm with nothing submitted is a client-side no-op.
+              if (
+                msg.type === "tool_use" &&
+                session.type === "webchat_handoff" &&
+                (msg.tool === "confirm_output" || msg.tool.endsWith("__confirm_output"))
+              ) {
                 try {
-                  await deps.webchatRepo.addBackendMessage(sessionId, turnId, [
-                    { type: "text", content: msg.content, turnPhase: "commentary" },
-                  ]);
+                  await deps.webchatRepo.addMessage(
+                    randomUUID(),
+                    sessionId,
+                    "assistant",
+                    JSON.stringify([{ type: "handback_approved" }]),
+                    turnId,
+                  );
                 } catch (err) {
-                  log.warn("failed to persist commentary message", {
+                  log.warn("failed to persist handback_approved", {
                     sessionId,
                     turnId,
                     error: err instanceof Error ? err.message : String(err),
                   });
                 }
               }
-              stream.assistantBlockIx += 1;
-              stream.assistantText = "";
-            }
-            stream.traceBlocks.push(msg);
-            emitTraceBlock(stream, msg);
-            if (msg.type === "subagent_result") {
-              const parentRef = { sessionId, turnId, toolUseId: msg.toolUseId };
-              if (deps.activeSubagentRegistry.getLinkByParent(parentRef)) {
-                await safePersistTrace(stream, "subagent result");
-                deps.activeSubagentRegistry.clearByParent(parentRef);
-              }
-            }
-            if (msg.type === "result") resultContent = msg.content;
-            if (msg.type === "error") resultError = msg;
-            // Out-of-band snapshot for the routine draft card.
-            if (
-              msg.type === "tool_use" &&
-              (msg.tool === "propose_routine" || msg.tool.endsWith("__propose_routine"))
-            ) {
-              await persistRoutineDraftCard(
-                deps.webchatRepo,
-                deps.actionRegistry,
-                sessionId,
-                turnId,
-                msg.id,
-                msg.input,
-              );
-            }
-            // The borrowed agent relayed the guardian's verbal approval: snapshot
-            // a marker the client picks up to resolve the handback with the
-            // standing submission — the same outcome as clicking Approve. No
-            // payload travels here; the client ships the last submitted payload,
-            // so a stray confirm with nothing submitted is a client-side no-op.
-            if (
-              msg.type === "tool_use" &&
-              session.type === "webchat_handoff" &&
-              (msg.tool === "confirm_output" || msg.tool.endsWith("__confirm_output"))
-            ) {
-              try {
-                await deps.webchatRepo.addMessage(
-                  randomUUID(),
-                  sessionId,
-                  "assistant",
-                  JSON.stringify([{ type: "handback_approved" }]),
-                  turnId,
-                );
-              } catch (err) {
-                log.warn("failed to persist handback_approved", {
-                  sessionId,
-                  turnId,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-              }
-            }
-            // A valid submission in a handoff child conversation: snapshot it
-            // as a submission_card so the host renders the Approve /
-            // Keep-editing gate. The payload IS the candidate handback —
-            // Approve posts it verbatim as the parent's interaction_result; a
-            // later submission supersedes this card (the client treats only the
-            // newest card as active).
-            if (msg.type === "structured_output" && session.type === "webchat_handoff") {
-              const payload =
-                msg.payload && typeof msg.payload === "object" && !Array.isArray(msg.payload)
-                  ? (msg.payload as Record<string, unknown>)
-                  : { value: msg.payload };
-              try {
-                await deps.webchatRepo.addMessage(
-                  randomUUID(),
-                  sessionId,
-                  "assistant",
-                  JSON.stringify([{ type: "submission_card", payload }]),
-                  turnId,
-                );
-              } catch (err) {
-                log.warn("failed to persist submission_card", {
-                  sessionId,
-                  turnId,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-              }
-            }
-            // Parked suspension: any action that returned a pending_interaction
-            // or handoff result surfaces it on its tool_result. Snapshot a card
-            // keyed by toolUseId so the host renders it and can match the later
-            // interaction_result back to this call. Fail closed on both kinds —
-            // the owning app must actually be installed, and an inline
-            // component must be declared in its app.yaml `components:` list. A
-            // handoff additionally mints a dedicated child session for its
-            // design conversation so it never interleaves with this (parent)
-            // thread.
-            if (msg.type === "tool_result") {
-              const suspension = readSuspensionFromOutput(msg.output);
-              if (suspension && suspension.kind === "inline" && suspension.builtin) {
-                // Host built-in inline card (the ask_question question-card):
-                // rendered by rome-web, so there is no owning app to validate.
-                const card = buildBuiltinQuestionCard(msg, suspension, sessionId);
-                if (card) {
-                  await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, card);
+              // A valid submission in a handoff child conversation: snapshot it
+              // as a submission_card so the host renders the Approve /
+              // Keep-editing gate. The payload IS the candidate handback —
+              // Approve posts it verbatim as the parent's interaction_result; a
+              // later submission supersedes this card (the client treats only the
+              // newest card as active).
+              if (msg.type === "structured_output" && session.type === "webchat_handoff") {
+                const payload =
+                  msg.payload && typeof msg.payload === "object" && !Array.isArray(msg.payload)
+                    ? (msg.payload as Record<string, unknown>)
+                    : { value: msg.payload };
+                try {
+                  await deps.webchatRepo.addMessage(
+                    randomUUID(),
+                    sessionId,
+                    "assistant",
+                    JSON.stringify([{ type: "submission_card", payload }]),
+                    turnId,
+                  );
+                } catch (err) {
+                  log.warn("failed to persist submission_card", {
+                    sessionId,
+                    turnId,
+                    error: err instanceof Error ? err.message : String(err),
+                  });
                 }
-              } else if (suspension) {
-                const resolvedApp = deps.appCatalog
-                  ?.listResolved()
-                  .find((a) => a.appId === suspension.appId);
-                if (!resolvedApp) {
-                  log.warn("rejected suspension: app not installed", {
-                    sessionId,
-                    appId: suspension.appId,
-                  });
-                } else if (
-                  suspension.kind === "inline" &&
-                  !(resolvedApp.manifest.components ?? []).includes(suspension.componentId)
-                ) {
-                  log.warn("rejected suspension: component not declared by app", {
-                    sessionId,
-                    appId: suspension.appId,
-                    componentId: suspension.componentId,
-                  });
-                } else if (suspension.kind === "handoff") {
-                  const handoffAgentName = suspension.agentName;
-                  const childSessionId = randomUUID();
-                  const summary =
-                    typeof suspension.payload?.summary === "string"
-                      ? suspension.payload.summary
-                      : undefined;
-                  const childName = summary?.trim()
-                    ? summary.trim().slice(0, 50)
-                    : `${suspension.appId} design`;
-                  try {
-                    await deps.webchatRepo.createSession(
-                      childSessionId,
-                      childName,
-                      undefined,
-                      sessionProjectName,
-                      null,
-                      sessionProjectPath,
-                      handoffAgentName ?? null,
-                      "webchat_handoff",
-                      // The handback contract rides on the child row, so every
-                      // turn of the child conversation (including after a
-                      // backend restart) re-derives its submit_output tool.
-                      suspension.handback ? JSON.stringify(suspension.handback) : null,
-                    );
-                  } catch (err) {
-                    log.warn("failed to mint handoff child session", {
+              }
+              // Parked suspension: any action that returned a pending_interaction
+              // or handoff result surfaces it on its tool_result. Snapshot a card
+              // keyed by toolUseId so the host renders it and can match the later
+              // interaction_result back to this call. Fail closed on both kinds —
+              // the owning app must actually be installed, and an inline
+              // component must be declared in its app.yaml `components:` list. A
+              // handoff additionally mints a dedicated child session for its
+              // design conversation so it never interleaves with this (parent)
+              // thread.
+              if (msg.type === "tool_result") {
+                const suspension = readSuspensionFromOutput(msg.output);
+                if (suspension && suspension.kind === "inline" && suspension.builtin) {
+                  // Host built-in inline card (the ask_question question-card):
+                  // rendered by rome-web, so there is no owning app to validate.
+                  const card = buildBuiltinQuestionCard(msg, suspension, sessionId);
+                  if (card) {
+                    await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, card);
+                  }
+                } else if (suspension) {
+                  const resolvedApp = deps.appCatalog
+                    ?.listResolved()
+                    .find((a) => a.appId === suspension.appId);
+                  if (!resolvedApp) {
+                    log.warn("rejected suspension: app not installed", {
                       sessionId,
+                      appId: suspension.appId,
+                    });
+                  } else if (
+                    suspension.kind === "inline" &&
+                    !(resolvedApp.manifest.components ?? []).includes(suspension.componentId)
+                  ) {
+                    log.warn("rejected suspension: component not declared by app", {
+                      sessionId,
+                      appId: suspension.appId,
+                      componentId: suspension.componentId,
+                    });
+                  } else if (suspension.kind === "handoff") {
+                    const handoffAgentName = suspension.agentName;
+                    const childSessionId = randomUUID();
+                    const summary =
+                      typeof suspension.payload?.summary === "string"
+                        ? suspension.payload.summary
+                        : undefined;
+                    const childName = summary?.trim()
+                      ? summary.trim().slice(0, 50)
+                      : `${suspension.appId} design`;
+                    try {
+                      await deps.webchatRepo.createSession(
+                        childSessionId,
+                        childName,
+                        undefined,
+                        sessionProjectName,
+                        null,
+                        sessionProjectPath,
+                        handoffAgentName ?? null,
+                        "webchat_handoff",
+                        // The handback contract rides on the child row, so every
+                        // turn of the child conversation (including after a
+                        // backend restart) re-derives its submit_output tool.
+                        suspension.handback ? JSON.stringify(suspension.handback) : null,
+                      );
+                    } catch (err) {
+                      log.warn("failed to mint handoff child session", {
+                        sessionId,
+                        childSessionId,
+                        error: err instanceof Error ? err.message : String(err),
+                      });
+                    }
+                    await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, {
+                      type: "handoff",
+                      toolUseId: msg.toolUseId,
+                      appId: suspension.appId,
+                      agentName: handoffAgentName,
+                      payload: suspension.payload,
                       childSessionId,
-                      error: err instanceof Error ? err.message : String(err),
+                      handbackHint: suspension.handbackHint,
+                    });
+                  } else {
+                    await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, {
+                      type: "pending_interaction",
+                      toolUseId: msg.toolUseId,
+                      appId: suspension.appId,
+                      render: {
+                        kind: "inline",
+                        componentId: suspension.componentId,
+                        props: suspension.props,
+                      },
                     });
                   }
-                  await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, {
-                    type: "handoff",
-                    toolUseId: msg.toolUseId,
-                    appId: suspension.appId,
-                    agentName: handoffAgentName,
-                    payload: suspension.payload,
-                    childSessionId,
-                    handbackHint: suspension.handbackHint,
-                  });
-                } else {
-                  await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, {
-                    type: "pending_interaction",
-                    toolUseId: msg.toolUseId,
-                    appId: suspension.appId,
-                    render: {
-                      kind: "inline",
-                      componentId: suspension.componentId,
-                      props: suspension.props,
-                    },
-                  });
                 }
-              }
-              // Fire-and-forget widget placement: an action that returned
-              // `place_widget` surfaces it on its tool_result. Emit a transient
-              // `widget_placement` event so the live client mounts the widget on
-              // the freegrid (no card, no child session, no parked turn). The
-              // replay key is per-app so a reconnecting client re-mounts it once.
-              // Fail closed: the owning app must actually be installed.
-              const place = readPlaceWidgetFromOutput(msg.output);
-              if (place) {
-                const resolvedApp = deps.appCatalog
-                  ?.listResolved()
-                  .find((a) => a.appId === place.appId);
-                const isHostApp = place.appId === SESSIONS_HOST_APP_ID;
-                if (!resolvedApp && !isHostApp) {
-                  log.warn("rejected place_widget: app not installed", {
-                    sessionId,
-                    appId: place.appId,
-                  });
-                } else {
-                  emitToStream(
-                    stream,
-                    "widget_placement",
-                    {
+                // Fire-and-forget widget placement: an action that returned
+                // `place_widget` surfaces it on its tool_result. Emit a transient
+                // `widget_placement` event so the live client mounts the widget on
+                // the freegrid (no card, no child session, no parked turn). The
+                // replay key is per-app so a reconnecting client re-mounts it once.
+                // Fail closed: the owning app must actually be installed.
+                const place = readPlaceWidgetFromOutput(msg.output);
+                if (place) {
+                  const resolvedApp = deps.appCatalog
+                    ?.listResolved()
+                    .find((a) => a.appId === place.appId);
+                  const isHostApp = place.appId === SESSIONS_HOST_APP_ID;
+                  if (!resolvedApp && !isHostApp) {
+                    log.warn("rejected place_widget: app not installed", {
+                      sessionId,
                       appId: place.appId,
-                      ...(place.route !== undefined ? { route: place.route } : {}),
-                      ...(place.params !== undefined ? { params: place.params } : {}),
-                    },
-                    `widget:${place.appId}`,
-                  );
+                    });
+                  } else {
+                    emitToStream(
+                      stream,
+                      "widget_placement",
+                      {
+                        appId: place.appId,
+                        ...(place.route !== undefined ? { route: place.route } : {}),
+                        ...(place.params !== undefined ? { params: place.params } : {}),
+                      },
+                      `widget:${place.appId}`,
+                    );
+                  }
                 }
               }
             }
-          }
 
-          // Send the agent's reply via webchat channel adapter (guardian path).
-          // In-turn commentary was already persisted per-block as its own live
-          // message; this is the final answer only. `text` is the final answer
-          // for non-webchat consumers; webchat persists the tagged part.
-          if (resultContent && !stream.stopRequested) {
-            await deps.actionEngine.run(
-              "send_message",
-              {
-                channel: "webchat",
-                threadId: sessionId,
-                text: resultContent,
-                parts: [
-                  { type: "text" as const, content: resultContent, turnPhase: "final" as const },
-                ],
-                channelUserId,
-                displayName,
-                replyToMessageId: randomUUID(),
-                turnId,
-              },
-              {
-                initiator: "channel:webchat",
-                channelContext: threadContext,
-              },
-            );
-          }
-
-          // Mirror the auto-approved outgoing-message audit record message_handler creates.
-          if (resultContent && !stream.stopRequested && deps.approvalsRepo) {
-            await deps.approvalsRepo
-              .create({
-                type: "outgoing_message",
-                requestedBy: "main",
-                description: "WebChat guardian send (envoy skipped)",
-                payload: {
-                  response: resultContent,
+            // Send the agent's reply via webchat channel adapter (guardian path).
+            // In-turn commentary was already persisted per-block as its own live
+            // message; this is the final answer only. `text` is the final answer
+            // for non-webchat consumers; webchat persists the tagged part.
+            if (resultContent && !stream.stopRequested) {
+              await deps.actionEngine.run(
+                "send_message",
+                {
                   channel: "webchat",
                   threadId: sessionId,
+                  text: resultContent,
+                  parts: [
+                    { type: "text" as const, content: resultContent, turnPhase: "final" as const },
+                  ],
                   channelUserId,
-                },
-                status: "auto_approved",
-              })
-              .catch((err) => {
-                log.warn("failed to record auto-approved outgoing message", {
-                  sessionId,
+                  displayName,
+                  replyToMessageId: randomUUID(),
                   turnId,
-                  error: err instanceof Error ? err.message : String(err),
+                },
+                {
+                  initiator: "channel:webchat",
+                  channelContext: threadContext,
+                },
+              );
+            }
+
+            // Mirror the auto-approved outgoing-message audit record message_handler creates.
+            if (resultContent && !stream.stopRequested && deps.approvalsRepo) {
+              await deps.approvalsRepo
+                .create({
+                  type: "outgoing_message",
+                  requestedBy: "main",
+                  description: "WebChat guardian send (envoy skipped)",
+                  payload: {
+                    response: resultContent,
+                    channel: "webchat",
+                    threadId: sessionId,
+                    channelUserId,
+                  },
+                  status: "auto_approved",
+                })
+                .catch((err) => {
+                  log.warn("failed to record auto-approved outgoing message", {
+                    sessionId,
+                    turnId,
+                    error: err instanceof Error ? err.message : String(err),
+                  });
                 });
-              });
+            }
+
+            return {
+              success: !resultError,
+              data: { action: stream.stopRequested ? "stopped" : "sent" },
+              error: resultError?.error,
+              code: resultError?.code,
+              provider: resultError?.provider,
+              reason: resultError?.reason,
+            };
+          } finally {
+            unsubscribeStatus();
           }
+        }),
+      );
 
-          return {
-            success: !resultError,
-            data: { action: stream.stopRequested ? "stopped" : "sent" },
-            error: resultError?.error,
-            code: resultError?.code,
-            provider: resultError?.provider,
-            reason: resultError?.reason,
-          };
-        } finally {
-          unsubscribeStatus();
-        }
-      }),
-    );
+      return stream;
+    };
 
+    let started: ReturnType<typeof attachTurn> | undefined;
+    const options = {
+      links: turnLinks,
+      threadContext,
+      romeSessionId: sessionId,
+      romeSessionType: session.type as RomeSessionType,
+      onTurn: (handle: AgentTurnHandle) => {
+        started = attachTurn(handle);
+        void started.catch((error) =>
+          log.error("failed to attach input turn", {
+            turnId: handle.turnId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      },
+      onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusMessage) => {
+        await deps.webchatRepo.updateUserInput(sessionId, status);
+        const stream = status.turnId ? streamsByTurnId.get(status.turnId) : undefined;
+        if (stream) emitToStream(stream, "input_status", status, `input:${status.inputId}`);
+      },
+    };
+    const input = { inputId, prompt: promptText, reasoningEffort };
+    let receipt;
+    if (agentSess.submitInput) {
+      receipt = agentSess.submitInput(input, options);
+    } else {
+      const handle = agentSess.sendTurn(input, options);
+      options.onTurn(handle);
+      await options.onInputStatus({
+        type: "input_status",
+        inputId,
+        turnId: handle.turnId,
+        state: "submitted",
+      });
+      receipt = { inputId, turnId: handle.turnId, disposition: "started" as const };
+    }
+    const stream = started ? await started : streamsByTurnId.get(receipt.turnId);
     return c.json({
-      turnId,
+      ...receipt,
       sessionId,
-      startedAt: stream.startedAt,
+      startedAt: stream?.startedAt ?? new Date().toISOString(),
     });
   };
 
-  // Canonical resource-shaped endpoint. Returns JSON
-  // `{ turnId, sessionId, startedAt }` synchronously; the SSE stream lives
-  // at GET /chat/turns/:turnId/stream.
   app.post("/chat/sessions/:id/turns", async (c) => {
     const body = await parseChatSendBody(c);
-    return handleChatSend(c, c.req.param("id"), body);
+    const id = c.req.param("id");
+    return handleChatSend(c, id, body);
   });
 
   const runEnqueuedTask = async (
@@ -3488,7 +3532,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const builtinQuestionCards: PendingInteractionPart[] = [];
     const emit = (msg: AgentMessage & { agent?: string }) => {
       // Backend turns have no live bubble; drop transient text previews.
-      if (msg.type === "text_delta") return;
+      if (msg.type === "text_delta" || msg.type === "input_status") return;
       stream.traceBlocks.push(msg);
       emitTraceBlock(stream, msg);
       if (msg.type === "result") replyText = msg.content;

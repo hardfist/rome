@@ -21,6 +21,7 @@ export function startStream(
   sessionId: string,
   turnId: string,
 ): StreamingSessionMap {
+  if (prev.get(sessionId)?.turnId === turnId) return prev;
   const next = new Map(prev);
   next.set(sessionId, { turnId, snapshot: null, assistantText: "", assistantBlockIx: 0 });
   return next;

@@ -40,13 +40,31 @@ An agent run is one turn of agent work, identified by its turn id — the unit u
 
 **Contracts:**
 
-- The user message, assistant output, and trace evidence produced by the same turn count as one run, not several.
+- The user inputs, assistant output, and trace evidence produced by the same turn count as one run, not several. A run can consume more than one user input.
 - Failed and interrupted turns still count as runs.
 - A run's outcome and wall-clock duration come from the bracket that closes it, and its model attribution and token cost come from the terminal block's accounting. Neither is read from fields mirrored onto individual messages.
 
 **Not to be confused with:**
 
 - **[Session](#sessions)** — a session accumulates many runs. A run is a single turn.
+
+## Conversational inputs
+
+A conversational input is one independently submitted user message. Its identity remains the same whether it starts a run or joins one already in progress.
+
+**Contracts:**
+
+- WebChat persists an input before dispatch. Sending during a run attempts non-interrupting provider steering; it does not start a concurrent run or replace the active output stream.
+- Provider acceptance and consumption are distinct. An accepted input is not shown as consumed until the provider includes it in context.
+- A definitely unconsumed input can start the next run. If the provider already holds it, the next run adopts it without sending another copy.
+- An uncertain delivery is not automatically retried. After a backend restart, unfinished inputs remain visible with unconfirmed delivery; they are not silently replayed.
+- Stop targets the specified running turn. It cannot stop another turn, and it does not cancel separately queued inputs.
+- Independent action, approval, and external-channel callers retain their serial, one-result-per-call turn contract. They do not implicitly opt into the WebChat input lane.
+
+**Not to be confused with:**
+
+- **Output streaming** — incremental assistant output says nothing about whether new input can join an active run.
+- **Interrupting** — steering changes a later model step without cancelling an in-flight tool or model request.
 
 ## Owning app
 

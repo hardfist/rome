@@ -225,10 +225,18 @@ export type UserInput =
 
 export interface TurnStartParams {
   threadId: string;
+  clientUserMessageId?: string | null;
   input: UserInput[];
   model?: string | null;
   effort?: ReasoningEffort | null;
   approvalPolicy?: AskForApproval | null;
+}
+
+export interface TurnSteerParams {
+  threadId: string;
+  expectedTurnId: string;
+  clientUserMessageId?: string | null;
+  input: UserInput[];
 }
 
 export interface TurnInterruptParams {
@@ -250,6 +258,7 @@ export const Method = {
   threadRollback: "thread/rollback",
   threadUnsubscribe: "thread/unsubscribe",
   turnStart: "turn/start",
+  turnSteer: "turn/steer",
   turnInterrupt: "turn/interrupt",
 } as const;
 

@@ -264,6 +264,7 @@ async function main() {
 
   const policiesRepo = new PoliciesRepository(db);
   const webchatRepo = new WebChatRepository(db);
+  await webchatRepo.recoverInterruptedInputs();
   const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);

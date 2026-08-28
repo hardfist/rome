@@ -2,6 +2,11 @@
 
 import { createHash } from "node:crypto";
 import { Mutex } from "async-mutex";
+import {
+  AgentInputQueue,
+  type AgentInputReceipt,
+  type SubmitInputOptions,
+} from "./agent-input-queue.js";
 import { v4 as uuidv4 } from "uuid";
 import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
@@ -222,6 +227,7 @@ export interface AgentSessionInit {
 }
 
 export interface AgentTurnInput {
+  inputId?: string;
   prompt: string;
   /** Absolute local paths of images attached to the turn (providers without image-input support ignore them). */
   images?: string[];
@@ -311,10 +317,14 @@ export interface AgentSession {
    * turn actually begins running turn-lock semantics).
    */
   sendTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle;
+  submitInput?(
+    input: AgentTurnInput & { inputId: string },
+    options: SubmitInputOptions,
+  ): AgentInputReceipt;
   runForkedTurn?(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentMessage>;
   subscribe(handler: AgentSessionSubscriber): () => void;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
-  interrupt(reason?: string): Promise<void>;
+  interrupt(reason?: string, expectedTurnId?: string): Promise<void>;
   close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void>;
   /**
    * Read the structured payload that the agent submitted via `submit_output`
@@ -1859,6 +1869,15 @@ class AgentSessionImpl implements AgentSession {
   private toolCount: number;
   private subagentToolNames: Set<string>;
   private readonly turnMutex = new Mutex();
+  private readonly inputs = new AgentInputQueue(
+    (input, options) => this.sendTurn(input, options),
+    () => this.modelSession,
+    (error) =>
+      log.warn("conversational input dispatch failed", {
+        sessionId: this.sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+  );
   private keepAlive: boolean;
   private onClosed: () => void;
   private closingPromise?: Promise<void>;
@@ -1918,7 +1937,12 @@ class AgentSessionImpl implements AgentSession {
   }
 
   get isQuiescentForRotation(): boolean {
-    return this.status === "idle" && !this.turnMutex.isLocked() && !this.hasActiveForkedTurns;
+    return (
+      this.status === "idle" &&
+      !this.turnMutex.isLocked() &&
+      !this.hasActiveForkedTurns &&
+      !this.inputs.busy
+    );
   }
 
   get childManager(): AgentSessionManager {
@@ -2008,6 +2032,12 @@ class AgentSessionImpl implements AgentSession {
           });
           continue;
         }
+        if (msg.type === "input_status") {
+          await this.inputs.observe(msg, sink.turnId);
+          this.publishOutbound(sink, { ...msg, turnId: sink.turnId });
+          continue;
+        }
+        if (msg.type === "result" || msg.type === "error") await this.inputs.seal(sink.turnId);
         // Time-to-first-token: the first *text* event of the turn (a text_delta
         // preview or a completed text block) marks when the model started
         // producing visible output. Gate strictly to text — thinking/tool_use
@@ -2139,6 +2169,7 @@ class AgentSessionImpl implements AgentSession {
       });
     } finally {
       if (this.replacingModelSession === session || this.modelSession !== session) return;
+      this.inputs.close();
       const sink = this.currentSink;
       if (sink && !sink.done) {
         this.failTurn(sink, "session closed mid-turn");
@@ -2413,6 +2444,7 @@ class AgentSessionImpl implements AgentSession {
     this.status = "idle";
     this.currentTurnId = undefined;
     this.emitStatus();
+    this.inputs.finish(sink.turnId);
   }
 
   private clearSubagentLinks(sink: TurnSink): void {
@@ -2803,6 +2835,14 @@ class AgentSessionImpl implements AgentSession {
 
   // sendTurn — FIFO-serialized via turnMutex
 
+  submitInput(
+    input: AgentTurnInput & { inputId: string },
+    options: SubmitInputOptions,
+  ): AgentInputReceipt {
+    if (this.status === "closed") throw new Error(`AgentSession ${this.sessionId} is closed`);
+    return this.inputs.submit(input, options);
+  }
+
   sendTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle {
     if (this.status === "closed") {
       throw new Error(`AgentSession ${this.sessionId} is closed`);
@@ -2887,29 +2927,32 @@ class AgentSessionImpl implements AgentSession {
     // swallows its own failures, so `runExclusive` never rejects here — the
     // fire-and-forget promise is intentionally discarded.
     void this.turnMutex
-      .runExclusive(async () => {
-        try {
-          await context.with(turnCtx, () => this.runOneTurn(turnId, input, sink, turnCtx));
-        } catch (err) {
-          // Safety net: if runOneTurn threw before reaching its own finally
-          // (e.g. synchronous failure before the modelSession call), the
-          // agent span may still be open. End it so the trace closes.
-          if (!span.isRecording || span.isRecording()) {
-            span.setStatus({
-              code: SpanStatusCode.ERROR,
-              message: err instanceof Error ? err.message : String(err),
-            });
-            if (err instanceof Error) span.recordException(err);
-            span.end();
+      .runExclusive(
+        async () => {
+          try {
+            await context.with(turnCtx, () => this.runOneTurn(turnId, input, sink, turnCtx));
+          } catch (err) {
+            // Safety net: if runOneTurn threw before reaching its own finally
+            // (e.g. synchronous failure before the modelSession call), the
+            // agent span may still be open. End it so the trace closes.
+            if (!span.isRecording || span.isRecording()) {
+              span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: err instanceof Error ? err.message : String(err),
+              });
+              if (err instanceof Error) span.recordException(err);
+              span.end();
+            }
+            // Surface failure on the sink so consumers' for-await ends cleanly.
+            this.failTurn(
+              sink,
+              toModelResolutionErrorPayload(err) ??
+                (err instanceof Error ? err.message : String(err)),
+            );
           }
-          // Surface failure on the sink so consumers' for-await ends cleanly.
-          this.failTurn(
-            sink,
-            toModelResolutionErrorPayload(err) ??
-              (err instanceof Error ? err.message : String(err)),
-          );
-        }
-      })
+        },
+        input.inputId ? 1 : 0,
+      )
       .finally(() => this.emitStatus());
 
     return {
@@ -3045,6 +3088,7 @@ class AgentSessionImpl implements AgentSession {
       // pipeline can't tell them apart.
       const mwInput = { prompt: userPrompt, reasoningEffort: input.reasoningEffort };
       let emittedTerminal: ResultMessage | ErrorMessage | undefined;
+      let modelRan = false;
       const mwCtx: TurnMiddlewareContext = {
         input: mwInput,
         session: {
@@ -3063,14 +3107,18 @@ class AgentSessionImpl implements AgentSession {
       };
 
       const runModelTerminal = async (): Promise<void> => {
+        modelRan = true;
         try {
           await context.with(turnCtx, async () => {
+            await this.inputs.beforeSend(turnId);
             await this.modelSession.sendUserInput({
+              inputId: input.inputId,
               text: mwInput.prompt,
               images: input.images,
               reasoningEffort: mwInput.reasoningEffort,
               injectedToolResult: input.injectedToolResult,
             });
+            this.inputs.ready(turnId);
             if (this.deps.webchatRepo && pendingConversationMessageIds.length > 0) {
               try {
                 await this.deps.webchatRepo.markConversationContextInjected(
@@ -3114,6 +3162,16 @@ class AgentSessionImpl implements AgentSession {
       }
 
       if (!sink.done) {
+        if (!modelRan && input.inputId) {
+          await this.inputs.observe(
+            {
+              type: "input_status",
+              inputId: input.inputId,
+              state: emittedTerminal?.type === "error" ? "failed" : "consumed",
+            },
+            turnId,
+          );
+        }
         this.finalizeTurn(sink, emittedTerminal ?? { type: "result", content: "" });
       }
 
@@ -3210,21 +3268,22 @@ class AgentSessionImpl implements AgentSession {
     }
   }
 
-  async interrupt(reason?: string): Promise<void> {
-    if (this.currentSink && !this.currentSink.done) {
-      this.currentSink.lifecycleInterrupted = true;
-      await Promise.allSettled(
-        [...this.currentSink.subagentExecutions.values()].map(({ execution }) =>
-          execution.interrupt(reason),
-        ),
-      );
-    }
-    await this.modelSession.interrupt(reason);
+  async interrupt(reason?: string, expectedTurnId?: string): Promise<void> {
+    const sink = this.currentSink;
+    if (!sink || sink.done || (expectedTurnId && sink.turnId !== expectedTurnId)) return;
+    sink.lifecycleInterrupted = true;
+    // Capture the provider target before awaiting child interruption: the
+    // current turn may finish and another turn may start during that await.
+    await Promise.allSettled([
+      this.modelSession.interrupt(reason),
+      ...[...sink.subagentExecutions.values()].map(({ execution }) => execution.interrupt(reason)),
+    ]);
   }
 
   async close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void> {
     if (this.closingPromise) return await this.closingPromise;
     if (this.status === "closed") return;
+    this.inputs.close();
     this.closingPromise = (async () => {
       log.info("agent session closing", {
         sessionId: this.sessionId,

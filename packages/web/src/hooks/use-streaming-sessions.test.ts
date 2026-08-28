@@ -19,6 +19,13 @@ const segmentIdAt = (state: StreamingSessionMap, sessionId: string): string | un
 };
 
 describe("streaming-sessions state", () => {
+  it("preserves the live tail and trace when another input joins the same turn", () => {
+    let state = startStream(new Map(), "session", "turn");
+    state = updateSnapshot(state, "session", "turn", snapshotFor("trace"));
+    state = updateAssistantText(state, "session", "turn", 0, "Still working");
+    expect(startStream(state, "session", "turn")).toBe(state);
+    expect(state.get("session")?.assistantText).toBe("Still working");
+  });
   it("isolates per-session snapshots when concurrent streams update each other", () => {
     let state: StreamingSessionMap = new Map();
     state = startStream(state, "A", "turn-A");

@@ -1,4 +1,5 @@
 import { memo, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
 import type { ChatMessage, StreamBlock } from "@/lib/chat-types";
@@ -10,6 +11,7 @@ import { formatMessageTimestamp } from "@/lib/message-timestamp";
 // ChatMessage object identities even though id+content are unchanged.
 export const UserMessage = memo(
   function UserMessage({ msg }: { msg: ChatMessage }) {
+    const { t } = useTranslation("chat");
     const text = useMemo(() => {
       let blocks: StreamBlock[];
       try {
@@ -40,6 +42,11 @@ export const UserMessage = memo(
             {text}
           </Markdown>
         </div>
+        {msg.inputState && msg.inputState !== "consumed" ? (
+          <span className="mt-1 text-aux text-muted-foreground" role="status">
+            {t(`inputState.${msg.inputState}`)}
+          </span>
+        ) : null}
         {/* Timestamp + copy under the bubble. Hover-revealed on pointer
             devices, always visible on touch. Precision tracks recency: time
             of day today, month + day this year, full date for older years. */}
@@ -50,5 +57,8 @@ export const UserMessage = memo(
       </div>
     );
   },
-  (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content,
+  (prev, next) =>
+    prev.msg.id === next.msg.id &&
+    prev.msg.content === next.msg.content &&
+    prev.msg.inputState === next.msg.inputState,
 );

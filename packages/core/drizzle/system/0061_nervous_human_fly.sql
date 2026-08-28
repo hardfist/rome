@@ -1,0 +1,1 @@
+ALTER TABLE `rome_agent_messages` ADD `input_state` text;

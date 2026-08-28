@@ -258,7 +258,10 @@ export interface TurnInfo {
 
 // Shape of POST /chat/sessions/:id/turns response.
 export interface CreateTurnResponse {
-  turnId: string;
+  turnId: string | null;
+  inputId?: string;
+  disposition?: "started" | "queued" | "steering";
+  inputState?: import("@rome/api-types/trace-segments").AgentInputState | null;
   sessionId: string;
   startedAt: string;
 }
@@ -267,6 +270,7 @@ export interface ChatMessage {
   id: string;
   sessionId: string;
   turnId?: string | null;
+  inputState?: import("@rome/api-types/trace-segments").AgentInputState | null;
   role: "user" | "assistant" | "notification" | "trace";
   content: string; // JSON array of blocks
   createdAt: string;

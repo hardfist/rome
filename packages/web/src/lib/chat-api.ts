@@ -371,7 +371,7 @@ export async function postSessionTurnJson(
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ inputId: crypto.randomUUID(), ...body }),
   });
   return parseTurnResponse(res);
 }
@@ -422,6 +422,7 @@ async function parseTurnResponse(res: Response): Promise<PostTurnResult> {
 }
 
 export async function postSessionTurn(sessionId: string, body: FormData): Promise<PostTurnResult> {
+  if (!body.has("inputId")) body.set("inputId", crypto.randomUUID());
   const res = await fetch(`/api/chat/sessions/${sessionId}/turns`, {
     method: "POST",
     credentials: "include",

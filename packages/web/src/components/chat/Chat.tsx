@@ -814,6 +814,28 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             }
             continue;
           }
+          if (evt.event === "input_status") {
+            try {
+              const status = JSON.parse(
+                evt.data,
+              ) as import("@rome/api-types/trace-segments").InputStatusMessage;
+              setMessages((prev) => {
+                const next = new Map(prev);
+                next.set(
+                  sessionId,
+                  (prev.get(sessionId) ?? []).map((message) =>
+                    message.id === status.inputId
+                      ? { ...message, inputState: status.state, turnId: status.turnId }
+                      : message,
+                  ),
+                );
+                return next;
+              });
+            } catch {
+              /* Reconnection reloads the durable input state. */
+            }
+            continue;
+          }
           if (evt.event === "session_status") {
             // SSE-driven status lets the UI flip the
             // Send/Stop button without polling /stream-status.
@@ -956,6 +978,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // Sending re-engages stickiness so the user follows their own message and
       // the reply, even if they'd scrolled up to read history.
       scrollToBottom("auto");
+      const wasLocallyStreaming = locallyStreamingSessionIdsRef.current.has(sendingSessionId);
       locallyStreamingSessionIdsRef.current.add(sendingSessionId);
 
       // The POST result is the acceptance boundary. Whether the composer clears
@@ -967,13 +990,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // dropped stream never does.
       const result = await postTurn().catch((err: unknown) => {
         // Transport failure posting the turn — a genuine failed submit.
-        locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
+        if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
         setStreamError(t("stream.errors.sendInvalidResponse"));
         throw err;
       });
       if (!result.ok) {
-        locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
+        if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
         const message =
           result.message ||
@@ -992,13 +1015,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       const createResp: CreateTurnResponse = result.data;
       const pendingTurnId = createResp.turnId;
       const turnsForSession = inflightTurnsRef.current.get(sendingSessionId) ?? new Set<string>();
-      turnsForSession.add(pendingTurnId);
-      inflightTurnsRef.current.set(sendingSessionId, turnsForSession);
-      startSessionStream(sendingSessionId, pendingTurnId);
 
       const userMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: createResp.inputId ?? crypto.randomUUID(),
         sessionId: sendingSessionId,
+        turnId: pendingTurnId,
+        inputState: createResp.inputState ?? (createResp.inputId ? "queued" : undefined),
         role: "user",
         content: optimisticUserContent,
         createdAt: new Date().toISOString(),
@@ -1013,6 +1035,21 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         next.set(sendingSessionId, mergeChatMessage(existing, userMsg));
         return next;
       });
+
+      // Appending input does not own a second stream or replace the live tail.
+      // Late follow-up turns are discovered by the existing reattach loop.
+      if (turnsForSession.size || streamingSessionsRef.current.has(sendingSessionId)) {
+        if (!turnsForSession.size) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
+        return;
+      }
+      if (!pendingTurnId) {
+        locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
+        setStreamReconnectRevision((revision) => revision + 1);
+        return;
+      }
+      turnsForSession.add(pendingTurnId);
+      inflightTurnsRef.current.set(sendingSessionId, turnsForSession);
+      startSessionStream(sendingSessionId, pendingTurnId);
 
       // turn is already submitted, so a failed attach or a mid-stream drop must
       // never reject this function — that rejection is what used to restore the
@@ -1075,8 +1112,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // (text/uploads/options); this handler builds the POST and delegates the
   // turn lifecycle to runTurnLifecycle.
   //
-  // A new turn while a previous one is still streaming is
-  // queued FIFO at the AgentSession layer — no client-side block needed.
+  // The session decides whether input joins the active run or starts the next.
   const handleComposerSend = useCallback(
     async (snapshot: ChatComposerSnapshot) => {
       // The single composer talks to whoever holds the floor — the open

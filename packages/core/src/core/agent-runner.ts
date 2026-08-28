@@ -203,6 +203,8 @@ export interface ModelSessionParams {
 }
 
 export interface ModelUserInput {
+  /** Stable identity of an independently submitted conversational input. */
+  inputId?: string;
   text: string;
   /** Absolute local paths of images attached to the turn (providers without image-input support ignore them). */
   images?: string[];
@@ -269,6 +271,9 @@ export interface ModelSession {
 
   /** Push a new user turn. Resolves once the provider accepts it. */
   sendUserInput(input: ModelUserInput): Promise<void>;
+
+  /** Append without interrupting. Only `deferred` is safe to submit again. */
+  steerUserInput?(input: ModelUserInput): Promise<"accepted" | "deferred">;
 
   /** Create an isolated provider-owned branch from this live session. */
   fork(params: ModelSessionForkParams): Promise<ModelSessionFork>;

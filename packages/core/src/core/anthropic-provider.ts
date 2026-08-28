@@ -474,6 +474,16 @@ export class AnthropicProvider implements ModelProvider {
 
     const inputQueue = new AsyncMessageQueue<SDKUserMessage>();
     const { sessionId } = params;
+    const pendingSteers = new Set<string>();
+    const deferredInputs = new Set<string>();
+    let promptPermits = 0;
+    let releasePrompt: (() => void) | undefined;
+    let gateClosed = false;
+    const permitPrompt = () => {
+      promptPermits++;
+      releasePrompt?.();
+      releasePrompt = undefined;
+    };
 
     const q = query({
       prompt: inputQueue.iter(),
@@ -489,6 +499,33 @@ export class AnthropicProvider implements ModelProvider {
         // Surface raw API stream events so the events loop below can yield
         // `text_delta` previews while a text block is still being generated.
         includePartialMessages: true,
+        extraArgs: { "replay-user-messages": null },
+        hooks: {
+          UserPromptSubmit: [
+            {
+              timeout: 600,
+              hooks: [
+                async (_input, _toolUseId, { signal }) => {
+                  // Same-loop steering skips this hook. A late SDK-queued input
+                  // starts a new loop, which must wait for Rome's next turn owner.
+                  while (!promptPermits && !gateClosed && !signal.aborted) {
+                    await new Promise<void>((resolve) => {
+                      const wake = () => {
+                        signal.removeEventListener("abort", wake);
+                        resolve();
+                      };
+                      releasePrompt = wake;
+                      signal.addEventListener("abort", wake, { once: true });
+                    });
+                  }
+                  if (gateClosed || signal.aborted) return { continue: false };
+                  promptPermits--;
+                  return {};
+                },
+              ],
+            },
+          ],
+        },
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         settingSources: ["project"],
@@ -626,10 +663,22 @@ export class AnthropicProvider implements ModelProvider {
               }
             }
           } else if (isUserMessage(message)) {
+            if ("isReplay" in message && message.isReplay && message.uuid) {
+              pendingSteers.delete(message.uuid);
+              yield { type: "input_status", inputId: message.uuid, state: "consumed" };
+            }
             for (const toolResult of extractToolResultMessages(message, toolUseNames)) {
               yield toolResult;
             }
           } else if (isResultMessage(message)) {
+            running = false;
+            // The SDK owns these queued messages already. Rebind them to a
+            // new Rome turn before allowing its next UserPromptSubmit hook.
+            for (const inputId of pendingSteers) {
+              deferredInputs.add(inputId);
+              yield { type: "input_status", inputId, state: "queued" };
+            }
+            pendingSteers.clear();
             // The turn is ending: any text still held was the closing answer.
             if (pendingText !== null) {
               yield { type: "text", content: pendingText, turnPhase: "final" };
@@ -763,6 +812,10 @@ export class AnthropicProvider implements ModelProvider {
         if (closed) {
           throw new Error("ModelSession is closed");
         }
+        activeTurnLastAssistantMessageId = undefined;
+        running = true;
+        permitPrompt();
+        if (input.inputId && deferredInputs.delete(input.inputId)) return;
         const content: NonNullable<SDKUserMessage["message"]["content"]> = [];
         if (input.injectedToolResult) {
           content.push({
@@ -780,6 +833,8 @@ export class AnthropicProvider implements ModelProvider {
         }
         const sdkMsg: SDKUserMessage = {
           type: "user",
+          ...(input.inputId ? { uuid: input.inputId as SDKUserMessage["uuid"] } : {}),
+          priority: "next",
           parent_tool_use_id: null,
           session_id: sessionId,
           message: {
@@ -788,6 +843,22 @@ export class AnthropicProvider implements ModelProvider {
           },
         };
         inputQueue.push(sdkMsg);
+      },
+      async steerUserInput(input: ModelUserInput): Promise<"accepted" | "deferred"> {
+        if (closed) throw new Error("ModelSession is closed");
+        if (!running || !input.inputId || input.injectedToolResult) return "deferred";
+        if (input.reasoningEffort && toAnthropicEffort(input.reasoningEffort) !== effort)
+          return "deferred";
+        pendingSteers.add(input.inputId);
+        inputQueue.push({
+          type: "user",
+          uuid: input.inputId as SDKUserMessage["uuid"],
+          priority: "next",
+          parent_tool_use_id: null,
+          session_id: sessionId,
+          message: { role: "user", content: [{ type: "text", text: input.text }] },
+        });
+        return "accepted";
       },
       async fork(forkParams: ModelSessionForkParams): Promise<ModelSessionFork> {
         if (closed) throw new Error("Cannot fork a closed ModelSession");
@@ -840,6 +911,8 @@ export class AnthropicProvider implements ModelProvider {
       async close(): Promise<void> {
         if (queryDisposed) return;
         queryDisposed = true;
+        gateClosed = true;
+        releasePrompt?.();
         try {
           inputQueue.end();
         } catch {

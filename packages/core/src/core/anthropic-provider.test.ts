@@ -122,6 +122,73 @@ function buildForkOpenParams(
 }
 
 describe("AnthropicProvider", () => {
+  it("adopts a late SDK-queued input exactly once and gates the next native loop", async () => {
+    const a = "00000000-0000-4000-8000-000000000001";
+    const b = "00000000-0000-4000-8000-000000000002";
+    const prompts: { uuid: string; priority: string }[] = [];
+    let enteredSecondLoop = false;
+    queryMock.mockImplementation(({ prompt, options }) => ({
+      async *[Symbol.asyncIterator]() {
+        const inputs = prompt[Symbol.asyncIterator]();
+        const hook = options.hooks.UserPromptSubmit[0].hooks[0];
+        const first = (await inputs.next()).value;
+        prompts.push(first);
+        await hook({}, undefined, { signal: new AbortController().signal });
+        yield { ...first, isReplay: true };
+        const second = (await inputs.next()).value;
+        prompts.push(second);
+        yield { type: "result", subtype: "success", result: "first", num_turns: 1 };
+        await hook({}, undefined, { signal: new AbortController().signal });
+        enteredSecondLoop = true;
+        yield { ...second, isReplay: true };
+        yield { type: "result", subtype: "success", result: "second", num_turns: 1 };
+      },
+      close: vi.fn(),
+    }));
+    const session = await new AnthropicProvider().openSession(buildParams());
+    const events = session.events[Symbol.asyncIterator]();
+    await session.sendUserInput({ text: "first", inputId: a });
+    expect((await events.next()).value).toMatchObject({ inputId: a, state: "consumed" });
+    expect(await session.steerUserInput!({ text: "second", inputId: b })).toBe("accepted");
+    expect((await events.next()).value).toMatchObject({ inputId: b, state: "queued" });
+    expect((await events.next()).value).toMatchObject({ type: "result", content: "first" });
+    const next = events.next();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(enteredSecondLoop).toBe(false);
+    await session.sendUserInput({ text: "second", inputId: b });
+    expect((await next).value).toMatchObject({ inputId: b, state: "consumed" });
+    expect(prompts.map((input) => input.uuid)).toEqual([a, b]);
+    expect(prompts.map((input) => input.priority)).toEqual(["next", "next"]);
+    expect((await events.next()).value).toMatchObject({ type: "result", content: "second" });
+    await session.close();
+  });
+
+  it("marks a boundary-consumed steer without creating another native turn", async () => {
+    const a = "00000000-0000-4000-8000-000000000001";
+    const b = "00000000-0000-4000-8000-000000000002";
+    queryMock.mockImplementation(({ prompt, options }) => ({
+      async *[Symbol.asyncIterator]() {
+        const inputs = prompt[Symbol.asyncIterator]();
+        const first = (await inputs.next()).value;
+        await options.hooks.UserPromptSubmit[0].hooks[0]({}, undefined, {
+          signal: new AbortController().signal,
+        });
+        yield { ...first, isReplay: true };
+        yield { ...(await inputs.next()).value, isReplay: true };
+        yield { type: "result", subtype: "success", result: "both", num_turns: 2 };
+      },
+      close: vi.fn(),
+    }));
+    const session = await new AnthropicProvider().openSession(buildParams());
+    const events = session.events[Symbol.asyncIterator]();
+    await session.sendUserInput({ text: "first", inputId: a });
+    await events.next();
+    await session.steerUserInput!({ text: "second", inputId: b });
+    expect((await events.next()).value).toMatchObject({ inputId: b, state: "consumed" });
+    expect((await events.next()).value).toMatchObject({ type: "result", content: "both" });
+    await session.close();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     markAnthropicAuthRevokedMock.mockResolvedValue(undefined);

@@ -506,18 +506,20 @@ export function MessageList({
   // settled row bails on memo. A turn with nothing persisted yet has no row, so
   // the tail stands alone until its first message lands.
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
-  const hasRunningRow =
-    runningTurnId != null &&
-    rows.some((r) => r.kind === "agent" && r.messages.some((m) => m.turnId === runningTurnId));
+  const lastRow = rows.at(-1);
+  const runningRow =
+    runningTurnId &&
+    lastRow?.kind === "agent" &&
+    lastRow.messages.some((m) => m.turnId === runningTurnId)
+      ? lastRow
+      : undefined;
+  const hasRunningRow = !!runningRow;
 
   return (
     <div className="flex-1">
       <div ref={contentRef} className="mx-auto max-w-5xl px-4 pt-4 md:px-6">
         {rows.map((row) => {
-          const isRunning =
-            runningTurnId != null &&
-            row.kind === "agent" &&
-            row.messages.some((m) => m.turnId === runningTurnId);
+          const isRunning = row === runningRow;
           const view = (
             <RowView
               key={row.key}

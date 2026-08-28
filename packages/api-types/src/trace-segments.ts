@@ -2,6 +2,8 @@
 
 import type { AgentPlan, RomeSessionRef } from "@rome-os/app-runtime";
 export type {
+  AgentInputState,
+  InputStatusMessage,
   AgentPlan,
   AgentPlanStep,
   AgentPlanStepStatus,

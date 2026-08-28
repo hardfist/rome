@@ -1,6 +1,6 @@
 # A concurrent turn queues behind the running turn instead of interrupting it
 
-- **Status**: Accepted
+- **Status**: Superseded for WebChat inputs by [provider-native conversational steering](provider-native-conversational-steering.md). Retained for independent turn callers.
 - **Date**: 2026-08-11
 - **Concept**: [sessions](../concepts/sessions.md)
 

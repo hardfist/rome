@@ -137,6 +137,79 @@ async function collectUntilTerminal(session: ModelSession): Promise<AgentMessage
 }
 
 describe("CodexAppServerProvider", () => {
+  it("steers the owned native turn, correlating consumption separately from RPC acceptance", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thr-1" } };
+      if (method === "turn/start") {
+        captured.onNotification?.("turn/started", { threadId: "thr-1", turn: { id: "native-a" } });
+        return { turn: { id: "native-a" } };
+      }
+      if (method === "turn/steer") return { turnId: "native-a" };
+      return {};
+    });
+    const session = await new CodexAppServerProvider().openSession(buildParams());
+    await session.sendUserInput({ text: "first", inputId: "a" });
+    const steering = session.steerUserInput!({ text: "second", inputId: "b" });
+    await vi.waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith("turn/start", expect.anything()),
+    );
+    expect(requestMock).not.toHaveBeenCalledWith("turn/steer", expect.anything());
+    captured.onNotification?.("item/completed", {
+      threadId: "thr-1",
+      turnId: "native-a",
+      item: { type: "userMessage", id: "native-input-a", clientId: "a", content: [] },
+    });
+    expect(await steering).toBe("accepted");
+    expect(requestMock).toHaveBeenCalledWith("turn/steer", {
+      threadId: "thr-1",
+      expectedTurnId: "native-a",
+      clientUserMessageId: "b",
+      input: [{ type: "text", text: "second", text_elements: [] }],
+    });
+    expect(requestMock.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(1);
+    expect(requestMock.mock.calls.filter(([method]) => method === "turn/interrupt")).toHaveLength(
+      0,
+    );
+    captured.onNotification?.("item/completed", {
+      threadId: "thr-1",
+      turnId: "native-a",
+      item: { type: "userMessage", id: "native-b", clientId: "b", content: [] },
+    });
+    captured.onNotification?.("turn/completed", {
+      threadId: "thr-1",
+      turn: { id: "native-a", status: "completed" },
+    });
+    const messages = await collectUntilTerminal(session);
+    expect(messages.filter((message) => message.type === "input_status")).toEqual([
+      { type: "input_status", inputId: "a", state: "consumed" },
+      { type: "input_status", inputId: "b", state: "consumed" },
+    ]);
+    expect(await session.steerUserInput!({ text: "late", inputId: "c" })).toBe("deferred");
+    await session.close();
+  });
+
+  it("releases a buffered steer when startup ends without confirming the first input", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thr-1" } };
+      if (method === "turn/start") return { turn: { id: "native-a" } };
+      return {};
+    });
+    const session = await new CodexAppServerProvider().openSession(buildParams());
+    await session.sendUserInput({ text: "first", inputId: "a" });
+    const steering = session.steerUserInput!({ text: "second", inputId: "b" });
+    await vi.waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith("turn/start", expect.anything()),
+    );
+    captured.onNotification?.("turn/completed", {
+      threadId: "thr-1",
+      turn: { id: "native-a", status: "completed" },
+    });
+    expect(await steering).toBe("deferred");
+    expect(requestMock).not.toHaveBeenCalledWith("turn/steer", expect.anything());
+    await collectUntilTerminal(session);
+    await session.close();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     getCodexCliStatusMock.mockResolvedValue({ loggedIn: true });
@@ -852,6 +925,12 @@ describe("CodexAppServerProvider", () => {
     await vi.waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith("turn/start", expect.anything()),
     );
+    expect(
+      await source.steerUserInput!({ text: "not for the fork", inputId: "source-input" }),
+    ).toBe("deferred");
+    await source.interrupt("source-only");
+    expect(requestMock).not.toHaveBeenCalledWith("turn/steer", expect.anything());
+    expect(requestMock).not.toHaveBeenCalledWith("turn/interrupt", expect.anything());
 
     // A model-changing fork (e.g. a recap turn on a smaller tier) arrives
     // while the borrowed turn holds the thread.

@@ -40,6 +40,7 @@ export interface StoredWebchatMessage {
   id: string;
   sessionId: string;
   turnId: string | null;
+  inputState?: import("@rome-os/app-runtime").AgentInputState | null;
   role: string;
   content: string;
   platformMessageId?: string | null;
@@ -1465,6 +1466,70 @@ export class WebChatRepository {
     return rows[0]?.count ?? 0;
   }
 
+  async recordUserInput(id: string, sessionId: string, content: string): Promise<boolean> {
+    return this.db.transaction((tx) => {
+      const createdAt = new Date();
+      const inserted = tx
+        .insert(romeAgentMessages)
+        .values({
+          id,
+          sessionId,
+          content,
+          role: "user",
+          inputState: "queued",
+          createdAt,
+        })
+        .onConflictDoNothing()
+        .returning({ id: romeAgentMessages.id })
+        .all();
+      if (inserted.length)
+        tx.update(romeSessions)
+          .set(advanceSessionActivitySet(createdAt))
+          .where(eq(romeSessions.id, sessionId))
+          .run();
+      return inserted.length > 0;
+    });
+  }
+
+  async recoverInterruptedInputs(): Promise<void> {
+    // A process crash can occur between the durable dispatch marker and the
+    // provider acknowledgement. Preserve the message without replaying it.
+    await this.db
+      .update(romeAgentMessages)
+      .set({ inputState: "unknown" })
+      .where(inArray(romeAgentMessages.inputState, ["queued", "submitted", "accepted"]));
+  }
+
+  async getUserInput(sessionId: string, inputId: string) {
+    return this.db
+      .select({ turnId: romeAgentMessages.turnId, inputState: romeAgentMessages.inputState })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.id, inputId),
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "user"),
+        ),
+      )
+      .get();
+  }
+
+  async updateUserInput(
+    sessionId: string,
+    status: import("@rome-os/app-runtime").InputStatusMessage,
+  ): Promise<void> {
+    await this.db
+      .update(romeAgentMessages)
+      .set({ inputState: status.state, turnId: status.turnId ?? null })
+      .where(
+        and(
+          eq(romeAgentMessages.id, status.inputId),
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "user"),
+        ),
+      );
+  }
+
   async addMessage(
     id: string,
     sessionId: string,
@@ -1788,6 +1853,7 @@ export class WebChatRepository {
         id: romeAgentMessages.id,
         sessionId: romeAgentMessages.sessionId,
         turnId: romeAgentMessages.turnId,
+        inputState: romeAgentMessages.inputState,
         role: romeAgentMessages.role,
         content:
           sql<string>`CASE WHEN ${romeAgentMessages.role} = 'trace' THEN '[]' ELSE ${romeAgentMessages.content} END`.as(
