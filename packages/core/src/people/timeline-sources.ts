@@ -8,8 +8,10 @@
 
 import { sql } from "drizzle-orm";
 import type { TalkAccounts } from "../channels/accounts.js";
+// How a stored agent message reads — which way it went, and the line it
+// renders as — defined once beside the `Messages` store over the same rows.
+import { agentMessageOutbound, messageContentText } from "../channels/messages-agent.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { MessagePart } from "../types.js";
 import type { TimelineAccount, TimelineSource } from "./timeline.js";
 import { accountPairs, addressesOn, inList, sqlTimelineSource } from "./timeline-sql.js";
 
@@ -126,15 +128,17 @@ export function agentMessagesSource(db: DrizzleDb): TimelineSource {
           s.source_channel AS source,
           s.source_thread_id AS address,
           m.created_at AS at,
-          CASE WHEN m.role = 'assistant' THEN 1 ELSE 0 END AS outbound,
+          ${agentMessageOutbound(sql`m.role`, sql`m.sender_id`)} AS outbound,
           'agent:' || m.id AS ref,
           m.content AS body
         FROM rome_agent_messages m
         JOIN rome_sessions s ON s.id = m.session_id
         WHERE s.type = 'channel'
           AND ${addressed}
-          -- 'notification' is an inbound message that did not wake the agent;
-          -- it is still something the person said. 'trace' is the turn's
+          -- 'notification' is a line that passed outside a turn — something
+          -- the person said without waking the agent, or something Rome sent
+          -- untied to one. Either way it is conversation, and the direction
+          -- above is what tells the two apart. 'trace' is the turn's own
           -- machinery and belongs to no conversation.
           AND m.role IN ('user', 'assistant', 'notification')`;
     },
@@ -289,26 +293,3 @@ function foldAccounts(
 /** One page big enough to hold any listing — what `TalkAccounts.listAccounts`
  *  says to ask for when a caller needs every account exactly once. */
 const WHOLE_LISTING = Number.MAX_SAFE_INTEGER;
-
-/** The line a stored agent message renders as: its text parts, joined.
- *  Non-text parts (cards, recaps, errors) carry no conversation, and content
- *  that does not parse is a row with nothing to show rather than a failed read. */
-function messageContentText(raw: string | null): string | null {
-  if (raw === null) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(parsed)) return null;
-  const text = parsed
-    .filter((part): part is Extract<MessagePart, { type: "text" }> => {
-      if (typeof part !== "object" || part === null) return false;
-      const candidate = part as { type?: unknown; content?: unknown };
-      return candidate.type === "text" && typeof candidate.content === "string";
-    })
-    .map((part) => part.content)
-    .join("\n");
-  return text.length > 0 ? text : null;
-}

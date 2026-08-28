@@ -4,7 +4,7 @@
 
 import { sql, type SQL } from "drizzle-orm";
 import { compareTimelineEntries, type TimelineEntry } from "@rome/api-types/people";
-import { inList } from "../channels/messages-sql.js";
+import { inList, scopePairs } from "../channels/messages-sql.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { AccountDigest, TimelineAccount, TimelineSource, TimelineRead } from "./timeline.js";
 
@@ -178,20 +178,21 @@ export function addressesOn(accounts: readonly TimelineAccount[], channel: strin
 }
 
 /** `(channel, address)` matched as a pair, so an address on one channel never
- *  selects a row another channel stores under the same string. */
+ *  selects a row another channel stores under the same string.
+ *
+ *  The accounts flattened to the pairs they name, and the clause itself is the
+ *  channel-side one: the two sides of the migration scope the same rows, and a
+ *  second spelling here is a second set of rows to disagree about. */
 export function accountPairs(
   accounts: readonly TimelineAccount[],
   channelColumn: SQL,
   addressColumn: SQL,
 ): SQL | null {
-  const clauses = accounts
-    .map((account) => {
-      const addresses = inList(addressColumn, account.addresses);
-      return addresses === null
-        ? null
-        : sql`(${channelColumn} = ${account.channel} AND ${addresses})`;
-    })
-    .filter((clause): clause is SQL => clause !== null);
-  if (clauses.length === 0) return null;
-  return sql`(${sql.join(clauses, sql` OR `)})`;
+  return scopePairs(
+    accounts.flatMap((account) =>
+      account.addresses.map((address) => ({ channel: account.channel, address })),
+    ),
+    channelColumn,
+    addressColumn,
+  );
 }

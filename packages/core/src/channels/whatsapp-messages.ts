@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import type { Messages } from "./messages.js";
-import { inList, sqlMessages } from "./messages-sql.js";
+import { addressesIn, inList, sqlMessages } from "./messages-sql.js";
 
 /**
  * `Messages` over the WhatsApp message mirror (`wa_messages`) — the thread as
@@ -29,7 +29,8 @@ export function whatsAppMessages(db: DrizzleDb): Messages {
   return sqlMessages({
     channel: "whatsapp",
     db,
-    view(addresses) {
+    view(scope) {
+      const addresses = addressesIn(scope);
       const chats = inList(sql`m.chat_jid`, addresses);
       if (chats === null) return null;
       return sql`

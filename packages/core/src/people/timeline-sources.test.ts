@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Account, AccountId } from "../channels/accounts.js";
-import { timelineAccounts } from "./timeline-sources.js";
+import { WebChatRepository } from "../db/repositories/webchat.js";
+import { romeSessions } from "../db/schema.js";
+import { createTestDb } from "../test/helpers.js";
+import { agentMessagesSource, timelineAccounts } from "./timeline-sources.js";
 
 const account = (id: string, addresses: string[] = [id]): Account => ({
   id: id as AccountId,
@@ -106,5 +109,65 @@ describe("timelineAccounts", () => {
     expect(groups[2]?.[0]?.channel).toBe("whatsapp");
     // One read serves every group.
     expect(whatsAppAccounts.listings).toBe(1);
+  });
+});
+
+describe("agentMessagesSource", () => {
+  const CHANNEL = "telegram";
+  const THREAD = "tg-777";
+  const accounts = [{ channel: CHANNEL, addresses: [THREAD] }];
+
+  /** A channel session for the thread, and the repository that writes to it —
+   *  the rows this source reads come from the writer that really stores them. */
+  async function conversation() {
+    const { db } = createTestDb();
+    const now = new Date(0);
+    await db.insert(romeSessions).values({
+      id: "session",
+      name: "session",
+      type: "channel",
+      sourceChannel: CHANNEL,
+      sourceThreadId: THREAD,
+      sourceThreadType: "private",
+      createdAt: now,
+      activityAt: now,
+    });
+    return { source: agentMessagesSource(db), repo: new WebChatRepository(db) };
+  }
+
+  const content = (line: string) => JSON.stringify([{ type: "text", content: line }]);
+
+  // `notification` is written in both directions, so the role cannot settle
+  // one on its own: a Rome message the send path did not tie to a turn is
+  // stored under it, and reading the role alone puts Rome's own line on the
+  // person's side of their timeline.
+  it("puts a notification Rome sent on Rome's side", async () => {
+    const { source, repo } = await conversation();
+    await repo.recordOutboundConversationMessage({
+      sessionId: "session",
+      content: content("delivered without a turn"),
+      platformMessageId: "pm-out-of-band",
+      senderId: "rome",
+      senderName: "Rome",
+      knownToProvider: false,
+    });
+
+    const [entry] = await source.read({ accounts, cursor: null, limit: 10 });
+    expect(entry).toMatchObject({ direction: "outbound", body: "delivered without a turn" });
+  });
+
+  it("puts a notification the person sent on theirs", async () => {
+    const { source, repo } = await conversation();
+    await repo.addConversationMessage({
+      sessionId: "session",
+      role: "notification",
+      content: content("said while Rome slept"),
+      platformMessageId: "pm-unwoken",
+      senderId: THREAD,
+      senderName: "Ada",
+    });
+
+    const [entry] = await source.read({ accounts, cursor: null, limit: 10 });
+    expect(entry).toMatchObject({ direction: "inbound", body: "said while Rome slept" });
   });
 });

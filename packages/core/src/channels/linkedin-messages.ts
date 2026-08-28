@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import type { Messages } from "./messages.js";
-import { inList, sqlMessages } from "./messages-sql.js";
+import { addressesIn, inList, sqlMessages } from "./messages-sql.js";
 
 /**
  * `Messages` over the LinkedIn inbox mirror (`linkedin_messages`), restricted
@@ -25,7 +25,8 @@ export function linkedInMessages(db: DrizzleDb): Messages {
   return sqlMessages({
     channel: "linkedin",
     db,
-    view(addresses) {
+    view(scope) {
+      const addresses = addressesIn(scope);
       const members = inList(sql`tp.participant_id`, addresses);
       if (members === null) return null;
       return sql`
