@@ -330,6 +330,32 @@ describe("Chat turn stream lifecycle", () => {
     );
   });
 
+  it("keeps Stop available while the server still reports the turn running", async () => {
+    vi.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 202 }));
+    vi.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    const signal = vi.mocked(openTurnStream).mock.calls[0]?.[1];
+
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByTestId("stop-button"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+    expect(signal?.aborted).toBe(false);
+    expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+
+    // Retry is real, and a missed done can still be recovered once confirmed.
+    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    fireEvent.click(screen.getByTestId("stop-button"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+    expect(interruptTurn).toHaveBeenCalledTimes(2);
+    expect(signal?.aborted).toBe(true);
+    expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("false");
+  });
+
   it("does not let a delayed force-release abort a fresh stream for the same turn", async () => {
     const streamControllers: ReadableStreamDefaultController<Uint8Array>[] = [];
     vi.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);

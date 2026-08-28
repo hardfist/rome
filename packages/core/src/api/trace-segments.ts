@@ -113,11 +113,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
   const subagents: TraceSummary["subagents"] = [];
   const subagentByUseId = new Map<string, NonNullable<TraceSummary["subagents"]>[number]>();
   let totalDurationMs: number | undefined;
-  // Mirrors `turn_end.status === "interrupted"` — the AgentSession classifies
-  // a user stop (Stop button → `q.interrupt()` → terminal accounting
-  // `stopReason: "interrupted"`) when it emits the bracket, so the builder
-  // reads the outcome off the lifecycle block instead of re-deriving it from
-  // the terminal's accounting.
+  // Turn outcome comes from turn_end, not provider transport completion.
   let stoppedByUser = false;
   let terminalError: string | undefined;
   let latestPlan: TraceSummary["plan"];

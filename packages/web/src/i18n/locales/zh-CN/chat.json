@@ -104,6 +104,8 @@
     "showLess": "收起",
     "input": "输入",
     "output": "输出",
+    "resultUnknown": "结果未知",
+    "resultUnknownHint": "未收到执行结果；工具可能已在本轮结束前产生修改。",
     "itemCount_one": "{{count}} 项",
     "itemCount_other": "{{count}} 项",
     "keyCount_one": "{{count}} 个字段",

@@ -1,4 +1,5 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { AbortError, query } from "@anthropic-ai/claude-agent-sdk";
+import { randomUUID } from "node:crypto";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type {
   EffortLevel,
@@ -49,6 +50,7 @@ import {
 } from "./anthropic-auth-revoked.js";
 import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
 import { isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
+import { createClaudeQueryProcess } from "./claude-query-process.js";
 
 // Beta content block types are not re-exported from the agent SDK and
 // `@anthropic-ai/sdk` is not a direct dependency, so we derive the shapes
@@ -473,6 +475,8 @@ export class AnthropicProvider implements ModelProvider {
     const onQuotaExhausted = this.options.onQuotaExhausted;
 
     const inputQueue = new AsyncMessageQueue<SDKUserMessage>();
+    const queryProcess = createClaudeQueryProcess();
+    const { abortController } = queryProcess;
     const { sessionId } = params;
     const pendingSteers = new Set<string>();
     const deferredInputs = new Set<string>();
@@ -484,10 +488,16 @@ export class AnthropicProvider implements ModelProvider {
       releasePrompt?.();
       releasePrompt = undefined;
     };
+    // A cancelled first turn can leave a user-only transcript that is not
+    // resumable. Its id is still reserved by the CLI, so don't reuse it.
+    const sdkSessionId =
+      params.isNewSession === false && !params.providerThreadId ? randomUUID() : sessionId;
 
     const q = query({
       prompt: inputQueue.iter(),
       options: {
+        abortController,
+        spawnClaudeCodeProcess: queryProcess.spawn,
         model: effectiveModel,
         effort,
         systemPrompt,
@@ -548,7 +558,7 @@ export class AnthropicProvider implements ModelProvider {
             // "No conversation found with session ID". Start fresh in that case.
             !params.isNewSession && params.providerThreadId
             ? { resume: params.providerThreadId }
-            : { sessionId }),
+            : { sessionId: sdkSessionId }),
       },
     });
 
@@ -562,12 +572,6 @@ export class AnthropicProvider implements ModelProvider {
     let closed = false;
     let queryDisposed = false;
     let running = false;
-    // When interrupt() lands, the SDK aborts the in-flight HTTP
-    // request and emits an `error_during_execution` rather than a clean
-    // `stop_reason: "interrupted"` result. We track that state here so the
-    // events loop can translate the next error into a graceful interrupted
-    // result for the consumer.
-    let interruptRequested = false;
 
     // The SDK's own session id, captured from the first assistant message once a
     // transcript with real content exists. Exposed via `session.providerThreadId`
@@ -593,6 +597,7 @@ export class AnthropicProvider implements ModelProvider {
       // stream in real time; only the completed-block event is deferred by one
       // step (a block isn't truly "done" until the next one starts anyway).
       let pendingText: string | null = null;
+      let partialText = "";
       try {
         for await (const message of q) {
           if (isPartialAssistantMessage(message)) {
@@ -604,6 +609,11 @@ export class AnthropicProvider implements ModelProvider {
             if (message.parent_tool_use_id === null) {
               const evt = message.event;
               if (evt.type === "content_block_delta" && evt.delta.type === "text_delta") {
+                if (partialText === "" && pendingText !== null) {
+                  yield { type: "text", content: pendingText, turnPhase: "commentary" };
+                  pendingText = null;
+                }
+                partialText += evt.delta.text;
                 yield { type: "text_delta", content: evt.delta.text };
               }
             }
@@ -621,6 +631,7 @@ export class AnthropicProvider implements ModelProvider {
             }
             for (const block of message.message.content) {
               if (isTextBlock(block) && block.text) {
+                partialText = "";
                 // A new text block: the previously held one is now confirmed
                 // mid-turn narration. Hold this one until something follows it.
                 if (pendingText !== null) {
@@ -684,7 +695,10 @@ export class AnthropicProvider implements ModelProvider {
               yield { type: "text", content: pendingText, turnPhase: "final" };
               pendingText = null;
             }
-            const contextUsage = await readSdkContextUsage(q);
+            if (abortController.signal.aborted) await queryProcess.abort();
+            const contextUsage = abortController.signal.aborted
+              ? undefined
+              : await readSdkContextUsage(q);
             const accounting = buildAnthropicAccounting(
               message,
               effectiveModel,
@@ -705,7 +719,6 @@ export class AnthropicProvider implements ModelProvider {
                 agentName: params.agentName,
                 appStoreListingId: params.appStoreListingId,
               });
-              interruptRequested = false;
               running = false;
               // A turn that reached the API proves the credential works; drop any
               // lingering revoked marker (covers a Keychain re-login whose file
@@ -716,19 +729,6 @@ export class AnthropicProvider implements ModelProvider {
                 type: "result",
                 content: message.result || "",
                 accounting,
-              };
-            } else if (interruptRequested) {
-              // The user pressed Stop and the SDK aborted the request; emit a
-              // clean interrupted result instead of an error so the trace UI
-              // doesn't surface "Request was aborted." stack traces.
-              log.info("agent SDK result (interrupted)", resultData);
-              interruptRequested = false;
-              running = false;
-              lastCompletedTurnCheckpoint = activeTurnLastAssistantMessageId;
-              yield {
-                type: "result",
-                content: "",
-                accounting: accounting ? { ...accounting, stopReason: "interrupted" } : undefined,
               };
             } else {
               const errors = message.errors ?? [];
@@ -758,6 +758,19 @@ export class AnthropicProvider implements ModelProvider {
             }
           }
         }
+        if (abortController.signal.aborted && running) {
+          await queryProcess.abort();
+          if (pendingText !== null) {
+            yield {
+              type: "text",
+              content: pendingText,
+              turnPhase: partialText ? "commentary" : "final",
+            };
+          }
+          if (partialText) yield { type: "text", content: partialText, turnPhase: "final" };
+          running = false;
+          yield { type: "result", content: partialText || pendingText || "" };
+        }
       } catch (err) {
         // The stream threw without delivering a terminal `result` (raw abort,
         // SDK panic, …). Flush any held text as the closing answer before the
@@ -766,8 +779,20 @@ export class AnthropicProvider implements ModelProvider {
         // purpose: a `yield` in `finally` re-suspends the generator when the
         // consumer abandons iteration via `.return()`, swallowing the close.
         if (pendingText !== null) {
-          yield { type: "text", content: pendingText, turnPhase: "final" };
-          pendingText = null;
+          yield {
+            type: "text",
+            content: pendingText,
+            turnPhase: partialText ? "commentary" : "final",
+          };
+        }
+        if (partialText) yield { type: "text", content: partialText, turnPhase: "final" };
+        if (abortController.signal.aborted && err instanceof AbortError) {
+          await queryProcess.abort();
+          if (running) {
+            running = false;
+            yield { type: "result", content: partialText || pendingText || "" };
+          }
+          return;
         }
         // A 401 can also surface as a thrown stream error rather than a result
         // with `subtype: error`. Convert it to a classified terminal and persist
@@ -801,6 +826,9 @@ export class AnthropicProvider implements ModelProvider {
     const session: ModelSession = {
       providerId,
       model: effectiveModel,
+      get isClosed(): boolean {
+        return closed || abortController.signal.aborted;
+      },
       get providerThreadId(): string | undefined {
         return establishedThreadId;
       },
@@ -809,7 +837,7 @@ export class AnthropicProvider implements ModelProvider {
       },
       events,
       async sendUserInput(input: ModelUserInput): Promise<void> {
-        if (closed) {
+        if (closed || abortController.signal.aborted) {
           throw new Error("ModelSession is closed");
         }
         activeTurnLastAssistantMessageId = undefined;
@@ -836,7 +864,7 @@ export class AnthropicProvider implements ModelProvider {
           ...(input.inputId ? { uuid: input.inputId as SDKUserMessage["uuid"] } : {}),
           priority: "next",
           parent_tool_use_id: null,
-          session_id: sessionId,
+          session_id: sdkSessionId,
           message: {
             role: "user",
             content,
@@ -845,7 +873,9 @@ export class AnthropicProvider implements ModelProvider {
         inputQueue.push(sdkMsg);
       },
       async steerUserInput(input: ModelUserInput): Promise<"accepted" | "deferred"> {
-        if (closed) throw new Error("ModelSession is closed");
+        if (closed || abortController.signal.aborted) {
+          throw new Error("ModelSession is closed");
+        }
         if (!running || !input.inputId || input.injectedToolResult) return "deferred";
         if (input.reasoningEffort && toAnthropicEffort(input.reasoningEffort) !== effort)
           return "deferred";
@@ -855,13 +885,15 @@ export class AnthropicProvider implements ModelProvider {
           uuid: input.inputId as SDKUserMessage["uuid"],
           priority: "next",
           parent_tool_use_id: null,
-          session_id: sessionId,
+          session_id: sdkSessionId,
           message: { role: "user", content: [{ type: "text", text: input.text }] },
         });
         return "accepted";
       },
       async fork(forkParams: ModelSessionForkParams): Promise<ModelSessionFork> {
-        if (closed) throw new Error("Cannot fork a closed ModelSession");
+        if (closed || abortController.signal.aborted) {
+          throw new Error("Cannot fork a closed ModelSession");
+        }
         if (running) throw new Error("Cannot fork while source session is running");
         const mode = forkParams.mode ?? "ephemeral";
         const sourceSessionId = params.sessionId;
@@ -897,16 +929,9 @@ export class AnthropicProvider implements ModelProvider {
         };
       },
       async interrupt(reason?: string): Promise<void> {
-        if (closed) return;
         log.info("ModelSession interrupt requested", { reason });
-        interruptRequested = true;
-        try {
-          await q.interrupt();
-        } catch (err) {
-          log.warn("query.interrupt() rejected", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
+        await queryProcess.abort();
+        inputQueue.end();
       },
       async close(): Promise<void> {
         if (queryDisposed) return;

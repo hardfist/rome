@@ -1246,23 +1246,19 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     if (!turnId) return;
     const targetController = turnStreamControllersRef.current.get(turnId);
 
-    // The streaming entry normally clears when the stream delivers `done`.
-    // But if the SSE connection died silently (mobile background/lock, proxy
-    // idle timeout), that `done` never arrives: the entry is stuck on a turn
-    // that is over (interrupt → 404) or unobservable (interrupt → 200 with
-    // no visible effect) — Stop appears dead until the next send resyncs.
-    // Force-release the entry after `delayMs` if it's still pinned to this
-    // turn: aborting the turn's stream controller runs the caller's normal
-    // teardown (inflight bookkeeping + reconnect-revision bump, which also
-    // re-attaches if the turn is somehow still running), endSessionStream is
-    // the direct backstop, and the forced reload shows the turn's real state.
-    const forceReleaseIfStuck = (delayMs: number) => {
-      setTimeout(() => {
-        if (streamingSessionsRef.current.get(sid)?.turnId !== turnId) return;
-        // A dropped stream can reattach to the same turn while this timeout is
-        // pending. Only retire the controller that Stop originally targeted;
-        // a different instance is a healthy replacement and owns the state now.
-        if (turnStreamControllersRef.current.get(turnId) !== targetController) return;
+    // A dead SSE connection can miss `done`. Release it only after the server
+    // confirms this turn ended; accepting Stop is not confirmation of exit.
+    const forceReleaseIfStuck = (delayMs: number, confirmedFinished = false) => {
+      const stillOwnsStream = () =>
+        streamingSessionsRef.current.get(sid)?.turnId === turnId &&
+        turnStreamControllersRef.current.get(turnId) === targetController;
+      setTimeout(async () => {
+        if (!stillOwnsStream()) return;
+        if (!confirmedFinished) {
+          const turns = await listSessionTurns(sid).catch(() => null);
+          if (!turns || turns.some((turn) => turn.turnId === turnId)) return;
+          if (!stillOwnsStream()) return;
+        }
         targetController?.abort();
         endSessionStream(sid, turnId);
         void loadMessages(sid, { force: true, dropLocalOptimistic: true });
@@ -1274,7 +1270,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       if (res.status === 404) {
         // The turn already finished server-side (stop landed late, or the
         // local entry outlived a dead stream) — release the stale entry now.
-        forceReleaseIfStuck(0);
+        forceReleaseIfStuck(0, true);
       } else if (res.ok) {
         // Interrupt accepted. A healthy stream flips the UI via `done`
         // within moments; the grace-period check only fires on a dead one.

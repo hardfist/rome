@@ -156,7 +156,7 @@ export interface ModelSessionParams {
   /**
    * Provider-specific thread/session id from a previous session, used for
    * resume. Codex generates its own opaque thread id that must be passed
-   * back to `resumeThread()`; Anthropic uses Rome's `sessionId` directly.
+   * back to `resumeThread()`; Anthropic captures the SDK transcript's id.
    */
   providerThreadId?: string;
   /** Provider-owned fork source. Normal application code should not set this. */
@@ -256,6 +256,8 @@ export interface ModelSessionFork {
 export interface ModelSession {
   readonly providerId: ProviderId;
   readonly model: string;
+  /** A disposed provider execution must be reopened before another turn. */
+  readonly isClosed?: boolean;
   /** Single, lifetime stream of AgentMessages produced by the provider. */
   readonly events: AsyncIterable<AgentMessage>;
 
@@ -278,7 +280,7 @@ export interface ModelSession {
   /** Create an isolated provider-owned branch from this live session. */
   fork(params: ModelSessionForkParams): Promise<ModelSessionFork>;
 
-  /** Graceful stop of the in-flight turn. */
+  /** Stop the in-flight turn. The provider may dispose of its execution. */
   interrupt(reason?: string): Promise<void>;
 
   /**

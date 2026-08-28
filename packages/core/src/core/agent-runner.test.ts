@@ -60,6 +60,7 @@ import {
   type AgentSessionManager,
 } from "./agent-session.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import { createTurnMiddlewareChain } from "./turn-middleware.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { AgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -1430,6 +1431,165 @@ describe("AgentRunner", () => {
   }
 
   describe("session management", () => {
+    it("waits for cancellation before ending a turn stopped during middleware", async () => {
+      let releaseMiddleware!: () => void;
+      const middlewareGate = new Promise<void>((resolve) => {
+        releaseMiddleware = resolve;
+      });
+      let confirmExit!: () => void;
+      const exit = new Promise<void>((resolve) => {
+        confirmExit = resolve;
+      });
+      const turnMiddleware = createTurnMiddlewareChain();
+      vi.spyOn(turnMiddleware, "run").mockImplementation(async (_ctx, next) => {
+        await middlewareGate;
+        await next();
+      });
+      const interrupt = vi.fn(() => exit);
+      const sendUserInput = vi.fn(async () => {});
+      vi.spyOn(mockProvider, "openSession").mockImplementation(async (params) => ({
+        ...createClosableModelSession(params),
+        interrupt,
+        sendUserInput,
+      }));
+      const manager = createAgentSessionManager(
+        {
+          ...managerDeps(createTestModelResolver({ providers: [mockProvider] })),
+          turnMiddleware,
+        },
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:stop-middleware",
+      });
+      const turn = session.sendTurn({ prompt: "Do not dispatch" });
+      let finished = false;
+      const messages = collectMessages(turn.events).then((value) => {
+        finished = true;
+        return value;
+      });
+      await vi.waitFor(() => expect(turnMiddleware.run).toHaveBeenCalled());
+      const stopping = turn.interrupt!("user-stop");
+      releaseMiddleware();
+      await vi.waitFor(() => expect(interrupt).toHaveBeenCalledTimes(2));
+      expect(finished).toBe(false);
+      expect(sendUserInput).not.toHaveBeenCalled();
+      confirmExit();
+      await stopping;
+      expect(await messages).toContainEqual(
+        expect.objectContaining({ type: "turn_end", status: "interrupted" }),
+      );
+      await manager.shutdown();
+    });
+
+    it("cancels a turn before dispatch without sending its input", async () => {
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [mockProvider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:early-stop",
+      });
+      const turn = session.sendTurn({ prompt: "Do not dispatch" });
+      await turn.interrupt!("user-stop");
+      const messages = await collectMessages(turn.events);
+      expect(mockProvider.calls).toHaveLength(0);
+      expect(messages).toContainEqual(
+        expect.objectContaining({ type: "turn_end", status: "interrupted" }),
+      );
+      await manager.shutdown();
+    });
+
+    it("reopens an aborted provider for the next turn without replaying cancelled input", async () => {
+      const opens: ModelSessionParams[] = [];
+      const prompts: string[] = [];
+      const cancels = vi.fn();
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      let releaseSecond!: () => void;
+      const secondGate = new Promise<void>((resolve) => {
+        releaseSecond = resolve;
+      });
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "Claude",
+        builtinTools: new Set(),
+        async openSession(params) {
+          opens.push(params);
+          const first = opens.length === 1;
+          let disposed = false;
+          const model = createSessionFromRun(
+            "anthropic",
+            async function* ({ prompt }) {
+              prompts.push(prompt);
+              if (first) {
+                yield {
+                  type: "tool_use",
+                  id: "edit-1",
+                  tool: "Edit",
+                  input: { file_path: "test.txt" },
+                };
+                await firstGate;
+                yield { type: "result", content: "Work before cancellation" };
+                await model.close();
+              } else {
+                await secondGate;
+                yield { type: "result", content: "Next turn" };
+              }
+            },
+            params,
+          );
+          return {
+            ...model,
+            providerThreadId: "persisted-claude-thread",
+            get isClosed() {
+              return disposed;
+            },
+            async interrupt() {
+              cancels();
+              disposed = true;
+              releaseFirst();
+            },
+          };
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:abort-resume",
+      });
+      const first = session.sendTurn({ prompt: "first" });
+      const firstMessages = collectMessages(first.events);
+      await vi.waitFor(() => expect(prompts).toEqual(["first"]));
+      const second = session.sendTurn({ prompt: "second" });
+      const secondMessages = collectMessages(second.events);
+      await first.interrupt!("user-stop");
+      expect(await firstMessages).toContainEqual(
+        expect.objectContaining({ type: "turn_end", status: "interrupted" }),
+      );
+      await vi.waitFor(() => expect(prompts).toEqual(["first", "second"]));
+      await first.interrupt!("late-repeat");
+      expect(cancels).toHaveBeenCalledTimes(1);
+      releaseSecond();
+      expect(await secondMessages).toContainEqual(
+        expect.objectContaining({ type: "result", content: "Next turn" }),
+      );
+      expect(opens).toHaveLength(2);
+      expect(opens[1]).toMatchObject({
+        isNewSession: false,
+        providerThreadId: "persisted-claude-thread",
+      });
+      expect(session.status).toBe("idle");
+      await manager.shutdown();
+    });
+
     it("resumes an explicit sessionId without a caller-provided channelThreadKey", async () => {
       const sendTurn: AgentSession["sendTurn"] = vi.fn(() => ({
         turnId: "turn-1",

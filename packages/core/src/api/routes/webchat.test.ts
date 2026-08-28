@@ -2179,6 +2179,130 @@ describe("Webchat API", () => {
     });
   });
 
+  describe("turn cancellation", () => {
+    const setupStop = async (tail: "result" | "partial" | "error" = "result") => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const interrupt = vi.fn(async () => undefined);
+      const wrongTurnInterrupt = vi.fn(async () => undefined);
+      deps.agentSessionManager = {
+        acquire: vi.fn(async () => ({
+          key: { agentName: "main" },
+          sessionId: "runtime",
+          status: "running",
+          sendTurn: () => ({
+            turnId: "cancel-turn",
+            interrupt,
+            turnContext: otelContext.active(),
+            getSubmittedOutput: () => undefined,
+            events: (async function* () {
+              yield {
+                type: "turn_start",
+                turnId: "cancel-turn",
+                sessionId: "runtime",
+                userPrompt: "work",
+              };
+              yield {
+                type: "tool_use",
+                id: "edit-1",
+                tool: "Edit",
+                input: { file_path: "test.txt" },
+              };
+              yield {
+                type: "tool_result",
+                toolUseId: "edit-1",
+                tool: "Edit",
+                output: "File changed",
+              };
+              if (tail === "partial")
+                yield { type: "text_delta", content: "Already changed the file" };
+              await gate;
+              if (tail === "result") yield { type: "result", content: "Already changed the file" };
+              if (tail === "error") yield { type: "error", error: "Actual provider failure" };
+              yield {
+                type: "turn_end",
+                turnId: "cancel-turn",
+                status: tail === "error" ? "error" : "interrupted",
+                durationMs: 10,
+              };
+            })(),
+          }),
+          subscribe: () => () => undefined,
+          onStatusChange: () => () => undefined,
+          interrupt: wrongTurnInterrupt,
+        })),
+        peek: vi.fn(),
+        shutdown: async () => undefined,
+      } as unknown as typeof deps.agentSessionManager;
+      const sendMessageRun = vi.fn(async () => ({ status: "ok" }));
+      deps.actionEngine = { run: sendMessageRun } as unknown as typeof deps.actionEngine;
+      const app = createWebchatRuntime(deps).routes;
+      const res = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Stop test" }),
+      });
+      const { id: sessionId } = (await res.json()) as { id: string };
+      await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "work" }),
+      });
+      return {
+        app,
+        sessionId,
+        interrupt,
+        wrongTurnInterrupt,
+        sendMessageRun,
+        release,
+        stop: () => app.request("/chat/turns/cancel-turn/interrupt", { method: "POST" }),
+        finish: async () => {
+          release();
+          const stream = await app.request("/chat/turns/cancel-turn/stream");
+          return await stream.text();
+        },
+      };
+    };
+
+    it.each([
+      "result",
+      "partial",
+    ] as const)("preserves %s output and tool evidence after repeated Stop", async (tail) => {
+      const h = await setupStop(tail);
+      expect((await h.stop()).status).toBe(202);
+      expect(await (await h.stop()).json()).toEqual({ stopped: false });
+      expect(h.interrupt).toHaveBeenCalledTimes(2);
+      expect(h.wrongTurnInterrupt).not.toHaveBeenCalled();
+      const stream = await h.finish();
+      expect(stream).toContain('"stopped":true');
+      expect(h.sendMessageRun).toHaveBeenCalledWith(
+        "send_message",
+        expect.objectContaining({ text: "Already changed the file" }),
+        expect.anything(),
+      );
+      const trace = await deps.webchatRepo.getTraceContentByTurn(h.sessionId, "cancel-turn");
+      expect(trace!.content).toContain("File changed");
+      expect(trace!.content).toContain("edit-1");
+      if (tail === "partial") expect(trace!.content).toContain("Already changed the file");
+      expect((await h.stop()).status).toBe(404);
+    });
+
+    it("permits retry after cancellation fails and does not hide a later provider error", async () => {
+      const h = await setupStop("error");
+      h.interrupt.mockRejectedValueOnce(new Error("Stop transport failed"));
+      expect((await h.stop()).status).toBe(500);
+      expect((await h.stop()).status).toBe(202);
+      expect(h.interrupt).toHaveBeenCalledTimes(2);
+      const stream = await h.finish();
+      expect(stream).toContain("Actual provider failure");
+      expect(stream).toContain('"success":false');
+      expect(stream).toContain('"stopped":false');
+      expect(h.sendMessageRun).not.toHaveBeenCalled();
+    });
+  });
+
   it("expands a slash-skill command for the model but persists the raw text", async () => {
     let sentTurn: AgentTurnInput | undefined;
     deps.agentSessionManager = {
@@ -3343,6 +3467,55 @@ describe("Webchat API", () => {
   });
 
   describe("session message events", () => {
+    it("retries backend continuation Stop without interrupting a later provider turn", async () => {
+      const sessionId = "sess-backend-stop";
+      await deps.webchatRepo.createSession(sessionId, "Backend stop");
+      const owner = { currentTurnId: "backend-provider-turn", interrupt: vi.fn(async () => {}) };
+      vi.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
+      const { routes, runtime } = createWebchatRuntime(deps);
+      let finish!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const task = runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        emit({
+          type: "turn_start",
+          turnId: "backend-provider-turn",
+          sessionId: "provider-session",
+          userPrompt: "Continue",
+        });
+        await gate;
+        emit({ type: "result", content: "Already changed the file." });
+        emit({
+          type: "turn_end",
+          turnId: "backend-provider-turn",
+          status: "interrupted",
+          durationMs: 1,
+        });
+      });
+      let turnId = "";
+      await vi.waitFor(async () => {
+        const turns = await (await routes.request(`/chat/sessions/${sessionId}/turns`)).json();
+        turnId = turns[0]?.turnId;
+        expect(turnId).toMatch(/^backend:/);
+      });
+      const stop = () => routes.request(`/chat/turns/${turnId}/interrupt`, { method: "POST" });
+      expect((await stop()).status).toBe(202);
+      expect((await stop()).status).toBe(202);
+      expect(owner.interrupt).toHaveBeenCalledTimes(2);
+      owner.currentTurnId = "later-turn";
+      await stop();
+      expect(owner.interrupt).toHaveBeenCalledTimes(2);
+      finish();
+      await task;
+      expect(
+        (await deps.webchatRepo.getMessages(sessionId)).some((m) =>
+          m.content.includes("Already changed the file."),
+        ),
+      ).toBe(true);
+      await runtime.flushAll();
+    });
+
     it("emits message_insert when a turn recap row is inserted", async () => {
       const sessionId = "sess-recap-events";
       const turnId = "turn-recap-events";

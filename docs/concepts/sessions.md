@@ -42,6 +42,9 @@ An agent run is one turn of agent work, identified by its turn id — the unit u
 
 - The user inputs, assistant output, and trace evidence produced by the same turn count as one run, not several. A run can consume more than one user input.
 - Failed and interrupted turns still count as runs.
+- Stop targets one run and requests provider cancellation. Until that run ends, Stop can be retried; accepting the request does not mean execution has ended.
+- Stopping preserves received text and tool evidence, including partial replies. It does not roll back changes. A tool call without a received result has an unknown outcome, not a guarantee that nothing ran.
+- Cancelling provider execution does not close the conversation. The next message opens usable execution state and resumes available history without replaying the cancelled message.
 - A run's outcome and wall-clock duration come from the bracket that closes it, and its model attribution and token cost come from the terminal block's accounting. Neither is read from fields mirrored onto individual messages.
 
 **Not to be confused with:**

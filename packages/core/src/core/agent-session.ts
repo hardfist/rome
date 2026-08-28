@@ -256,6 +256,8 @@ export type AgentSessionStatus = "idle" | "running" | "closed";
 export interface AgentTurnHandle {
   turnId: string;
   events: AsyncIterable<StreamAgentMessage>;
+  /** Cancel only this turn, including before provider dispatch. */
+  interrupt?(reason?: string): Promise<void>;
   /**
    * OTel context carrying the per-turn `agent:*` span. Callers doing
    * post-turn work outside `runOneTurn` can wrap it in
@@ -1985,6 +1987,7 @@ class AgentSessionImpl implements AgentSession {
     );
     if (
       this.modelSessionAvailable &&
+      !this.modelSession.isClosed &&
       resolution.modelProvider.id === this.modelSession.providerId &&
       resolution.model === this.modelSession.model
     ) {
@@ -2019,6 +2022,7 @@ class AgentSessionImpl implements AgentSession {
   }
 
   private async runEventsLoop(session: ModelSession): Promise<void> {
+    let streamError: unknown;
     try {
       enterSession(this.sessionId);
       for await (const msg of session.events) {
@@ -2162,6 +2166,7 @@ class AgentSessionImpl implements AgentSession {
         }
       }
     } catch (err) {
+      streamError = err;
       log.warn("agent session events loop ended", {
         sessionId: this.sessionId,
         provider: session.providerId,
@@ -2171,6 +2176,20 @@ class AgentSessionImpl implements AgentSession {
       if (this.replacingModelSession === session || this.modelSession !== session) return;
       this.inputs.close();
       const sink = this.currentSink;
+      if (session.isClosed) {
+        this.modelSessionAvailable = false;
+        if (sink && !sink.done) {
+          if (sink.lifecycleInterrupted && !streamError) {
+            this.finalizeTurn(sink, { type: "result", content: "" });
+          } else {
+            this.failTurn(
+              sink,
+              streamError instanceof Error ? streamError.message : "session closed mid-turn",
+            );
+          }
+        }
+        return;
+      }
       if (sink && !sink.done) {
         this.failTurn(sink, "session closed mid-turn");
       }
@@ -2958,6 +2977,11 @@ class AgentSessionImpl implements AgentSession {
     return {
       turnId,
       events,
+      interrupt: async (reason) => {
+        if (sink.done) return;
+        sink.lifecycleInterrupted = true;
+        if (this.currentSink === sink) await this.interrupt(reason);
+      },
       turnContext: turnCtx,
       getSubmittedOutput: () => this.submittedOutputs.get(turnId),
     };
@@ -2981,7 +3005,14 @@ class AgentSessionImpl implements AgentSession {
     // Turns are FIFO-serialized by turnMutex. Resolve exactly once at this
     // boundary, before the sink is attached, so a backend replacement cannot
     // leak close events into the new turn.
-    await this.ensureModelSessionForTurn();
+    if (!sink.lifecycleInterrupted) await this.ensureModelSessionForTurn();
+    if (sink.lifecycleInterrupted) {
+      await this.modelSession.interrupt("user-stop");
+      this.ensureTurnStart(sink);
+      this.finalizeTurn(sink, { type: "result", content: "" });
+      span.end();
+      return;
+    }
     this.currentSink = sink;
     this.currentTurnId = turnId;
     this.status = "running";
@@ -3107,6 +3138,12 @@ class AgentSessionImpl implements AgentSession {
       };
 
       const runModelTerminal = async (): Promise<void> => {
+        if (sink.done) return;
+        if (sink.lifecycleInterrupted) {
+          await this.modelSession.interrupt("user-stop");
+          this.finalizeTurn(sink, { type: "result", content: "" });
+          return;
+        }
         modelRan = true;
         try {
           await context.with(turnCtx, async () => {
@@ -3272,11 +3309,13 @@ class AgentSessionImpl implements AgentSession {
     const sink = this.currentSink;
     if (!sink || sink.done || (expectedTurnId && sink.turnId !== expectedTurnId)) return;
     sink.lifecycleInterrupted = true;
-    // Capture the provider target before awaiting child interruption: the
-    // current turn may finish and another turn may start during that await.
-    await Promise.allSettled([
+    // Cancel the provider before awaiting child cleanup. A slow child must
+    // not keep its parent generating after the user presses Stop.
+    await Promise.all([
       this.modelSession.interrupt(reason),
-      ...[...sink.subagentExecutions.values()].map(({ execution }) => execution.interrupt(reason)),
+      Promise.allSettled(
+        [...sink.subagentExecutions.values()].map(({ execution }) => execution.interrupt(reason)),
+      ),
     ]);
   }
 

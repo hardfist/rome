@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AbortError } from "@anthropic-ai/claude-agent-sdk";
 import { AnthropicProvider } from "./anthropic-provider.js";
 import type { AgentMessage } from "../types.js";
 import type {
@@ -34,7 +35,8 @@ const {
   clearAnthropicAuthRevokedMock: vi.fn(),
 }));
 
-vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
+vi.mock("@anthropic-ai/claude-agent-sdk", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@anthropic-ai/claude-agent-sdk")>()),
   query: queryMock,
   createSdkMcpServer: createSdkMcpServerMock,
   tool: sdkToolMock,
@@ -210,6 +212,71 @@ describe("AnthropicProvider", () => {
     const provider = new AnthropicProvider();
 
     expect(provider.builtinTools.has("TodoWrite")).toBe(true);
+  });
+
+  it.each([
+    "startup",
+    "partial",
+    "completed-block",
+  ])("aborts the Query during %s and preserves received output", async (phase) => {
+    let controller!: AbortController;
+    let begin!: () => void;
+    const begun = new Promise<void>((resolve) => {
+      begin = resolve;
+    });
+    const q = {
+      interrupt: vi.fn(),
+      close: vi.fn(),
+      async *[Symbol.asyncIterator]() {
+        if (phase === "partial") {
+          yield {
+            type: "stream_event",
+            parent_tool_use_id: null,
+            event: {
+              type: "content_block_delta",
+              delta: { type: "text_delta", text: "Saved work" },
+            },
+          };
+        }
+        if (phase === "completed-block") {
+          yield {
+            type: "assistant",
+            session_id: "persisted-thread",
+            parent_tool_use_id: null,
+            message: { content: [{ type: "text", text: "Saved work" }] },
+          };
+        }
+        begin();
+        if (!controller.signal.aborted) {
+          await new Promise<void>((resolve) =>
+            controller.signal.addEventListener("abort", () => resolve(), { once: true }),
+          );
+        }
+        throw new AbortError("Cancelled");
+      },
+    };
+    queryMock.mockImplementation(({ options }) => {
+      controller = options.abortController;
+      return q;
+    });
+    const session = await new AnthropicProvider().openSession(buildParams());
+    await session.sendUserInput({ text: "work" });
+    const collected = collectEvents(session);
+    await begun;
+    await session.interrupt("user-stop");
+    const messages = await collected;
+    expect(q.interrupt).not.toHaveBeenCalled();
+    expect(q.close).not.toHaveBeenCalled();
+    expect(controller.signal.aborted).toBe(true);
+    expect(session.isClosed).toBe(true);
+    expect(messages.filter((message) => message.type === "result")).toEqual([
+      { type: "result", content: phase === "startup" ? "" : "Saved work" },
+    ]);
+    if (phase !== "startup") {
+      expect(messages).toContainEqual({ type: "text", content: "Saved work", turnPhase: "final" });
+    }
+    await expect(session.sendUserInput({ text: "next" })).rejects.toThrow("closed");
+    await session.close();
   });
 
   it("projects top-level TodoWrite snapshots while preserving generic tool events", async () => {
@@ -403,7 +470,7 @@ describe("AnthropicProvider", () => {
       await session.close();
     });
 
-    it("does not resume a reused session that never wrote a transcript", async () => {
+    it("uses a fresh SDK id when a reused session has no resumable transcript", async () => {
       // A stored session row with no captured provider thread id — e.g. a turn
       // that short-circuited (the not-logged-in notice) before opening an SDK
       // conversation. Resuming it would fail with "No conversation found".
@@ -416,7 +483,8 @@ describe("AnthropicProvider", () => {
         }),
       );
 
-      expect(queryMock.mock.calls[0]![0].options).toMatchObject({ sessionId: "reused-session" });
+      expect(queryMock.mock.calls[0]![0].options.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(queryMock.mock.calls[0]![0].options.sessionId).not.toBe("reused-session");
       expect(queryMock.mock.calls[0]![0].options.resume).toBeUndefined();
 
       await session.close();

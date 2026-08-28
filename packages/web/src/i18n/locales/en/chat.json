@@ -104,6 +104,8 @@
     "showLess": "Show less",
     "input": "Input",
     "output": "Output",
+    "resultUnknown": "Result unknown",
+    "resultUnknownHint": "No result was received. The tool may have made changes before the turn ended.",
     "itemCount_one": "{{count}} item",
     "itemCount_other": "{{count}} items",
     "keyCount_one": "{{count}} key",

@@ -43,6 +43,7 @@ export function ToolStepBlock({
   const toolLabel = artifactLocalName(rawToolLabel);
   const summary = describeToolSummary(tool, input, output, hasResult, t);
   const duration = formatStepDuration(durationMs);
+  const resultUnknown = !hasResult && !live;
 
   return (
     <div
@@ -80,6 +81,11 @@ export function ToolStepBlock({
           </span>
         )}
         {!summary && <span className="flex-1" />}
+        {resultUnknown && (
+          <span className="flex-none text-aux text-muted-foreground">
+            {t("blocks.resultUnknown")}
+          </span>
+        )}
         {duration && (
           <span className="flex-none font-mono text-aux tracking-wide tabular-nums text-subtle-foreground">
             {duration}
@@ -89,6 +95,9 @@ export function ToolStepBlock({
       {open && (
         <div className="pt-1 pr-3 pb-3 pl-9">
           <ToolStepDetails tool={toolLabel} input={input} output={output} hasResult={hasResult} />
+          {resultUnknown && (
+            <p className="mt-2 text-aux text-muted-foreground">{t("blocks.resultUnknownHint")}</p>
+          )}
         </div>
       )}
     </div>

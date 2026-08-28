@@ -613,7 +613,7 @@ interface ActiveWebchatStream {
   cleanupTimer: ReturnType<typeof setTimeout> | null;
   onFinish: Promise<void>;
   resolveFinish: () => void;
-  stopRequested: boolean;
+  interrupt?: (reason?: string) => Promise<void>;
   agentName: string;
   channelThreadKey: string | null;
 }
@@ -1619,7 +1619,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       cleanupTimer: null,
       onFinish,
       resolveFinish,
-      stopRequested: false,
       agentName,
       channelThreadKey,
     };
@@ -1684,29 +1683,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     try {
       const done = await task();
       await safePersistTrace(stream, label);
-      if (stream.stopRequested) {
-        emitToStream(stream, "done", { success: true, stopped: true }, "terminal");
-      } else {
-        emitToStream(stream, "done", done ?? { success: true }, "terminal");
-      }
+      emitToStream(stream, "done", done ?? { success: true }, "terminal");
     } catch (err) {
       await safePersistTrace(stream, label);
-      if (stream.stopRequested) {
-        log.info(`${label} stopped by user`, { sessionId: stream.sessionId });
-        emitToStream(stream, "done", { success: true, stopped: true }, "terminal");
-      } else {
-        const modelError = toModelResolutionErrorPayload(err);
-        log.error(`${label} failed`, {
-          sessionId: stream.sessionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        emitToStream(
-          stream,
-          "stream_error",
-          modelError ?? { error: err instanceof Error ? err.message : "Internal error" },
-          "terminal",
-        );
-      }
+      const modelError = toModelResolutionErrorPayload(err);
+      log.error(`${label} failed`, {
+        sessionId: stream.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      emitToStream(
+        stream,
+        "stream_error",
+        modelError ?? { error: err instanceof Error ? err.message : "Internal error" },
+        "terminal",
+      );
     } finally {
       finishStream(stream);
     }
@@ -2516,32 +2506,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         return c.json({ stopped: false, reason: "turn_not_interruptible" }, 409);
       }
       await agentTurnStream.interrupt("user-stop");
-      return c.json({ stopped: true });
+      return c.json({ stopped: agentTurnStream.finished }, agentTurnStream.finished ? 200 : 202);
     }
     if (!stream) return c.json({ stopped: false, reason: "no_running_turn" }, 404);
-    if (stream.stopRequested) {
-      return c.json({ stopped: true, alreadyRequested: true });
+    log.info("interrupt requested for turn", { turnId, sessionId: stream.sessionId });
+    if (stream.interrupt) {
+      await stream.interrupt("user-stop");
+      return c.json({ stopped: stream.finished }, stream.finished ? 200 : 202);
     }
-    const channelThreadKey = stream.channelThreadKey;
+    // A stream without a turn-bound interrupt can only be cancelled through
+    // its live session owner. Require the exact active turn so a queued turn
+    // cannot cancel the turn currently producing output.
     const agentSess = deps.agentSessionManager.peek({
       agentName: stream.agentName,
-      channelThreadKey: channelThreadKey ?? `webchat:${stream.sessionId}`,
+      channelThreadKey: stream.channelThreadKey ?? `webchat:${stream.sessionId}`,
     });
     if (!agentSess || agentSess.currentTurnId !== turnId) {
-      return c.json({ stopped: false, reason: "turn_not_running" }, 409);
+      return c.json({ stopped: false, reason: "turn_not_interruptible" }, 409);
     }
-    stream.stopRequested = true;
-    log.info("interrupt requested for turn", { turnId, sessionId: stream.sessionId });
-    if (agentSess) {
-      try {
-        await agentSess.interrupt("user-stop", turnId);
-      } catch (err) {
-        log.warn("agentSession.interrupt() rejected", {
-          turnId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    await agentSess.interrupt("user-stop", turnId);
     return c.json({ stopped: true });
   });
 
@@ -3076,6 +3059,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const turnId = handle.turnId;
 
       const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
+      stream.interrupt = handle.interrupt;
       enqueueStream(sessionId, stream);
       void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
 
@@ -3111,7 +3095,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
-              if (stream.stopRequested && msg.type === "error") continue;
               // Live preview of the in-flight text block. Transient — never a
               // trace block, never persisted. The replay key is fixed so a
               // late subscriber gets one event with the latest block's
@@ -3176,6 +3159,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   turnPhase: msg.turnPhase,
                 };
                 if (msg.turnPhase === "final") finalTextBlockIx = blockIx;
+                stream.assistantBlockIx += 1;
+                stream.assistantText = "";
+              }
+              if (msg.type === "turn_end" && stream.assistantText) {
+                const blockIx = stream.assistantBlockIx;
+                const partial = {
+                  type: "text" as const,
+                  content: stream.assistantText,
+                  turnPhase: "final" as const,
+                };
+                lastCompletedText = { blockIx, content: partial.content, turnPhase: "final" };
+                finalTextBlockIx = blockIx;
+                stream.traceBlocks.push(partial);
+                emitTraceBlock(stream, partial);
                 stream.assistantBlockIx += 1;
                 stream.assistantText = "";
               }
@@ -3384,7 +3381,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // In-turn commentary was already persisted per-block as its own live
             // message; this is the final answer only. `text` is the final answer
             // for non-webchat consumers; webchat persists the tagged part.
-            if (resultContent && !stream.stopRequested) {
+            if (
+              !resultContent &&
+              lastCompletedText &&
+              finalTextBlockIx === lastCompletedText.blockIx
+            ) {
+              resultContent = lastCompletedText.content;
+            }
+            if (resultContent) {
               const reusableResultBlockIx =
                 lastCompletedText?.turnPhase === undefined &&
                 lastCompletedText?.content === resultContent
@@ -3419,7 +3423,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             }
 
             // Mirror the auto-approved outgoing-message audit record message_handler creates.
-            if (resultContent && !stream.stopRequested && deps.approvalsRepo) {
+            if (resultContent && deps.approvalsRepo) {
               await deps.approvalsRepo
                 .create({
                   type: "outgoing_message",
@@ -3442,9 +3446,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 });
             }
 
+            const stopped = stream.segmentBuilder.snapshot().summary.stoppedByUser === true;
             return {
               success: !resultError,
-              data: { action: stream.stopRequested ? "stopped" : "sent" },
+              stopped,
+              data: { action: stopped ? "stopped" : "sent" },
               error: resultError?.error,
               code: resultError?.code,
               provider: resultError?.provider,
@@ -3546,7 +3552,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const stream = await createStream(
       sessionId,
       syntheticTurnId,
-      null,
+      buildWebchatChannelThreadKey(
+        sessionId,
+        resolveStoredModelSelection(session.largeModelSelection),
+      ),
       session.agentName ?? "main",
     );
     enqueueStream(sessionId, stream);
@@ -3562,6 +3571,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // in the trace and the model falsely believes the form was shown.
     const builtinQuestionCards: PendingInteractionPart[] = [];
     const emit = (msg: AgentMessage & { agent?: string }) => {
+      if (msg.type === "turn_start" && stream.channelThreadKey) {
+        const owner = deps.agentSessionManager.peek({
+          agentName: msg.agent ?? stream.agentName,
+          channelThreadKey: stream.channelThreadKey,
+        });
+        // The wrapper may outlive its provider turn. Never stop a later turn
+        // merely because it reuses the same runtime session.
+        if (owner?.currentTurnId === msg.turnId) {
+          stream.interrupt = async (reason) => {
+            if (owner.currentTurnId === msg.turnId) await owner.interrupt(reason);
+          };
+        }
+      }
       // Backend turns have no live bubble; drop transient text previews.
       if (msg.type === "text_delta" || msg.type === "input_status") return;
       stream.traceBlocks.push(msg);
@@ -3588,9 +3610,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // late-attached subscriber's reload-on-done also sees it. The push
       // (addBackendReplyMessage → message_inserted) is the primary delivery
       // path since the browser isn't subscribed to this synthetic stream.
-      if (replyText && !stream.stopRequested) {
+      if (replyText) {
         await deps.webchatRepo.addBackendReplyMessage(sessionId, syntheticTurnId, replyText);
       }
+      return {
+        success: true,
+        stopped: stream.segmentBuilder.snapshot().summary.stoppedByUser === true,
+      };
     });
   };
 
