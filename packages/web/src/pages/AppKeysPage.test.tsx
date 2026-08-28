@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "@/i18n";
+import AppKeysPage from "./AppKeysPage";
 import SettingsPage from "./SettingsTabPage";
 
 // The Toaster mounts in App.tsx, outside this tree — spy on the calls instead.
@@ -75,6 +76,19 @@ function mockAppKeysFetch(
   return writes;
 }
 
+function renderAppKeysPage() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/settings/connections/app-keys"]}>
+        <Routes>
+          <Route path="/settings/connections/app-keys" element={<AppKeysPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
 function renderConnectionsSettings() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -95,22 +109,54 @@ const storedKey = {
   overridden: false,
 };
 
-describe("Settings app keys section", () => {
-  it("lists stored keys with label, name, and a Set badge — never the value", async () => {
+describe("Connections tab app keys entry row", () => {
+  it("links to the app keys page and shows the stored-key count", async () => {
     mockAppKeysFetch(() => ok({ keys: [storedKey] }));
 
     renderConnectionsSettings();
 
-    expect(await screen.findByRole("heading", { level: 2, name: "App keys" })).toBeTruthy();
+    const row = await screen.findByRole("link", { name: "Open App keys" });
+    expect(row.getAttribute("href")).toBe("/settings/connections/app-keys");
+    expect(await within(row).findByText("1 key")).toBeTruthy();
+    // The management ceremony lives on the page, not the tab.
+    expect(screen.queryByRole("button", { name: "Add key" })).toBeNull();
+  });
+
+  it("reads 'None yet' when no keys are stored", async () => {
+    mockAppKeysFetch(() => ok({ keys: [] }));
+
+    renderConnectionsSettings();
+
+    const row = await screen.findByRole("link", { name: "Open App keys" });
+    expect(await within(row).findByText("None yet")).toBeTruthy();
+  });
+});
+
+describe("App keys page", () => {
+  it("lists stored keys with label and name — never the value, no badge unless overridden", async () => {
+    mockAppKeysFetch(() => ok({ keys: [storedKey] }));
+
+    renderAppKeysPage();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "App keys" })).toBeTruthy();
     expect(await screen.findByText("My shop database password")).toBeTruthy();
     expect(screen.getByText("SHOP_DB_PASSWORD")).toBeTruthy();
-    expect(screen.getByText("Set")).toBeTruthy();
+    expect(screen.queryByText("Overridden by server settings")).toBeNull();
+  });
+
+  it("links back to the connections list", async () => {
+    mockAppKeysFetch(() => ok({ keys: [] }));
+
+    renderAppKeysPage();
+
+    const back = await screen.findByRole("link", { name: "Connections" });
+    expect(back.getAttribute("href")).toBe("/settings/connections");
   });
 
   it("shows the empty state when no keys exist", async () => {
     mockAppKeysFetch(() => ok({ keys: [] }));
 
-    renderConnectionsSettings();
+    renderAppKeysPage();
 
     expect(await screen.findByText("No app keys yet")).toBeTruthy();
   });
@@ -118,10 +164,11 @@ describe("Settings app keys section", () => {
   it("saves a new key through the add form with the all-apps consent visible", async () => {
     const writes = mockAppKeysFetch(() => ok({ keys: [] }));
 
-    renderConnectionsSettings();
+    renderAppKeysPage();
 
     await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
 
+    expect(screen.getByRole("heading", { level: 2, name: "New key" })).toBeTruthy();
     expect(
       screen.getByText("Any app installed on your Rome will be able to read this."),
     ).toBeTruthy();
@@ -151,7 +198,7 @@ describe("Settings app keys section", () => {
   it("rejects a reserved name client-side without calling the API", async () => {
     const writes = mockAppKeysFetch(() => ok({ keys: [] }));
 
-    renderConnectionsSettings();
+    renderAppKeysPage();
 
     await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
     await userEvent.type(screen.getByLabelText("Name apps use"), "ROME_PROFILE");
@@ -172,7 +219,7 @@ describe("Settings app keys section", () => {
       () => ok({ ok: true }),
     );
 
-    renderConnectionsSettings();
+    renderAppKeysPage();
 
     await userEvent.click(await screen.findByRole("button", { name: "Remove" }));
 
@@ -193,12 +240,15 @@ describe("Settings app keys section", () => {
       () => ok({ ok: true, overridden: true }),
     );
 
-    renderConnectionsSettings();
+    renderAppKeysPage();
 
     expect(await screen.findByText("Overridden by server settings")).toBeTruthy();
 
     await userEvent.click(screen.getByRole("button", { name: "Replace" }));
     // Replace locks the name and only asks for a new value.
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Replace SHOP_DB_PASSWORD" }),
+    ).toBeTruthy();
     expect((screen.getByLabelText("Name apps use") as HTMLInputElement).disabled).toBe(true);
     await userEvent.type(screen.getByLabelText("Secret value"), "new-secret");
     await userEvent.click(screen.getByRole("button", { name: "Save for all apps" }));

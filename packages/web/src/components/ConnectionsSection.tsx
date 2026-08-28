@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleAlert, RefreshCw, Unplug } from "lucide-react";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
+import { AppKeysRow } from "@/components/connections/app-keys-row";
 import { ConnectionDetailDialog } from "@/components/ConnectionDetail";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,11 @@ import type { ComposioCliStatus } from "@/lib/provider-types";
  * clicking it opens the `ConnectionDetailDialog` over the list, where the
  * connect ceremony lives. The list itself performs NO ceremony — no inline
  * connect/disconnect, no expand-in-place cards, no accordion.
+ *
+ * The list closes with the `AppKeysRow` — the app-keys vault is not a registry
+ * service, but it lives on this surface, so it renders in the same row anatomy
+ * and navigates to its own page. It self-loads and stays up whatever state the
+ * registry request is in.
  */
 export function ConnectionsSection({
   connections,
@@ -111,6 +117,7 @@ export function ConnectionsSection({
             </Button>
           ))
         )}
+        <AppKeysRow />
       </div>
 
       <ConnectionDetailDialog

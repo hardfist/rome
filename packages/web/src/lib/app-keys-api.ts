@@ -3,6 +3,10 @@ import { fetchJson } from "@/lib/fetch-json";
 
 export type { AppKeyDto };
 
+/** Shared react-query key: the Connections-list row and the app-keys page read
+ * the same cache, so a save or remove on the page updates the row's count. */
+export const APP_KEYS_QUERY_KEY = ["app-keys"] as const;
+
 export async function fetchAppKeys(): Promise<AppKeyDto[]> {
   const payload = await fetchJson<AppKeysListResponse>("/api/app-keys", {
     fallback: "Failed to load app keys.",
