@@ -29,14 +29,21 @@ const buttonVariants = cva(
   "group/button inline-flex shrink-0 items-center justify-center border border-transparent text-ui whitespace-nowrap transition-all outline-none select-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
+      // `outline` and `ghost` name their resting foreground, which the page
+      // would otherwise supply by inheritance — so inside a status-colored card
+      // the label stayed neutral only by accident. Naming it makes the `hover:`
+      // and `aria-expanded:` promotions below look dead, and they are not: a
+      // caller that de-emphasizes the control writes a bare
+      // `text-muted-foreground`, which lands in a different tailwind-merge group
+      // than the prefixed ones, so the promotion still fires.
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/80",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+          "border-border bg-background text-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
-          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+          "text-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:outline-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30",
         link: "text-primary underline-offset-4 hover:underline",

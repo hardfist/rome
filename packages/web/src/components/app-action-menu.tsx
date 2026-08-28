@@ -312,7 +312,7 @@ export function AppActionSheet({
                 size="icon-lg"
                 aria-label={closeLabel}
                 title={closeLabel}
-                className="rounded-full text-muted-foreground hover:bg-surface-muted hover:text-foreground dark:hover:bg-surface-muted"
+                className="rounded-full text-muted-foreground hover:bg-surface-muted dark:hover:bg-surface-muted"
               >
                 <X className="size-5" aria-hidden />
               </Button>

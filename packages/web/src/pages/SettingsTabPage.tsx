@@ -1493,7 +1493,7 @@ function AdvancedEasterEggOverlay({ onClose }: { onClose: () => void }) {
             size="icon-sm"
             onClick={onClose}
             aria-label={t("easterEgg.closeLabel")}
-            className="rounded-full border border-surface/10 text-subtle-foreground hover:border-surface/30 hover:bg-surface/5 hover:text-foreground"
+            className="rounded-full border border-surface/10 text-subtle-foreground hover:border-surface/30 hover:bg-surface/5"
           >
             <X aria-hidden />
           </Button>

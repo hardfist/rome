@@ -813,7 +813,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           Approve. Neutral throughout except the single Approve CTA. */}
       {designingInteraction?.onApprove && (
         <ButtonGroup className="mb-2 w-full rounded-12 shadow-card-hover">
-          <ButtonGroupText className="min-w-0 flex-1 gap-2 border-border bg-surface px-3 text-foreground">
+          <ButtonGroupText className="min-w-0 flex-1 gap-2 border-border bg-surface px-3">
             <Sparkles className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate">
               <span>{designingInteraction.agentLabel}</span> submitted a result — approve it, or

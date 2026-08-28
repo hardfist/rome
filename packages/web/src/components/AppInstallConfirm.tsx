@@ -188,15 +188,7 @@ export function AppInstallConfirm({
           <Button type="button" size="sm" onClick={() => void refresh()}>
             {t("listing.retry")}
           </Button>
-          {/* `outline` sets no text color, so inside these status-colored cards
-              it would inherit the card's tone; the label is neutral by intent. */}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onCancel}
-            className="text-foreground"
-          >
+          <Button type="button" variant="outline" size="sm" onClick={onCancel}>
             {t("install.cancel")}
           </Button>
         </div>
@@ -209,13 +201,7 @@ export function AppInstallConfirm({
       <EmptyState className="rounded-12 border border-dashed border-border bg-surface/50">
         <EmptyStateTitle>{data.reason ?? t("install.unavailable")}</EmptyStateTitle>
         <EmptyStateAction>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onCancel}
-            className="text-foreground"
-          >
+          <Button type="button" variant="outline" size="sm" onClick={onCancel}>
             {t("install.cancel")}
           </Button>
         </EmptyStateAction>
