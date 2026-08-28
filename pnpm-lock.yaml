@@ -74,7 +74,7 @@ importers:
         specifier: latest
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.0
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.2.2
@@ -965,7 +965,7 @@ importers:
         specifier: ^0.6.0
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.2.2
@@ -1005,7 +1005,7 @@ importers:
         specifier: ^0.6.0
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       react:
         specifier: 19.2.6
@@ -1027,7 +1027,7 @@ importers:
         specifier: ^0.6.0
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.2.2
@@ -1070,7 +1070,7 @@ importers:
         specifier: ^0.6.0
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.2.2
@@ -1113,7 +1113,7 @@ importers:
         specifier: ^0.6.0
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       drizzle-orm:
         specifier: ^0.45.1
@@ -1138,7 +1138,7 @@ importers:
         specifier: ^0.6.0
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       react:
         specifier: 19.2.6
@@ -1160,7 +1160,7 @@ importers:
         specifier: ^0.6.0
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.2.2
@@ -1209,7 +1209,7 @@ importers:
         specifier: ^0.6.0
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.2.2
@@ -1246,7 +1246,7 @@ importers:
         specifier: ^0.6.0
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.2.2
@@ -1295,7 +1295,7 @@ importers:
   rome_apps/skills:
     dependencies:
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.2.2
@@ -1326,7 +1326,7 @@ importers:
         specifier: ^0.6.0
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       react:
         specifier: 19.2.6
@@ -1357,7 +1357,7 @@ importers:
         specifier: ^0.6.0
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.2.2
@@ -1400,7 +1400,7 @@ importers:
         specifier: ^0.6.0
         version: link:../../packages/app-runtime-sdk
       '@rome-os/app-web-sdk':
-        specifier: ^0.2.21
+        specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
       '@rome-os/ui':
         specifier: ^0.2.2
