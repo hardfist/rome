@@ -57,6 +57,8 @@ import { createAccountNames } from "./channels/account-names.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
+import { AppKeysRepository } from "./db/repositories/app-keys.js";
+import { AppKeyInjector } from "./app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
 import { WebChatRepository } from "./db/repositories/webchat.js";
 import { ActionExecutionsRepository } from "./db/repositories/action-executions.js";
@@ -74,6 +76,7 @@ import {
 } from "./actions/global-actions.js";
 import { ActionLoader } from "./actions/loader.js";
 import { ActionEngine } from "./actions/engine.js";
+import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
 import { ActionWorkerCoordinator } from "./actions/action-subprocess.js";
 import { WorkerRpcServer } from "./actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
@@ -134,6 +137,7 @@ import {
   createAppActionsSubscriber,
   createNoopChannelMessageHook,
   createChannelMessageHookFromCatalog,
+  createChannelMessageHookReloader,
   registerAppActions,
 } from "./actions/app-actions-wiring.js";
 import type { ChannelMessageHook } from "./hooks/types.js";
@@ -248,6 +252,15 @@ async function main() {
     log.info("Seeded instance token from environment into database");
   }
   await hydrateInstanceToken(settingsRepo);
+
+  // App keys: guardian-entered values go live in process.env before any app
+  // code, action worker, or route can read them. Operator-set env always wins;
+  // the injector records those as overridden instead of clobbering.
+  const appKeysRepo = new AppKeysRepository(db);
+  const appKeyInjector = new AppKeyInjector();
+  for (const row of await appKeysRepo.listWithValues()) {
+    appKeyInjector.apply(row.name, row.value);
+  }
 
   const policiesRepo = new PoliciesRepository(db);
   const webchatRepo = new WebChatRepository(db);
@@ -842,8 +855,9 @@ async function main() {
     }
   }
   // App hooks discovered from the catalog share one load+report+subscribe
-  // ritual: (re)load on startup and on every catalog change (install/uninstall),
-  // clear this kind's prior failures, surface new ones as runtime status, and
+  // ritual: (re)load on startup, on every catalog change (install/uninstall),
+  // and on an app-keys change (the reload picks up the new environment), clear
+  // this kind's prior failures, surface new ones as runtime status, and
   // persist status on change. Each kind differs only in its loader and the
   // failure-source key it stamps. An empty chain is a pure passthrough.
   const registerCatalogHookLoad = async <F extends { appId: string; error: string }>(opts: {
@@ -851,8 +865,8 @@ async function main() {
     warnMessage: string;
     load: () => Promise<F[]>;
     failureSource: (failure: F) => string;
-  }): Promise<void> => {
-    const run = async (source: "startup" | "catalog-change") => {
+  }): Promise<(source: "catalog-change" | "app-keys-change") => Promise<void>> => {
+    const run = async (source: "startup" | "catalog-change" | "app-keys-change") => {
       const failures = await opts.load();
       runtimeStatusFailures.clearSources((failureSource) =>
         failureSource.startsWith(`${opts.sourcePrefix}:`),
@@ -863,7 +877,7 @@ async function main() {
           markAppFailed(opts.failureSource(failure), failure.appId, failure.error);
         }
       }
-      if (source === "catalog-change") {
+      if (source !== "startup") {
         try {
           await writeAppRuntimeStatus(refreshRuntimeAppStatus());
         } catch (err) {
@@ -879,9 +893,10 @@ async function main() {
     };
     Object.defineProperty(subscriber, "name", { value: `${opts.sourcePrefix}HookSubscriber` });
     appCatalog.subscribe(subscriber);
+    return run;
   };
 
-  await registerCatalogHookLoad({
+  const reloadLifecycleHooks = await registerCatalogHookLoad({
     sourcePrefix: "lifecycle",
     warnMessage: "some agent lifecycle hooks failed to initialize",
     load: () => lifecycleDispatcher.loadFromCatalog(appCatalog),
@@ -889,7 +904,7 @@ async function main() {
   });
 
   // Turn-middleware artifacts load alongside the lifecycle hooks.
-  await registerCatalogHookLoad({
+  const reloadTurnMiddlewareHooks = await registerCatalogHookLoad({
     sourcePrefix: "turn-middleware",
     warnMessage: "some turn-middleware hooks failed to initialize",
     load: () => turnMiddlewareChain.loadFromCatalog(appCatalog),
@@ -990,6 +1005,23 @@ async function main() {
   connectionRegistry.onUnlocked("talk", (connection) => {
     messageHook.registerConnection(connection.id, connection.service);
   });
+  // App-keys refreshes recreate this hook: it is instantiated once and held by
+  // the subscription closures above, so an env value captured in its module
+  // graph would otherwise outlive the key edit. The let-binding is the single
+  // handle — the onUnlocked callback reads it at call time, so a swap re-routes
+  // future unlocks, and register() on the fresh instance re-subscribes the
+  // already-unlocked connections via talkRouter.list().
+  const reloadChannelMessageHook = messageHandlerRegistered
+    ? createChannelMessageHookReloader({
+        catalog: appCatalog,
+        deps: { actionEngine, talkRouter, conversationSettings },
+        getCurrent: () => messageHook,
+        setCurrent: (hook) => {
+          messageHook = hook;
+        },
+        onSkip: (reason) => log.warn(reason),
+      })
+    : null;
 
   // Fold the legacy providerAccounts rows into the grant ledger
   // BEFORE load(), so rehydration re-materializes each provider grant exactly
@@ -1090,6 +1122,28 @@ async function main() {
   appCatalog.subscribe(async function actionWorkerWarmPoolInvalidator() {
     await actionEngine.restartWorkerWarmPool();
   });
+  // An app-keys change edits process.env after app code may have captured it:
+  // warm workers hold a fork-time env snapshot, and main-process app modules
+  // (API handlers via AppApiDispatcher, hook chains) can read env at module
+  // scope and stay cached — the import cache key is file identity, which an
+  // env change never touches. Salt the cache (so every later import
+  // re-evaluates), recycle the workers, and reload the hook chains, in that
+  // order — a reload before the bump would reinstall the stale modules.
+  const refreshAppRuntimeEnv = async (): Promise<void> => {
+    bumpModuleEnvEpoch();
+    await actionEngine.restartWorkerWarmPool();
+    await reloadLifecycleHooks("app-keys-change");
+    await reloadTurnMiddlewareHooks("app-keys-change");
+    if (reloadChannelMessageHook) {
+      try {
+        await reloadChannelMessageHook();
+      } catch (err) {
+        log.warn("channel-message hook reload failed; keeping the previous instance", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  };
   const publicAccessState = new PublicAccessState();
   try {
     await publicAccessState.load(db);
@@ -1176,6 +1230,9 @@ async function main() {
       skillCatalog,
       db,
       settingsRepo,
+      appKeysRepo,
+      appKeyInjector,
+      refreshAppRuntime: refreshAppRuntimeEnv,
       appRuntimeRepositories,
       sentinelLogRepo,
       actionExecutionsRepo,

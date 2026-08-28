@@ -42,6 +42,20 @@ export type BundleSource = z.infer<typeof BundleSourceSchema>;
 export type AppstoreSource = z.infer<typeof AppstoreSourceSchema>;
 export type SpecSource = z.infer<typeof SpecSourceSchema>;
 
+/** A Store intent identifies an exact version, never a moving latest release. */
+export type AppRemixStoreIntent = {
+  listingId: string;
+  version: string;
+};
+
+export type AppRemixStorePin = AppRemixStoreIntent & {
+  contentHash: string;
+};
+
+export type AppRemixSource =
+  | { appId: string; expectedSource?: AppRemixStorePin }
+  | AppRemixStorePin;
+
 export const PERSISTED_APP_STATES = ["installed", "failed", "broken"] as const;
 export type PersistedAppState = (typeof PERSISTED_APP_STATES)[number];
 

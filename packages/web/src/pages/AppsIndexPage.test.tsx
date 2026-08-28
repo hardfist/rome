@@ -357,14 +357,9 @@ describe("AppsIndexPage reactivity", () => {
         JSON.stringify({
           pathname: "/chat",
           state: {
-            draft: [
-              "Use the `app_remix` skill to remix the installed app `calendar` as `@ray/calendar` (`ray-calendar`).",
-              "",
-              "Source: `@alice/calendar` v1.2.3. Keep the source app unchanged.",
-              "",
-              "I want to add: ",
-            ].join("\n"),
-            skill: "app_remix",
+            draft:
+              "I want to remix the installed app calendar version 1.2.3 as @ray/calendar, with the following changes:\n\n",
+            skill: "coding:app_remix",
           },
         }),
       );

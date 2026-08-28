@@ -9,6 +9,7 @@ import {
   latestDynamic,
   parseAccountCursor,
   parseAccountState,
+  parseStreamCursor,
   parseMergeRequest,
   parsePersonFilterLevel,
   parseTimelineCursor,
@@ -16,14 +17,17 @@ import {
   personMatchesLevel,
   personMatchesQuery,
   sliceAccountDirectory,
+  sliceAccountStream,
   timelineCursor,
   timelinePageLimit,
   type CreatePersonRequest,
   type DirectoryAccount,
   type LinkAccountRequest,
   type LinkConflict,
+  type AccountState,
   type PeopleList,
   type PersonResource,
+  type StreamAccount,
   type TimelineEntry,
   type TimelinePage,
 } from "@rome/api-types/people";
@@ -35,8 +39,8 @@ import {
   personTimeline,
   persons,
   sentinelSenders,
-  summarize,
   whatsappContacts,
+  type AccountRef,
 } from "./people";
 
 /**
@@ -56,16 +60,6 @@ import {
  */
 
 type PersonFixture = (typeof persons)[number];
-type AccountRef = { channel: string; channelUserId: string };
-
-function messageCountFor(channel: string, channelUserId: string): number {
-  if (channel === "whatsapp" && whatsappContacts.some((c) => c.jid === channelUserId)) {
-    return summarize(channelUserId).messageCount;
-  }
-  return sentinelSenders
-    .filter((s) => s.channel === channel && s.channelUserId === channelUserId)
-    .reduce((total, s) => total + (s.reply ? 2 : 1), 0);
-}
 
 function personResource(person: PersonFixture): PersonResource {
   const entries = personTimeline(person.id) ?? [];
@@ -85,18 +79,52 @@ function personResource(person: PersonFixture): PersonResource {
   };
 }
 
+/** A contacts-list row: who the account is, and nothing about what was said. */
 function directoryRow(ref: AccountRef): DirectoryAccount {
   const owner = ownerOf(ref.channel, ref.channelUserId);
-  const entries = accountTimeline(ref);
   return {
     channel: ref.channel,
     channelUserId: ref.channelUserId,
     addresses: [ref.channelUserId],
     displayName: nameForAccount(ref.channel, ref.channelUserId),
     ...accountPresentation(owner ? { personId: owner.id, displayName: owner.displayName } : null),
-    messageCount: messageCountFor(ref.channel, ref.channelUserId),
-    latest: latestDynamic(entries),
   };
+}
+
+/** The same account on the recents surface, or null when nothing has happened
+ *  on it — the stream carries no such account. */
+function streamRow(ref: AccountRef): StreamAccount | null {
+  const latest = latestDynamic(accountTimeline(ref));
+  return latest == null ? null : { ...directoryRow(ref), latest };
+}
+
+/** Every account the three sources name, once each — what both account reads
+ *  are cut out of. */
+function observedAccounts(): AccountRef[] {
+  const seen = new Map<string, AccountRef>();
+  const add = (channel: string, channelUserId: string) => {
+    seen.set(`${channel}\n${channelUserId}`, { channel, channelUserId });
+  };
+  for (const p of persons) for (const m of p.channelMappings) add(m.channel, m.channelUserId);
+  for (const s of sentinelSenders) add(s.channel, s.channelUserId);
+  for (const c of whatsappContacts) if (!c.isGroup) add("whatsapp", c.jid);
+  return [...seen.values()];
+}
+
+/** The `?state=` both account reads narrow by, or the 400 a value naming no
+ *  state earns. */
+function readState(params: URLSearchParams): { state: AccountState | null } | { error: Response } {
+  const raw = params.get("state");
+  const state = parseAccountState(raw);
+  if (raw != null && raw !== "" && state === null) {
+    return {
+      error: HttpResponse.json(
+        { error: "state must be unlinked, linked, or dismissed" },
+        { status: 400 },
+      ),
+    };
+  }
+  return { state };
 }
 
 /** The sentinel is structure: no /api/people route resolves it. */
@@ -180,39 +208,52 @@ export const peopleHandlers = [
   // mirrors — with its derived state. `?state=unlinked` is the discovery queue:
   // every account nobody has placed, which is the question the retired unknown
   // senders endpoint answered over one channel at a time.
+  //
+  // The contacts list: every account, by name, carrying nothing about what
+  // anyone said. `/api/accounts/stream` below is the other half.
   http.get("/api/accounts", ({ request }) => {
     const params = new URL(request.url).searchParams;
-    const rawState = params.get("state");
-    const state = parseAccountState(rawState);
-    if (rawState != null && rawState !== "" && state === null) {
-      return HttpResponse.json(
-        { error: "state must be unlinked, linked, or dismissed" },
-        { status: 400 },
-      );
-    }
+    const state = readState(params);
+    if ("error" in state) return state.error;
     const rawCursor = params.get("cursor");
     const cursor = parseAccountCursor(rawCursor);
     if (rawCursor != null && rawCursor !== "" && cursor === null) {
       return HttpResponse.json({ error: "cursor is not an account cursor" }, { status: 400 });
     }
-    const seen = new Map<string, AccountRef>();
-    const add = (channel: string, channelUserId: string) => {
-      seen.set(`${channel}\n${channelUserId}`, { channel, channelUserId });
-    };
-    for (const p of persons) for (const m of p.channelMappings) add(m.channel, m.channelUserId);
-    for (const s of sentinelSenders) add(s.channel, s.channelUserId);
-    for (const c of whatsappContacts) if (!c.isGroup) add("whatsapp", c.jid);
 
-    // Paging, counts, the silent toggle and ordering are the shared rule's job,
-    // so the fixtures cannot drift from the route on any of them.
+    // Paging, counts and ordering are the shared rule's job, so the fixtures
+    // cannot drift from the route on any of them.
     return HttpResponse.json(
-      sliceAccountDirectory([...seen.values()].map(directoryRow), {
+      sliceAccountDirectory(observedAccounts().map(directoryRow), {
         query: params.get("q"),
-        state,
+        state: state.state,
         cursor,
         limit: params.get("limit") ? Number(params.get("limit")) : null,
-        includeSilent: params.get("includeSilent") === "true",
       }),
+    );
+  }),
+
+  // The recents surface: the accounts something has happened on, newest first.
+  http.get("/api/accounts/stream", ({ request }) => {
+    const params = new URL(request.url).searchParams;
+    const state = readState(params);
+    if ("error" in state) return state.error;
+    const rawCursor = params.get("cursor");
+    const cursor = parseStreamCursor(rawCursor);
+    if (rawCursor != null && rawCursor !== "" && cursor === null) {
+      return HttpResponse.json({ error: "cursor is not a stream cursor" }, { status: 400 });
+    }
+
+    return HttpResponse.json(
+      sliceAccountStream(
+        observedAccounts().flatMap((ref) => streamRow(ref) ?? []),
+        {
+          query: params.get("q"),
+          state: state.state,
+          cursor,
+          limit: params.get("limit") ? Number(params.get("limit")) : null,
+        },
+      ),
     );
   }),
 

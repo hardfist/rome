@@ -11,6 +11,7 @@ import { deriveAppRuntimeStatus } from "@rome/api-types/apps-runtime";
 import { http, HttpResponse } from "msw";
 import type { UpgradeCandidate } from "@/hooks/use-apps";
 import { publicAccess } from "./settings";
+import type { ListingDetailPayload } from "@/components/AppInstallConfirm";
 
 // The installed-app catalog. Each card is a distinct card state the grid and the
 // details page have to render — active/disabled/failed, first-party/appstore/
@@ -331,6 +332,45 @@ function iconSvg(tint: string, letter: string): string {
 }
 
 export const appHandlers = [
+  http.get("/api/app-store/listings/*", ({ params }) => {
+    if (decodeURIComponent(String(params[0])) !== "@alice/calendar") {
+      return HttpResponse.json({ error: "Listing not found" }, { status: 404 });
+    }
+    return HttpResponse.json({
+      available: true,
+      listing: {
+        id: "@alice/calendar",
+        handle: "alice",
+        slug: "calendar",
+        name: "Calendar",
+        description: "A calendar to make your own.",
+        longDescription: null,
+        iconUrl: null,
+        categories: [],
+        state: "published",
+        highestVersion: "2.0.0",
+        verified: true,
+      },
+      versions: [
+        {
+          version: "2.0.0",
+          contentHash: "b".repeat(64),
+          sourceAvailable: false,
+          state: "live",
+          sizeBytes: 1024,
+          publishedAt: "2026-08-27T00:00:00Z",
+        },
+        {
+          version: "1.2.3",
+          contentHash: "a".repeat(64),
+          sourceAvailable: true,
+          state: "live",
+          sizeBytes: 1024,
+          publishedAt: "2026-08-26T00:00:00Z",
+        },
+      ],
+    } satisfies ListingDetailPayload);
+  }),
   http.get("/api/apps", () =>
     HttpResponse.json({ apps: apps.map(toCard) } satisfies AppListResponse),
   ),

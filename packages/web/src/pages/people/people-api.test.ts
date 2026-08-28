@@ -64,12 +64,25 @@ test("proposed /people contract walkthrough", async () => {
   const unlinked = r.body.accounts.map((a: { channelUserId: string }) => a.channelUserId);
   expect(unlinked).toContain(DEV_JID);
   expect(unlinked).toContain(JULES_TG);
-  // Silent address-book contacts stay off the default page and are counted
-  // for the toggle; the state counts describe the admitted directory.
-  expect(r.body.silentTotal).toBeGreaterThan(0);
+  // The contacts list carries nothing about what anyone said, and the state
+  // counts describe the whole of it.
+  expect(r.body.accounts.every((a: object) => !("latest" in a))).toBe(true);
   expect(r.body.counts.unlinked).toBeGreaterThanOrEqual(r.body.accounts.length);
   r = await call("GET", "/api/accounts?state=bogus");
   expect(r.status).toBe(400);
+
+  // The stream is the same accounts, narrowed to the ones something happened
+  // on, with the line to preview. A cursor from one names no position in the
+  // other, so each read refuses the other's.
+  r = await call("GET", "/api/accounts/stream?state=unlinked");
+  expect(r.body.accounts.map((a: { channelUserId: string }) => a.channelUserId)).toContain(DEV_JID);
+  expect(r.body.accounts.every((a: { latest: unknown }) => a.latest != null)).toBe(true);
+  expect(r.body.silentTotal).toBeUndefined();
+  const streamPage = await call("GET", "/api/accounts/stream?limit=1");
+  expect(
+    (await call("GET", `/api/accounts?cursor=${encodeURIComponent(streamPage.body.nextCursor)}`))
+      .status,
+  ).toBe(400);
 
   // Atomic create-and-link: promote Devika. One call, person + link together.
   r = await call("POST", "/api/people", {

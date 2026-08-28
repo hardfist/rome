@@ -78,7 +78,7 @@ export function ProfileMenu() {
           >
             <Avatar>
               {avatarUrl ? <AvatarImage src={avatarUrl} alt="" /> : null}
-              <AvatarFallback className="bg-primary/15 text-aux text-primary">
+              <AvatarFallback className="bg-primary/15 text-primary">
                 {initial || <UserRound className="size-4" aria-hidden />}
               </AvatarFallback>
             </Avatar>
@@ -94,17 +94,16 @@ export function ProfileMenu() {
               <DropdownMenuSeparator />
             </>
           ) : null}
-          <DropdownMenuItem className="text-ui" onSelect={() => navigate("/settings")}>
+          <DropdownMenuItem onSelect={() => navigate("/settings")}>
             <Settings aria-hidden />
             {t("nav.settings")}
           </DropdownMenuItem>
-          <DropdownMenuItem className="text-ui" onSelect={() => setFeedbackOpen(true)}>
+          <DropdownMenuItem onSelect={() => setFeedbackOpen(true)}>
             <MessageSquarePlus aria-hidden />
             {t("feedback.open")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            className="text-ui"
             variant="destructive"
             disabled={signingOut}
             onSelect={(event) => {

@@ -905,19 +905,16 @@ See the community sample repo for full web app examples.
 ### Styling
 
 - Tailwind v4 and the `@rome-os/ui` component kit are pre-installed.
-  `styles.css` is two imports — `@rome-os/app-web-sdk/styles` (Tailwind,
-  `tw-animate-css`, and the SDK's own `@source`) followed by
-  `@rome-os/ui/styles.css` (the token vocabulary, the `@custom-variant` set, the
-  base resets, and the kit's `@source` list). Keep it thin and add only
-  app-specific rules below them.
-- **Import the kit canon from the app, not only through the SDK.** The SDK sheet
-  imports the canon too, but resolves it through the SDK's own copy of the kit,
-  while `@rome-os/ui/button` resolves the app's copy. Cross a `0.x` minor with
-  `pnpm up @rome-os/ui --latest` and those are two installs: Tailwind would scan
-  the old copy's `@source` files while the bundle ships the new components, so
-  their classes vanish from the CSS and the build still passes. The app-level
-  import keeps the version that supplies the components as the one that supplies
-  their styles. Dropping either import renders kit components unstyled.
+  `styles.css` is one import — `@rome-os/app-web-sdk/styles`, which carries
+  Tailwind, `tw-animate-css`, the SDK's own `@source`, and the kit canon (the
+  token vocabulary, the `@custom-variant` set, the base resets, and the kit's
+  `@source` list). Keep it thin and add only app-specific rules below it.
+- **Keep `@rome-os/ui` in the app's `package.json`.** The SDK takes the kit as
+  an optional peer dependency, so the app supplies it and the tree holds one
+  copy. Two copies would let a component read a token its own stylesheet no
+  longer emits, and the build would still pass. Drop the dependency and the
+  build fails to resolve `@rome-os/ui/styles.css`, which is the loud version of
+  the same problem.
 - A kit component that ships its own stylesheet (`@rome-os/ui/markdown.css`)
   needs that import here too — the host document's copy does not cross the
   shadow boundary — plus its optional peers installed. The kit's README says

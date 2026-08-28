@@ -1,18 +1,16 @@
 import { describe, it, expect } from "vitest";
-import {
-  compareTimelineEntries,
-  isAfterTimelineCursor,
-  parseTimelineCursor,
-  type TimelineEntry,
-} from "@rome/api-types/people";
-import { readPersonTimeline, type TimelineAccount, type TimelineSource } from "./timeline.js";
+import { latestDynamic, parseTimelineCursor, type TimelineEntry } from "@rome/api-types/people";
+import { memoryMessages } from "../channels/messages-memory.js";
+import type { MessageAccount, Messages } from "../channels/messages.js";
+import { readPersonTimeline } from "./timeline.js";
 import { readPeopleActivity } from "./activity.js";
 
 // The merge above the stores: what a page is, how it resumes, and which store
-// owns an account. Every source here is a fake, so nothing below is about SQL —
-// a store that answers the seam's contract is a store this merge can page.
+// owns an account. Every store here is in-memory, so nothing below is about
+// SQL — a store that answers the `Messages` contract is a store this merge can
+// page.
 
-const account = (channel: string, ...addresses: string[]): TimelineAccount => ({
+const account = (channel: string, ...addresses: string[]): MessageAccount => ({
   channel,
   addresses,
 });
@@ -25,52 +23,44 @@ const entry = (
 ): TimelineEntry => ({ source, timestamp, ref, direction, body: `${ref}@${timestamp}` });
 
 /**
- * A store held in memory, answering the seam exactly as its contract asks:
- * only entries strictly after the cursor, in order, at most `limit` of them.
+ * A store holding `held`, keyed by the address each entry arrived at — the
+ * reference `Messages` implementation, which is what makes these fakes prove
+ * something: they answer the contract every real adapter is enrolled in.
+ *
+ * An entry's `source` is the channel it belongs to, so an address on one
+ * channel never answers for an account on another.
  */
-function fakeSource(
+function store(held: Record<string, TimelineEntry[]>): Messages {
+  return memoryMessages(
+    Object.entries(held).flatMap(([address, entries]) =>
+      entries.map((held) => ({ channel: held.source, address, entry: held })),
+    ),
+  );
+}
+
+/** One store, with every verb the merge reaches for written down. The property
+ *  name rather than only the call, so a merge that asked for a verb `Messages`
+ *  does not have is caught here rather than by the type checker alone. */
+function watched(
   name: string,
-  held: Record<string, TimelineEntry[]>,
-  calls: string[] = [],
-): TimelineSource & { calls: string[] } {
-  const addressesHeld = new Set(Object.keys(held));
-  return {
-    name,
-    calls,
-    async holds(accounts) {
-      return accounts.filter((a) => a.addresses.some((address) => addressesHeld.has(address)));
+  messages: Messages,
+  asked: Array<{ store: string; verb: string }>,
+): Messages {
+  return new Proxy(messages, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof property !== "string") return value;
+      asked.push({ store: name, verb: property });
+      return value;
     },
-    async digest(accounts) {
-      return accounts.flatMap((a) => {
-        const entries = a.addresses.flatMap((address) => held[address] ?? []);
-        if (entries.length === 0) return [];
-        return [
-          {
-            account: a,
-            latest: [...entries].sort(compareTimelineEntries)[0],
-            messageCount: entries.length,
-          },
-        ];
-      });
-    },
-    async read(request) {
-      calls.push(name);
-      const entries = request.accounts
-        .flatMap((a) => a.addresses)
-        .flatMap((address) => held[address] ?? []);
-      return entries
-        .filter((e) => request.cursor === null || isAfterTimelineCursor(e, request.cursor))
-        .sort(compareTimelineEntries)
-        .slice(0, request.limit);
-    },
-  };
+  });
 }
 
 describe("readPersonTimeline", () => {
-  const whatsapp = fakeSource("wa", {
+  const whatsapp = store({
     "wa-1": [entry("whatsapp", 300, "wa:c"), entry("whatsapp", 100, "wa:a")],
   });
-  const telegram = fakeSource("tg", {
+  const telegram = store({
     "tg-1": [entry("telegram", 200, "tg:b"), entry("telegram", 400, "tg:d")],
   });
   const accounts = [account("whatsapp", "wa-1"), account("telegram", "tg-1")];
@@ -99,7 +89,7 @@ describe("readPersonTimeline", () => {
   it("resumes inside a second rather than after it", async () => {
     // Four entries share one timestamp, so a cursor carrying the timestamp
     // alone could only resume before or after all of them.
-    const crowded = fakeSource("crowd", {
+    const crowded = store({
       "c-1": [
         entry("whatsapp", 100, "a"),
         entry("whatsapp", 100, "b", "outbound"),
@@ -129,35 +119,40 @@ describe("readPersonTimeline", () => {
     expect(short.nextCursor).not.toBeNull();
   });
 
-  it("gives an account to the first store that holds it and asks no other", async () => {
-    const calls: string[] = [];
-    const mirror = fakeSource("mirror", { "wa-1": [entry("whatsapp", 500, "mirrored")] }, calls);
-    const transcript = fakeSource(
+  it("gives an account to the first store whose latest answers, and asks no other", async () => {
+    // Ownership is derived rather than asked for: the mirror answers a newest
+    // message for the account, so the transcript's copy of the same exchange is
+    // never read — and the transcript is not asked anything at all.
+    const asked: Array<{ store: string; verb: string }> = [];
+    const mirror = watched(
+      "mirror",
+      store({ "wa-1": [entry("whatsapp", 500, "mirrored")] }),
+      asked,
+    );
+    const transcript = watched(
       "transcript",
-      { "wa-1": [entry("whatsapp", 500, "transcribed")] },
-      calls,
+      store({ "wa-1": [entry("whatsapp", 500, "transcribed")] }),
+      asked,
     );
     const page = await readPersonTimeline([mirror, transcript], [account("whatsapp", "wa-1")], {
       limit: 10,
     });
     expect(page.entries.map((e) => e.ref)).toEqual(["mirrored"]);
-    expect(calls).toEqual(["mirror"]);
+    expect(new Set(asked.map((call) => call.store))).toEqual(new Set(["mirror"]));
   });
 
-  it("falls through to a later store for an account the earlier one lacks", async () => {
-    const mirror = fakeSource("mirror", { "wa-1": [entry("whatsapp", 500, "mirrored")] });
-    const transcript = fakeSource("transcript", { "tg-1": [entry("telegram", 400, "typed")] });
+  it("falls through to a later store for an account the earlier one holds nothing for", async () => {
+    const mirror = store({ "wa-1": [entry("whatsapp", 500, "mirrored")] });
+    const transcript = store({ "tg-1": [entry("telegram", 400, "typed")] });
     const page = await readPersonTimeline([mirror, transcript], accounts, { limit: 10 });
     expect(page.entries.map((e) => e.ref)).toEqual(["mirrored", "typed"]);
   });
 
   it("takes a new store as one more adapter, with nothing above it changed", async () => {
-    // What "adding a source is one adapter" means: a store of a kind this file
+    // What "adding a store is one adapter" means: a store of a kind this file
     // has never heard of, appended to the list, and its entries page with the
     // rest through the same cursor.
-    const app = fakeSource("some-rome-app", {
-      "app-1": [entry("bookings", 250, "booking:7", "outbound")],
-    });
+    const app = store({ "app-1": [entry("bookings", 250, "booking:7", "outbound")] });
     const page = await readPersonTimeline(
       [whatsapp, telegram, app],
       [...accounts, account("bookings", "app-1")],
@@ -170,6 +165,18 @@ describe("readPersonTimeline", () => {
     const page = await readPersonTimeline([whatsapp, telegram], [], { limit: 10 });
     expect(page).toEqual({ entries: [], nextCursor: null });
   });
+
+  it("asks a store for nothing but read, count and latest", async () => {
+    // The seam is `Messages` and only `Messages`: `holds` and `digest` were how
+    // the old interface asked a store who it answered for, and a merge still
+    // reaching for either would be reading a store two ways at once.
+    const asked: Array<{ store: string; verb: string }> = [];
+    const only = watched("only", store({ "wa-1": [entry("whatsapp", 500, "mirrored")] }), asked);
+    await readPersonTimeline([only], [account("whatsapp", "wa-1")], { limit: 10 });
+
+    expect(asked.length).toBeGreaterThan(0);
+    expect(new Set(asked.map((call) => call.verb))).toEqual(new Set(["read", "latest"]));
+  });
 });
 
 // The same precedence, read as a summary instead of a page: what a directory
@@ -181,8 +188,8 @@ describe("readPeopleActivity", () => {
   it("summarizes each account from the first store that claims it", async () => {
     // One exchange written down twice, as the real stores overlap. Counting
     // both would report an inbox the dossier does not have.
-    const mirror = fakeSource("mirror", { "wa-1": [entry("whatsapp", 500, "mirrored")] });
-    const transcript = fakeSource("transcript", {
+    const mirror = store({ "wa-1": [entry("whatsapp", 500, "mirrored")] });
+    const transcript = store({
       "wa-1": [entry("whatsapp", 500, "copy"), entry("whatsapp", 200, "older copy")],
       "tg-1": [entry("telegram", 400, "typed")],
     });
@@ -195,16 +202,16 @@ describe("readPeopleActivity", () => {
       messageCount: 1,
       latest: { source: "whatsapp", timestamp: 500, preview: "mirrored@500" },
     });
-    expect(telegram.messageCount).toBe(1);
+    expect(telegram?.messageCount).toBe(1);
   });
 
   it("folds a person's accounts into one history", async () => {
-    const store = fakeSource("store", {
+    const held = store({
       "wa-1": [entry("whatsapp", 300, "wa:c"), entry("whatsapp", 100, "wa:a")],
       "tg-1": [entry("telegram", 400, "tg:d")],
     });
 
-    const [both] = await readPeopleActivity([store], [[waAccount, tgAccount]]);
+    const [both] = await readPeopleActivity([held], [[waAccount, tgAccount]]);
     expect(both).toEqual({
       messageCount: 3,
       // The head of the merged timeline, not of whichever account came first.
@@ -213,11 +220,51 @@ describe("readPeopleActivity", () => {
   });
 
   it("answers one activity per group, in the order given", async () => {
-    const store = fakeSource("store", { "tg-1": [entry("telegram", 400, "tg:d")] });
-    expect(await readPeopleActivity([store], [[waAccount], [], [tgAccount]])).toEqual([
+    const held = store({ "tg-1": [entry("telegram", 400, "tg:d")] });
+    expect(await readPeopleActivity([held], [[waAccount], [], [tgAccount]])).toEqual([
       { latest: null, messageCount: 0 },
       { latest: null, messageCount: 0 },
       { latest: { source: "telegram", timestamp: 400, preview: "tg:d@400" }, messageCount: 1 },
     ]);
+  });
+
+  it("previews the entry the person's own timeline opens on, and counts its length", async () => {
+    // The listing and the page are one read of one set of stores, so the row a
+    // guardian clicks and the history it opens cannot disagree — the preview is
+    // the first entry of the timeline, and the number beside it the length of
+    // exactly that timeline.
+    const mirror = store({
+      "wa-1": [entry("whatsapp", 500, "mirrored"), entry("whatsapp", 300, "earlier")],
+    });
+    const transcript = store({
+      // The same WhatsApp exchange again, and a newer entry on a channel with
+      // no mirror: counting the copy would put a number on the row the page
+      // never reaches.
+      "wa-1": [entry("whatsapp", 500, "copy")],
+      "tg-1": [entry("telegram", 700, "tg:newest"), entry("telegram", 200, "tg:old")],
+    });
+    const stores = [mirror, transcript];
+    const accounts = [waAccount, tgAccount];
+
+    const [activity] = await readPeopleActivity(stores, [accounts]);
+    const timeline = await readPersonTimeline(stores, accounts, { limit: 100 });
+
+    expect(timeline.entries.map((e) => e.ref)).toEqual([
+      "tg:newest",
+      "mirrored",
+      "earlier",
+      "tg:old",
+    ]);
+    expect(activity?.latest).toEqual(latestDynamic(timeline.entries));
+    expect(activity?.messageCount).toBe(timeline.entries.length);
+  });
+
+  it("asks a store for nothing but read, count and latest", async () => {
+    const asked: Array<{ store: string; verb: string }> = [];
+    const only = watched("only", store({ "wa-1": [entry("whatsapp", 500, "mirrored")] }), asked);
+    await readPeopleActivity([only], [[waAccount]]);
+
+    expect(asked.length).toBeGreaterThan(0);
+    expect(new Set(asked.map((call) => call.verb))).toEqual(new Set(["count", "latest"]));
   });
 });

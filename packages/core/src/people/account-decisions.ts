@@ -180,10 +180,10 @@ async function locate(
  * it now.
  *
  * Patched rather than re-read. A decision moves the link and nothing else — the
- * platform's name for the account, the addresses it answers to, its last
- * message and its count are all untouched — so re-folding every address book to
- * learn what this function already holds would buy nothing but a second chance
- * to disagree with the read that made the decision.
+ * platform's name for the account, the addresses it answers to and whether
+ * anything is on record for it are all untouched — so re-folding every address
+ * book to learn what this function already holds would buy nothing but a second
+ * chance to disagree with the read that made the decision.
  *
  * The link goes through the same presentation seam a directory row does, which
  * is what keeps the sentinel off the wire here.

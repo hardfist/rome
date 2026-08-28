@@ -216,16 +216,19 @@ describe("AppDetailPage", () => {
     expect(within(hooks).getByText("No hooks declared.")).toBeTruthy();
   });
 
-  it("offers Remix beside Open for a remixable installed Store app", async () => {
+  it.each([
+    "calendar",
+    "@alice/calendar",
+  ])("offers Remix for installed source %s and preserves its id", async (sourceId) => {
     const user = userEvent.setup();
     mockBackend({
       installed: [
         installedCard({
-          id: "calendar",
+          id: sourceId,
           displayName: "Calendar",
           version: "1.2.3",
           hasFrontend: true,
-          href: "/apps/calendar",
+          href: `/apps/${encodeURIComponent(sourceId)}`,
           origin: "appstore",
           source: { mode: "appstore", listingId: "@alice/calendar", version: "1.2.3" },
           includeSource: true,
@@ -233,7 +236,7 @@ describe("AppDetailPage", () => {
       ],
     });
 
-    renderPage("calendar");
+    renderPage(sourceId);
 
     const open = await screen.findByRole("link", { name: "Open" });
     const remix = screen.getByRole("button", { name: "Remix…" });
@@ -250,14 +253,8 @@ describe("AppDetailPage", () => {
         JSON.stringify({
           pathname: "/chat",
           state: {
-            draft: [
-              "Use the `app_remix` skill to remix the installed app `calendar` as `@ray/calendar` (`ray-calendar`).",
-              "",
-              "Source: `@alice/calendar` v1.2.3. Keep the source app unchanged.",
-              "",
-              "I want to add: ",
-            ].join("\n"),
-            skill: "app_remix",
+            draft: `I want to remix the installed app ${sourceId} version 1.2.3 as @ray/calendar, with the following changes:\n\n`,
+            skill: "coding:app_remix",
           },
         }),
       );

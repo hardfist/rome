@@ -111,7 +111,7 @@ export async function appManagement(
     case "create":
       log.info("app create requested", {
         appId: input.appId,
-        ...(input.from ? { fromAppId: input.from.appId } : { template: input.template }),
+        ...(input.from ? { from: input.from } : { template: input.template }),
       });
       return {
         status: "ok",
@@ -172,7 +172,7 @@ export function createAppManagementAction(config: ActionConfig, deps: AppManagem
           description: [
             "Lifecycle operation. One per call.",
             "First-party apps (shipped with Rome) are bundled at build time and installed automatically at boot — they cannot be installed or uninstalled via this action. The only first-party control here is 'set_enabled'.",
-            "- 'create': create a new dev app. For a new app from scratch, pass `rootPath` and `template`. For a remix, pass `from: { appId }` plus the new `appId` and scoped `name`; the daemon copies the installed Store app's pinned source bundle into the custom authoring root. The two shapes are mutually exclusive. Follow up with op: 'install'.",
+            "- 'create': create a new dev app. For a new app from scratch, pass `rootPath` and `template`. For a remix, pass `from: { appId }` for installed code or `from: { listingId, version, contentHash }` for a Store bundle, plus the new `appId` and scoped `name`. The daemon creates an independent project without installing the source. The two create shapes are mutually exclusive. Build and install the new app only after finishing the requested changes.",
             "- 'install': install (or re-install) an app via AppManager. Takes NO `appId` — the daemon derives it from the source (the manifest id at `source.path` for local modes, the listing slug for appstore) and returns it in the result. For local dev the one-step path is `source.mode = 'source'` with `source.path` = the root of a standalone dev app repo: the daemon runs the workspace's build, packs into `<repo>/.rome/artifact`, and installs — no separate pack step. `mode: 'bundle'` installs an already-packed artifact dir as-is. For Rome App Store installs, use `app_store_search` first, then call install with `source.mode = 'appstore'` and `listingId`; omit `version` to install the latest live version, or pass a specific live historical version. The declared mode is cross-checked against the directory's actual shape and a mismatch is rejected up front with ARTIFACT_INVALID (before anything is staged or recorded — a previously installed version keeps running untouched), with the error naming the exact next command. Build/pack/download failures also leave the prior version running and return the error. An install whose derived id collides with a first-party app is rejected with FIRST_PARTY_PROTECTED. Returns once the bundle is active.",
             "- 'uninstall': remove the app via AppManager. Pass `purge: true` to drop the DB tables and data dir. Rejected with FIRST_PARTY_PROTECTED for first-party apps — disable them with 'set_enabled' instead.",
             "- 'set_enabled': flip the app's enabled flag without re-installing. Works for every app except 'system'.",
@@ -198,17 +198,44 @@ export function createAppManagementAction(config: ActionConfig, deps: AppManagem
             "Required for a remix create (`from` present): the user-facing scoped name, for example `@ray/calendar`. The local `appId` must be the filesystem-safe scoped form (`ray-calendar`).",
         },
         from: {
-          type: "object",
           description:
-            "For a remix create: the locally installed App Store app whose pinned bundle is copied in full. Core rechecks the installed app.yaml includeSource flag and never overwrites the source app.",
-          properties: {
-            appId: {
-              type: "string",
-              pattern: "^[a-z][a-z0-9-]{0,63}$",
+            "For a remix create: copy local installed code with {appId}, or use a pinned Store bundle with {listingId, version, contentHash}. Core reuses an identical installed pin or downloads and extracts the bundle without installing the source. It checks includeSource and never changes the original app.",
+          oneOf: [
+            {
+              type: "object",
+              properties: {
+                appId: {
+                  type: "string",
+                  minLength: 1,
+                  description:
+                    "Canonical installed app id, including the full @handle/slug for scoped apps.",
+                },
+                expectedSource: {
+                  type: "object",
+                  description: "Optional Store pin; reject if the installed source changed.",
+                  properties: {
+                    listingId: { type: "string", minLength: 1 },
+                    version: { type: "string", minLength: 1 },
+                    contentHash: { type: "string", pattern: "^[a-fA-F0-9]{64}$" },
+                  },
+                  required: ["listingId", "version", "contentHash"],
+                  additionalProperties: false,
+                },
+              },
+              required: ["appId"],
+              additionalProperties: false,
             },
-          },
-          required: ["appId"],
-          additionalProperties: false,
+            {
+              type: "object",
+              properties: {
+                listingId: { type: "string", minLength: 1 },
+                version: { type: "string", minLength: 1 },
+                contentHash: { type: "string", pattern: "^[a-fA-F0-9]{64}$" },
+              },
+              required: ["listingId", "version", "contentHash"],
+              additionalProperties: false,
+            },
+          ],
         },
         template: {
           type: "string",

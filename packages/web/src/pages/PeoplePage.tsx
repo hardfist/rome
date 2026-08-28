@@ -15,6 +15,7 @@ import {
   FILTER_ORDER,
   levelCounts,
   streamRows,
+  type LevelCounts,
   type PeopleFilter,
   type PeopleRow,
   type PeopleView,
@@ -28,15 +29,17 @@ import { LinkedInSection } from "./people/linkedin";
  *
  * Latest answers "who has something new" — one row per identity with a
  * dynamic, newest first, carrying only what routing needs. Directory answers
- * "who does Rome know" — everyone grouped by bond. Unknown and Stranger are
- * positions on the same ladder as the curated levels, so an account waiting on
- * a decision and a person the guardian placed sit in one list rather than in
- * sections that cannot say where either stands relative to the other.
+ * "who does Rome know" — a contacts list, everyone Rome holds, by name, with no
+ * preview and no count anywhere in it. Unknown and Stranger are positions on
+ * the same ladder as the curated levels, so an account waiting on a decision
+ * and a person the guardian placed sit in one list rather than in sections that
+ * cannot say where either stands relative to the other.
  *
  * The contract is two nouns and this page is one ladder over both: `GET
- * /api/people` for the people, `GET /api/accounts` for every account Rome has
- * observed, joined in `people-model.ts`. A person's history is a third read,
- * `GET /api/people/:id/messages`, and it belongs to the person page.
+ * /api/people` for the people, and the account read the view is about — `GET
+ * /api/accounts` for the contacts list, `GET /api/accounts/stream` for the
+ * recents surface — joined in `people-model.ts`. A person's history is a third
+ * read, `GET /api/people/:id/messages`, and it belongs to the person page.
  *
  * Every number on screen is the server's. The directory pages, so a count taken
  * over the rows that happened to arrive would report no waiting senders as soon
@@ -66,19 +69,17 @@ export default function PeoplePage() {
   const [view, setView] = useState<PeopleView>("latest");
   const [filter, setFilter] = useState<PeopleFilter>("all");
   const [search, setSearch] = useState("");
-  const [showSilent, setShowSilent] = useState(false);
 
-  // The directory shows the address book behind its own toggle; the stream
-  // never does, and a search reaches it either way — the endpoint's own rule.
+  // The view picks the account read: the contacts list, or the recents surface.
   //
   // The chip rides the requests in the stream, where a level is the whole view:
-  // an account state is what the directory read can narrow by, a bond level is
+  // an account state is what the account read can narrow by, a bond level is
   // what the people read can. The directory view renders every group at once,
   // so it sends neither — a level on the request would leave the other headings
   // with nothing to show.
   const roster = usePeopleRoster({
     search,
-    includeSilent: view === "directory" && showSilent,
+    view,
     accountState: view === "directory" ? null : filter === "stranger" ? "dismissed" : "unlinked",
     personLevel: view === "directory" || !PLACED_FILTERS.has(filter) ? null : filter,
   });
@@ -94,20 +95,15 @@ export default function PeoplePage() {
     [rows, settled, filter],
   );
   const groups = useMemo(
-    () => directoryGroups(rows, { filter, search: settled, showSilent }),
-    [rows, filter, settled, showSilent],
+    () => directoryGroups(rows, { filter, search: settled }),
+    [rows, filter, settled],
   );
-  // Two sets of numbers, and they are meant to disagree: a chip counts what is
-  // waiting on a decision, a directory heading counts everyone in the group as
-  // the roster currently stands.
+  // The numbers the chips and the group headings show, from the read the view
+  // is on: what the stream calls Unknown is the senders waiting on a decision,
+  // what the directory calls Unknown is everyone Rome has not placed.
   const counts = useMemo(
-    () =>
-      levelCounts(
-        roster.peopleCounts,
-        { counts: roster.accountCounts, silentTotal: roster.silentTotal },
-        { includeSilent: view === "directory" && showSilent },
-      ),
-    [roster.peopleCounts, roster.accountCounts, roster.silentTotal, view, showSilent],
+    () => levelCounts(roster.peopleCounts, roster.accountCounts),
+    [roster.peopleCounts, roster.accountCounts],
   );
   // A link lands on a person, so the picker offers the people this read
   // returned rather than the accounts beside them.
@@ -136,15 +132,16 @@ export default function PeoplePage() {
   const loading = roster.isPending;
   const loadError = roster.error ? roster.error.message : null;
 
-  // Both unplaced ends of the ladder render dense, with the gesture their
-  // position admits. A restore decides on the same evidence a placement does —
-  // what the sender actually sent — so it gets the same row rather than a
-  // roster line with a button on it.
-  const unplaced = (row: PeopleRow) =>
+  // Both unplaced ends of the ladder carry the gesture their position admits,
+  // on the row their view has. The stream renders them dense — a placement and
+  // a restore both decide on what the sender actually sent, so the evidence is
+  // on the row rather than a click away — and the directory renders them as the
+  // contacts line every other row is, with the buttons at the end of it.
+  const unplaced = (row: PeopleRow, variant: PeopleView) =>
     row.level === "stranger" ? (
-      <DismissedEntry key={row.id} row={row} />
+      <DismissedEntry key={row.id} row={row} variant={variant} />
     ) : (
-      <UnknownEntry key={row.id} row={row} people={linkTargets} />
+      <UnknownEntry key={row.id} row={row} people={linkTargets} variant={variant} />
     );
 
   return (
@@ -189,8 +186,7 @@ export default function PeoplePage() {
               label: option === "all" ? t("filters.all") : t(levelLabelKey(option)),
               // Unknown is the page's one number that asks for a decision, so
               // it carries a count; the other chips are plain labels.
-              count:
-                option === "unknown" && counts.chips.unknown > 0 ? counts.chips.unknown : undefined,
+              count: option === "unknown" && counts.unknown > 0 ? counts.unknown : undefined,
             }))}
           />
         </div>
@@ -239,17 +235,14 @@ export default function PeoplePage() {
             rows={latest}
             searching={settled !== ""}
             onOpen={openRow}
-            renderUnplaced={unplaced}
+            renderUnplaced={(row) => unplaced(row, "latest")}
           />
         ) : (
           <DirectoryView
             groups={groups}
-            counts={counts.totals}
-            showSilent={showSilent}
-            silentTotal={roster.silentTotal}
-            onToggleSilent={setShowSilent}
+            counts={counts}
             onOpen={openRow}
-            renderUnplaced={unplaced}
+            renderUnplaced={(row) => unplaced(row, "directory")}
           />
         )}
 
@@ -330,19 +323,11 @@ function LatestView({
 function DirectoryView({
   groups,
   counts,
-  showSilent,
-  silentTotal,
-  onToggleSilent,
   onOpen,
   renderUnplaced,
 }: {
   groups: { level: RowLevel; rows: PeopleRow[] }[];
-  counts: Record<RowLevel, number>;
-  showSilent: boolean;
-  /** How many silent contacts the directory holds, whether or not this view is
-   *  currently carrying them. */
-  silentTotal: number;
-  onToggleSilent: (value: boolean) => void;
+  counts: LevelCounts;
   onOpen: (row: PeopleRow) => void;
   renderUnplaced: (row: PeopleRow) => React.ReactNode;
 }) {
@@ -369,30 +354,10 @@ function DirectoryView({
             <span className="font-mono text-badge tabular-nums text-subtle-foreground">
               {counts[group.level]}
             </span>
-            {/* The toggle is always on the Unknown heading: the endpoint holds
-                silent contacts back until it is on, so the page cannot count
-                what it has not been sent. */}
-            {group.level === "unknown" ? (
-              <label className="ml-auto flex items-center gap-2 text-badge text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={showSilent}
-                  onChange={(e) => onToggleSilent(e.target.checked)}
-                  className="accent-primary"
-                />
-                {/* The number is what the toggle is deciding about, and it is a
-                    directory-wide total rather than a page one — so it reads
-                    the same whether those rows are on screen or held back. */}
-                {silentTotal > 0
-                  ? t("unknown.includeSilentCount", { count: silentTotal })
-                  : t("unknown.includeSilent")}
-              </label>
-            ) : (
-              LEVEL_HINT_KEY[group.level] && (
-                <span className="ml-auto text-badge text-subtle-foreground">
-                  {t(LEVEL_HINT_KEY[group.level]!)}
-                </span>
-              )
+            {LEVEL_HINT_KEY[group.level] && (
+              <span className="ml-auto text-badge text-subtle-foreground">
+                {t(LEVEL_HINT_KEY[group.level]!)}
+              </span>
             )}
           </div>
           <div className="flex flex-col">

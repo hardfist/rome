@@ -17,17 +17,6 @@
    it. Paint with the tokens the imports below supply, and nothing else. */
 @import "@rome-os/app-web-sdk/styles";
 
-/* The canon again, resolved from THIS app's @rome-os/ui — deliberately not
-   redundant. The SDK sheet imports the canon too, but through the SDK's own
-   copy of the kit, and a component import (`@rome-os/ui/button`) resolves this
-   app's copy. Upgrade the kit across a 0.x minor and those become two different
-   installs: without the line below Tailwind would scan the *old* copy's
-   `@source` files while the bundle ships the *new* components, so their classes
-   would silently vanish from the CSS with a passing build. Importing here keeps
-   the version that supplies the components as the one that supplies their
-   styles. Costs nothing when both resolve to the same install. */
-@import "@rome-os/ui/styles.css";
-
 /* App-specific rules go below. Paint only with the registered tokens
    (`bg-card`, `text-muted-foreground`, `rounded-lg`, …) — never raw shades
    (`bg-gray-100`) or scrims (`bg-black/40`). To override a host token (e.g. pin

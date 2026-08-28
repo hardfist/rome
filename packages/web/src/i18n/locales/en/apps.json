@@ -135,7 +135,8 @@
       "nameLabel": "New app name",
       "invalidName": "Use a scoped name such as @ray/calendar with your lowercase username.",
       "confirm": "Continue in chat",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "prompt": "I want to remix the installed app {{app}} version {{version}} as {{name}}, with the following changes:\n\n"
     },
     "publishSuccess": "Published {{name}} v{{version}} to the App Store.",
     "publishDialog": {
@@ -236,6 +237,17 @@
       "loadFailed": "Failed to load listing",
       "installFailed": "Failed to install app"
     }
+  },
+  "remixStore": {
+    "prompt": "I want to remix {{app}} version {{version}}, with the following changes:\n\n",
+    "title": "Remix this app?",
+    "description": "Create your own copy and describe your changes in chat. The original app and its data stay unchanged.",
+    "installNotice": "Nothing happens until you send the chat message. Rome creates an independent project from this version without installing or changing the original app.",
+    "confirm": "Yes, continue in chat",
+    "cancel": "No, cancel",
+    "invalidLink": "This Remix link needs a valid listing ID and an exact version.",
+    "unavailable": "This exact version is unavailable or does not include source for Remix.",
+    "loadFailed": "Could not verify the app with the App Store. Please try again."
   },
   "install": {
     "loading": "Loading app details...",

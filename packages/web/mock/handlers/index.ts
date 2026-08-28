@@ -46,6 +46,7 @@ import type {
 import type { FileBrowserTreeNode } from "@/lib/file-browser-tree";
 import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
+import { appKeysHandlers } from "./app-keys";
 import { connections } from "./connections-store";
 import { channelMirrorHandlers } from "./people";
 import { peopleHandlers } from "./people-api";
@@ -1301,4 +1302,5 @@ export const handlers = [
   ...peopleHandlers,
   ...routineHandlers,
   ...settingsHandlers,
+  ...appKeysHandlers,
 ];

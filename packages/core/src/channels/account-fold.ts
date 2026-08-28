@@ -4,7 +4,13 @@
 // `TalkAccounts` (accounts.ts) is one channel's address book and `AccountNames`
 // (account-names.ts) is the display-name half of all of them. This is the fold
 // underneath both reads that have to show every account there is: which
-// addressings are one account, and what that account last did.
+// addressings are one account, and — for the readers that ask — what that
+// account last did.
+//
+// The two halves fold separately, because the contacts list has no use for the
+// second one. `foldAccounts` reads address books alone; `foldAccountRecords`
+// reads them and joins the histories. A caller that only needs to know who is
+// one account therefore never touches a message store.
 
 import { compareCodePoints, type AccountDynamic } from "@rome/api-types/people";
 import type { SentinelSenderActivity } from "../db/repositories/sentinel-log.js";
@@ -30,8 +36,6 @@ export interface MirrorAccount {
   aliases: string[];
   /** What the channel calls the account, or null when it holds no name. */
   name: string | null;
-  latest: AccountDynamic | null;
-  messageCount: number;
 }
 
 /** What the producers hold for one account: its newest dynamic, and how many
@@ -60,9 +64,18 @@ export function mirrorRegistry<T>(deps: {
   return { whatsapp: deps.whatsAppAccounts, linkedin: deps.linkedInAccounts };
 }
 
-/** A channel that answers both halves of its address book: who it can reach,
- *  and what was last said to each of them. */
-export type MirrorPlane = TalkAccounts & TalkAccountActivity;
+/**
+ * A channel that answers both halves of its address book: who it can reach,
+ * and what was last said to each of them.
+ *
+ * The listing half is read as the listing gives it — each account carrying its
+ * own addressing set — so the whole address book arrives as accounts rather
+ * than as a map of addresses a caller has to invert back into them. A separate
+ * address map is deliberately not part of what a plane owes here: it is a
+ * second answer to a question the listing already answers, and two sources of
+ * one truth is how they drift.
+ */
+export type MirrorPlane = Omit<TalkAccounts, "listAddresses"> & TalkAccountActivity;
 
 export type MirrorPlanes = Readonly<Record<string, MirrorPlane>>;
 
@@ -75,21 +88,19 @@ export interface StoredAddress {
 }
 
 /**
- * Every account the mirrors hold and every sender the triage record saw, folded
- * so that one account answers under every address it is reachable at.
+ * Every account the mirrors hold, folded so that one account answers under
+ * every address it is reachable at.
  *
  * Built by {@link foldAccounts}. A caller asks it questions about a (channel,
  * address) pair and never has to know which of them the channel considers
- * canonical, nor which store the answer came from.
+ * canonical. Nothing here is about what anybody said — {@link AccountRecords}
+ * is the fold that answers that.
  */
 export class AccountFold {
-  private readonly records = new Map<string, AccountRecord>();
-
   constructor(
     /** Every account the mirrors hold. */
     readonly accounts: readonly MirrorAccount[],
-    private readonly byAddress: ReadonlyMap<string, MirrorAccount>,
-    private readonly bySender: ReadonlyMap<string, SentinelSenderActivity[]>,
+    protected readonly byAddress: ReadonlyMap<string, MirrorAccount>,
   ) {}
 
   /**
@@ -117,6 +128,31 @@ export class AccountFold {
   mirrorFor(channel: string, channelUserId: string): MirrorAccount | undefined {
     return this.byAddress.get(this.key(channel, channelUserId));
   }
+}
+
+/**
+ * An {@link AccountFold} joined to what the producers hold for each account:
+ * the newest dynamic, and how many records are behind it.
+ *
+ * Built by {@link foldAccountRecords}, which is the fold that reads a message
+ * store. A caller holding one of these is on the recents surface; a caller who
+ * only has to know who is one account holds the base fold and pays for none of
+ * this.
+ */
+export class AccountRecords extends AccountFold {
+  private readonly records = new Map<string, AccountRecord>();
+
+  constructor(
+    accounts: readonly MirrorAccount[],
+    byAddress: ReadonlyMap<string, MirrorAccount>,
+    /** What each mirror holds for its own accounts, under the account's own
+     *  address. An entry per listed account, whether or not anything has
+     *  happened on it. */
+    private readonly mirrored: ReadonlyMap<string, AccountRecord>,
+    private readonly bySender: ReadonlyMap<string, SentinelSenderActivity[]>,
+  ) {
+    super(accounts, byAddress);
+  }
 
   /** Every triage row filed against this account, under any of its addresses. */
   sendersFor(channel: string, channelUserId: string): readonly SentinelSenderActivity[] {
@@ -136,7 +172,7 @@ export class AccountFold {
     const memoized = this.records.get(key);
     if (memoized) return memoized;
 
-    const fromMirror = this.byAddress.get(key);
+    const fromMirror = this.mirrored.get(key);
     const rows = this.bySender.get(key) ?? [];
     const fromSentinel = rows.reduce<AccountDynamic | null>(
       (best, row) =>
@@ -171,12 +207,17 @@ export function newer(a: AccountDynamic | null, b: AccountDynamic | null): Accou
 }
 
 /**
- * Read every mirror whole and join the triage record to it.
+ * Read every mirror's address book whole and fold it.
  *
  * Whole rather than paged: a caller pages its own answer, and an account past a
  * channel's own cutoff is one the guardian cannot find and no count includes.
  * The fold that decides which addressings are one account needs every address
  * book entire in any case.
+ *
+ * No history is read here — not a mirror's and not the triage record's. This is
+ * what a contacts list needs and the whole of it, so the read that serves one
+ * never reaches a message store. {@link foldAccountRecords} is the fold that
+ * does.
  *
  * `stored` is every address the caller already holds. The channels are read
  * concurrently, and each channel's reads are issued in one batch, because a
@@ -186,13 +227,52 @@ export function newer(a: AccountDynamic | null, b: AccountDynamic | null): Accou
  */
 export async function foldAccounts(
   planes: MirrorPlanes,
-  input: { senders: readonly SentinelSenderActivity[]; stored: readonly StoredAddress[] },
+  input: { stored: readonly StoredAddress[] },
 ): Promise<AccountFold> {
+  const read = await readPlanes(planes, input.stored, { activity: false });
+  return new AccountFold(read.accounts, read.byAddress);
+}
+
+/**
+ * {@link foldAccounts}, joined to what the producers hold for each account.
+ *
+ * Two histories: each mirror's own, and the triage record, which is the only
+ * one Rome keeps for a channel it mirrors no address book for. `senders` is
+ * that record, read by the caller and folded onto accounts here.
+ */
+export async function foldAccountRecords(
+  planes: MirrorPlanes,
+  input: { senders: readonly SentinelSenderActivity[]; stored: readonly StoredAddress[] },
+): Promise<AccountRecords> {
+  const read = await readPlanes(planes, input.stored, { activity: true });
+
+  const bySender = new Map<string, SentinelSenderActivity[]>();
+  for (const sender of input.senders) {
+    const own = read.byAddress.get(addressKey(sender.channel, sender.channelUserId));
+    const key = addressKey(sender.channel, own?.channelUserId ?? sender.channelUserId);
+    const group = bySender.get(key);
+    if (group) group.push(sender);
+    else bySender.set(key, [sender]);
+  }
+  return new AccountRecords(read.accounts, read.byAddress, read.activity, bySender);
+}
+
+/** Every channel read concurrently, and their address books merged into one
+ *  fold. */
+async function readPlanes(
+  planes: MirrorPlanes,
+  storedAddresses: readonly StoredAddress[],
+  options: { activity: boolean },
+): Promise<{
+  accounts: MirrorAccount[];
+  byAddress: Map<string, MirrorAccount>;
+  activity: Map<string, AccountRecord>;
+}> {
   // One entry per (channel, address): the sources overlap — a link and a
   // sentinel row routinely name the same address — and each one asks its
   // channel a question.
   const stored = new Map<string, StoredAddress>();
-  for (const address of input.stored) {
+  for (const address of storedAddresses) {
     stored.set(addressKey(address.channel, address.channelUserId), address);
   }
 
@@ -202,26 +282,20 @@ export async function foldAccounts(
         channel,
         plane,
         [...stored.values()].filter((address) => address.channel === channel),
+        options,
       ),
     ),
   );
 
   const accounts: MirrorAccount[] = [];
   const byAddress = new Map<string, MirrorAccount>();
+  const activity = new Map<string, AccountRecord>();
   for (const read of reads) {
     accounts.push(...read.accounts);
     for (const [address, account] of read.byAddress) byAddress.set(address, account);
+    for (const [address, record] of read.activity) activity.set(address, record);
   }
-
-  const bySender = new Map<string, SentinelSenderActivity[]>();
-  for (const sender of input.senders) {
-    const own = byAddress.get(addressKey(sender.channel, sender.channelUserId));
-    const key = addressKey(sender.channel, own?.channelUserId ?? sender.channelUserId);
-    const group = bySender.get(key);
-    if (group) group.push(sender);
-    else bySender.set(key, [sender]);
-  }
-  return new AccountFold(accounts, byAddress, bySender);
+  return { accounts, byAddress, activity };
 }
 
 /** One channel's address book, projected and indexed under every address its
@@ -230,65 +304,76 @@ async function readPlane(
   channel: string,
   plane: MirrorPlane,
   stored: readonly StoredAddress[],
-): Promise<{ accounts: MirrorAccount[]; byAddress: Map<string, MirrorAccount> }> {
+  options: { activity: boolean },
+): Promise<{
+  accounts: MirrorAccount[];
+  byAddress: Map<string, MirrorAccount>;
+  activity: Map<string, AccountRecord>;
+}> {
   // Every read this channel owes, issued in one batch so the plane serves them
   // all from a single fold of its address book. The stored addresses are
-  // resolved without waiting to learn which of them the address map already
-  // covers: a channel can accept an address it stores no row for — LinkedIn
-  // derives a member id from a profile URL naming it — and asking after the map
+  // resolved without waiting to learn which of them the listing already covers:
+  // a channel can accept an address it stores no row for — LinkedIn derives a
+  // member id from a profile URL naming it — and asking after the listing
   // arrived would fall outside the shared read and cost a second fold of the
   // whole address book.
-  const [listing, activity, addresses, resolved] = await Promise.all([
+  //
+  // The history read is the one thing that is conditional: a caller who only
+  // has to know who is one account skips it, and with it the channel's whole
+  // message store.
+  const [listing, seenBy, resolved] = await Promise.all([
     plane.listAccounts({ limit: WHOLE_LISTING }),
-    plane.listActivity(),
-    plane.listAddresses(),
+    options.activity ? plane.listActivity() : null,
     Promise.all(stored.map((address) => plane.resolve(address.channelUserId))),
   ]);
-
-  // The addressing set of each account, which is the address map read the other
-  // way round. An account carries all of them because a search reads them: an
-  // omitted address is a contact the guardian cannot reach by the phone number
-  // they know.
-  const aliasesOf = new Map<string, string[]>();
-  for (const [address, accountId] of addresses) {
-    const group = aliasesOf.get(accountId);
-    if (group) group.push(address);
-    else aliasesOf.set(accountId, [address]);
-  }
 
   const accounts: MirrorAccount[] = [];
   const byAddress = new Map<string, MirrorAccount>();
   const byId = new Map<string, MirrorAccount>();
+  const activity = new Map<string, AccountRecord>();
   for (const account of listing.accounts) {
-    const seen = activity.get(account.id);
     const mirrored: MirrorAccount = {
       channel,
       channelUserId: account.id,
-      aliases: (aliasesOf.get(account.id) ?? [account.id]).sort(compareCodePoints),
+      // The account's own addressing set, as the channel gave it. An account
+      // carries all of them because a search reads them: an omitted address is
+      // a contact the guardian cannot reach by the phone number they know. An
+      // account the channel holds no address for still answers to its id.
+      aliases: (account.addresses.length > 0 ? [...account.addresses] : [account.id]).sort(
+        compareCodePoints,
+      ),
       name: account.name,
-      latest:
-        seen == null
-          ? null
-          : { source: channel, timestamp: seen.lastMessageAt, preview: seen.lastMessagePreview },
-      messageCount: seen?.messageCount ?? 0,
     };
     accounts.push(mirrored);
     byId.set(account.id, mirrored);
     for (const alias of mirrored.aliases) byAddress.set(addressKey(channel, alias), mirrored);
+    if (seenBy) {
+      // An entry for every listed account, activity or not: its presence is
+      // what says the mirror holds this account, which is what decides whose
+      // message count a record reports.
+      const seen = seenBy.get(account.id);
+      activity.set(addressKey(channel, account.id), {
+        latest:
+          seen == null
+            ? null
+            : { source: channel, timestamp: seen.lastMessageAt, preview: seen.lastMessagePreview },
+        messageCount: seen?.messageCount ?? 0,
+      });
+    }
   }
 
-  // A stored address the channel's address map did not cover. Left unfolded, a
-  // mapping written in that form is a second account for someone the caller
-  // already lists, and half their history hangs off it. The address stays as
-  // the caller gave it: this is the fold, not a new alias to publish.
+  // A stored address no listed account named. Left unfolded, a mapping written
+  // in that form is a second account for someone the caller already lists, and
+  // half their history hangs off it. The address stays as the caller gave it:
+  // this is the fold, not a new alias to publish.
   stored.forEach((address, i) => {
-    if (addresses.has(address.channelUserId)) return;
+    if (byAddress.has(addressKey(channel, address.channelUserId))) return;
     const found = resolved[i];
     const account = found && byId.get(found.id);
     if (account) byAddress.set(addressKey(channel, address.channelUserId), account);
   });
 
-  return { accounts, byAddress };
+  return { accounts, byAddress, activity };
 }
 
 /**

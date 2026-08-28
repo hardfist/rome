@@ -492,7 +492,6 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
       </DropdownMenuTrigger>
       <DropdownMenuContent side="bottom" align="end">
         <DropdownMenuItem
-          className="text-ui"
           onSelect={() => {
             // Freeze which apps are "new" before persisting "seen", so the
             // badges survive the acknowledgement for this edit session.

@@ -2,22 +2,18 @@ import { GitFork } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import type { TFunction } from "i18next";
 import type { InstalledAppCard } from "@rome/api-types/apps";
+import { LISTING_HANDLE_PATTERN, parseListingId } from "@/lib/app-listing-id";
 import { RomeInputDialog } from "@/components/rome-input-dialog";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
-
-const REMIX_HANDLE_PATTERN = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/;
-const REMIX_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}[a-z0-9]$/;
+import { APP_REMIX_SKILL } from "@/lib/app-remix";
 
 function parseRemixName(value: string): { name: string; appId: string } | null {
   const name = value.trim();
-  if (!name.startsWith("@")) return null;
-  const slash = name.indexOf("/");
-  if (slash < 0 || name.indexOf("/", slash + 1) >= 0) return null;
-  const handle = name.slice(1, slash);
-  const slug = name.slice(slash + 1);
-  if (!REMIX_HANDLE_PATTERN.test(handle) || !REMIX_SLUG_PATTERN.test(slug)) return null;
-  if (handle === slug || !/^[a-z]/.test(handle)) return null;
+  const parsed = parseListingId(name);
+  if (!parsed?.scoped || !/^[a-z]/.test(parsed.handle)) return null;
+  const { handle, slug } = parsed;
   const appId = `${handle}-${slug.replaceAll("_", "-")}`;
   if (appId.length > 64) return null;
   return { name, appId };
@@ -30,16 +26,10 @@ export function canRemixApp(app: InstalledAppCard): boolean {
 export function appRemixDraft(
   app: InstalledAppCard,
   target: { name: string; appId: string },
+  t: TFunction<"apps">,
 ): string {
-  const listing = app.source.mode === "appstore" ? app.source.listingId : app.id;
   const version = app.source.mode === "appstore" ? app.source.version : app.version;
-  return [
-    `Use the \`app_remix\` skill to remix the installed app \`${app.id}\` as \`${target.name}\` (\`${target.appId}\`).`,
-    "",
-    `Source: \`${listing}\` v${version}. Keep the source app unchanged.`,
-    "",
-    "I want to add: ",
-  ].join("\n");
+  return t("installed.remixDialog.prompt", { app: app.id, version, name: target.name });
 }
 
 interface AppRemixDialogProps {
@@ -53,9 +43,10 @@ export function AppRemixDialog({ app, onClose }: AppRemixDialogProps) {
   const { data: identity } = useDashboardIdentity();
   const [error, setError] = useState<string | null>(null);
   const guardianHandle =
-    identity?.kind === "guardian" && REMIX_HANDLE_PATTERN.test(identity.userId)
+    identity?.kind === "guardian" && LISTING_HANDLE_PATTERN.test(identity.userId)
       ? identity.userId
       : null;
+  const sourceSlug = app?.id.split("/").at(-1);
 
   useEffect(() => setError(null), [app]);
 
@@ -74,8 +65,8 @@ export function AppRemixDialog({ app, onClose }: AppRemixDialogProps) {
     close();
     navigate("/chat", {
       state: {
-        draft: appRemixDraft(app, target),
-        skill: "app_remix",
+        draft: appRemixDraft(app, target, t),
+        skill: APP_REMIX_SKILL,
       },
     });
   };
@@ -91,8 +82,8 @@ export function AppRemixDialog({ app, onClose }: AppRemixDialogProps) {
         version: app?.version ?? "",
       })}
       inputLabel={t("installed.remixDialog.nameLabel")}
-      inputPlaceholder={app ? `@username/${app.id}` : undefined}
-      initialValue={app && guardianHandle ? `@${guardianHandle}/${app.id}` : ""}
+      inputPlaceholder={sourceSlug ? `@username/${sourceSlug}` : undefined}
+      initialValue={sourceSlug && guardianHandle ? `@${guardianHandle}/${sourceSlug}` : ""}
       confirmLabel={t("installed.remixDialog.confirm")}
       cancelLabel={t("installed.remixDialog.cancel")}
       error={error}

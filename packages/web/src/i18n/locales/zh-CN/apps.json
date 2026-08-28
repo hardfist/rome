@@ -135,7 +135,8 @@
       "nameLabel": "新应用名称",
       "invalidName": "请使用 @ray/calendar 这样的名称，其中用户名应为小写。",
       "confirm": "在聊天中继续",
-      "cancel": "取消"
+      "cancel": "取消",
+      "prompt": "我想要 remix 已安装的 {{app}} app 的 {{version}} 版本，新应用命名为 {{name}}，添加功能如下：\n\n"
     },
     "publishSuccess": "已将 {{name}} v{{version}} 发布到应用商店。",
     "publishDialog": {
@@ -236,6 +237,17 @@
       "loadFailed": "加载详情失败",
       "installFailed": "安装应用失败"
     }
+  },
+  "remixStore": {
+    "prompt": "我想要 remix {{app}} app 的 {{version}} 版本，添加功能如下：\n\n",
+    "title": "Remix 此应用？",
+    "description": "创建自己的副本，在聊天中描述修改需求。原应用及其数据保持不变。",
+    "installNotice": "发送聊天消息后才会开始。Rome 会从此版本创建独立项目，不会安装或改动原应用。",
+    "confirm": "是，在聊天中继续",
+    "cancel": "否，取消",
+    "invalidLink": "此 Remix 链接需要有效的应用商店 ID 和确切版本号。",
+    "unavailable": "此版本已不可用，或未包含 Remix 所需的源码。",
+    "loadFailed": "无法向应用商店确认此应用，请重试。"
   },
   "install": {
     "loading": "加载应用信息中...",

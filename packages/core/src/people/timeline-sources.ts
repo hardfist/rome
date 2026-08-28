@@ -1,31 +1,68 @@
-// One adapter per message store a person's history can come from, and the
-// order they claim an account in. The seam and the merge are in timeline.ts;
-// the SQL plumbing every adapter here shares is in timeline-sql.ts.
+// Which stores a person's history comes from, and the order they claim an
+// account in. The stores themselves are the channels' — one `Messages` adapter
+// each, in channels/ — and the merge over them is timeline.ts's.
 //
-// Direct threads only. Each adapter scopes itself by the account's own
-// addresses, so a group conversation — addressed by the group rather than by
-// the person — never reaches a person's timeline.
+// Also the fold from a person's channel mappings to the accounts those stores
+// are read for, since the two are the same question asked of one channel: which
+// addresses are one account, and what was said at them.
+//
+// The `TimelineSource` adapters below the list are the previous shape of the
+// same four stores, and nothing calls them any more; the SQL plumbing they
+// share is in timeline-sql.ts.
+//
+// Direct threads only, on either shape. Each adapter scopes itself by the
+// account's own addresses, so a group conversation — addressed by the group
+// rather than by the person — never reaches a person's timeline.
 
 import { sql } from "drizzle-orm";
 import type { TalkAccounts } from "../channels/accounts.js";
+import { linkedInMessages } from "../channels/linkedin-messages.js";
+import type { Messages } from "../channels/messages.js";
+// How a stored agent message reads — which way it went, and the line it
+// renders as — defined once beside the `Messages` store over the same rows.
+import {
+  agentMessageOutbound,
+  agentMessages,
+  messageContentText,
+} from "../channels/messages-agent.js";
+import { sentinelLogMessages } from "../channels/messages-sentinel.js";
+import { whatsAppMessages } from "../channels/whatsapp-messages.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { MessagePart } from "../types.js";
 import type { TimelineAccount, TimelineSource } from "./timeline.js";
 import { accountPairs, addressesOn, inList, sqlTimelineSource } from "./timeline-sql.js";
 
 /**
- * The stores a person's timeline is read from, in the order they claim an
- * account.
+ * The stores a person's history is read from, in the order they claim an
+ * account — the list `assignAccounts` walks, for the page and for the listing
+ * row alike.
  *
- * The order is the precedence the seam's {@link TimelineSource} contract
- * describes: a channel mirror holds the conversation as the channel has it, so
- * it outranks Rome's own transcript of the same messages, which in turn
- * outranks the sentinel's triage record. An account only the sentinel saw still
- * gets its exchanges — the sentinel is last, not excluded.
+ * The order is a precedence: a channel mirror holds the conversation as the
+ * channel has it, so it outranks Rome's own transcript of the same messages,
+ * which in turn outranks the sentinel's triage record. An account only the
+ * sentinel saw still gets its exchanges — the sentinel is last, not excluded.
  *
  * The cost of that precedence: an account with a mirrored conversation shows
  * the conversation, and the sentinel's own record of an exchange inside it
  * stays behind Rome's reply as the channel delivered it.
+ *
+ * Adding a store is one more `Messages` adapter appended here. Nothing above
+ * knows how many there are or what they read.
+ */
+export function personMessageStores(deps: { db: DrizzleDb }): Messages[] {
+  return [
+    whatsAppMessages(deps.db),
+    linkedInMessages(deps.db),
+    agentMessages(deps.db),
+    sentinelLogMessages(deps.db),
+  ];
+}
+
+/**
+ * The same four stores as {@link TimelineSource}s.
+ *
+ * @deprecated Nothing reads a person's history through these any more —
+ * {@link personMessageStores} is the list both the timeline and the people
+ * listing walk. Kept only until the account directory moves over too.
  */
 export function personTimelineSources(deps: { db: DrizzleDb }): TimelineSource[] {
   return [
@@ -126,15 +163,17 @@ export function agentMessagesSource(db: DrizzleDb): TimelineSource {
           s.source_channel AS source,
           s.source_thread_id AS address,
           m.created_at AS at,
-          CASE WHEN m.role = 'assistant' THEN 1 ELSE 0 END AS outbound,
+          ${agentMessageOutbound(sql`m.role`, sql`m.sender_id`)} AS outbound,
           'agent:' || m.id AS ref,
           m.content AS body
         FROM rome_agent_messages m
         JOIN rome_sessions s ON s.id = m.session_id
         WHERE s.type = 'channel'
           AND ${addressed}
-          -- 'notification' is an inbound message that did not wake the agent;
-          -- it is still something the person said. 'trace' is the turn's
+          -- 'notification' is a line that passed outside a turn — something
+          -- the person said without waking the agent, or something Rome sent
+          -- untied to one. Either way it is conversation, and the direction
+          -- above is what tells the two apart. 'trace' is the turn's own
           -- machinery and belongs to no conversation.
           AND m.role IN ('user', 'assistant', 'notification')`;
     },
@@ -208,7 +247,7 @@ export function sentinelLogSource(db: DrizzleDb): TimelineSource {
  * asking about a directory of people must not pay for one read per row.
  */
 export async function timelineAccounts(
-  deps: { whatsAppAccounts: TalkAccounts },
+  deps: { whatsAppAccounts: AddressBook },
   groups: readonly (readonly ChannelMapping[])[],
 ): Promise<TimelineAccount[][]> {
   const channels = new Set(groups.flatMap((group) => group.map((mapping) => mapping.channel)));
@@ -221,9 +260,13 @@ interface ChannelMapping {
   channelUserId: string;
 }
 
-/** Every address a channel folds onto an account, grouped by the account —
- *  the address map read the way the fold needs it, inverted once per request
- *  rather than re-scanned per person.
+/** The listing half of a channel's address book: the accounts, each carrying
+ *  every address it answers to. A separate address map is not asked for — the
+ *  listing already says which addresses are one account. */
+type AddressBook = Omit<TalkAccounts, "listAddresses">;
+
+/** Each channel's accounts, indexed the two ways the fold reads them: which
+ *  account an address belongs to, and every address of that account.
  *
  *  Read only for the channels the mappings name, since a plane costs a full
  *  address-book read. LinkedIn has a plane too but is deliberately absent: it
@@ -231,27 +274,33 @@ interface ChannelMapping {
  *  buy a whole mirror read and change no answer. It joins here when it starts
  *  storing a second addressing. */
 async function readAddressBooks(
-  deps: { whatsAppAccounts: TalkAccounts },
+  deps: { whatsAppAccounts: AddressBook },
   channels: ReadonlySet<string>,
-): Promise<Map<string, AddressBook>> {
-  const planes = new Map<string, TalkAccounts>([["whatsapp", deps.whatsAppAccounts]]);
-  const books = new Map<string, AddressBook>();
+): Promise<Map<string, FoldedBook>> {
+  const planes = new Map<string, AddressBook>([["whatsapp", deps.whatsAppAccounts]]);
+  const books = new Map<string, FoldedBook>();
   for (const [channel, accounts] of planes) {
     if (!channels.has(channel)) continue;
-    const addresses = await accounts.listAddresses();
-    const byAccount = new Map<string, string[]>();
-    for (const [address, accountId] of addresses) {
-      const folded = byAccount.get(accountId);
-      if (folded) folded.push(address);
-      else byAccount.set(accountId, [address]);
+    // One page big enough to hold the listing: its order is stable but the
+    // listing under it is not, so walking cursors across a live mirror would
+    // skip or repeat an account as an inbound message reordered it.
+    const { accounts: listing } = await accounts.listAccounts({ limit: WHOLE_LISTING });
+    const of = new Map<string, string>();
+    const folded = new Map<string, string[]>();
+    for (const account of listing) {
+      // The id among them, whether or not the channel spelled it out as an
+      // address: it is a form the account answers to.
+      const addresses = [...new Set([account.id as string, ...account.addresses])];
+      folded.set(account.id, addresses);
+      for (const address of addresses) of.set(address, account.id);
     }
-    books.set(channel, { of: addresses, folded: byAccount });
+    books.set(channel, { of, folded });
   }
   return books;
 }
 
-/** One channel's address map, and the same map read the other way round. */
-interface AddressBook {
+/** One channel's listing, indexed by address and by account. */
+interface FoldedBook {
   /** Which account each address belongs to. */
   of: Map<string, string>;
   /** Every address of each account. */
@@ -259,7 +308,7 @@ interface AddressBook {
 }
 
 function foldAccounts(
-  books: Map<string, AddressBook>,
+  books: Map<string, FoldedBook>,
   mappings: readonly ChannelMapping[],
 ): TimelineAccount[] {
   const byAccount = new Map<string, TimelineAccount>();
@@ -276,25 +325,6 @@ function foldAccounts(
   return [...byAccount.values()];
 }
 
-/** The line a stored agent message renders as: its text parts, joined.
- *  Non-text parts (cards, recaps, errors) carry no conversation, and content
- *  that does not parse is a row with nothing to show rather than a failed read. */
-function messageContentText(raw: string | null): string | null {
-  if (raw === null) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(parsed)) return null;
-  const text = parsed
-    .filter((part): part is Extract<MessagePart, { type: "text" }> => {
-      if (typeof part !== "object" || part === null) return false;
-      const candidate = part as { type?: unknown; content?: unknown };
-      return candidate.type === "text" && typeof candidate.content === "string";
-    })
-    .map((part) => part.content)
-    .join("\n");
-  return text.length > 0 ? text : null;
-}
+/** One page big enough to hold any listing — what `TalkAccounts.listAccounts`
+ *  says to ask for when a caller needs every account exactly once. */
+const WHOLE_LISTING = Number.MAX_SAFE_INTEGER;

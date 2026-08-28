@@ -537,7 +537,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 setOpenMenuId(null);
               }}
             >
-              <DropdownMenuItem className="text-ui" aria-keyshortcuts="P" onSelect={togglePin}>
+              <DropdownMenuItem aria-keyshortcuts="P" onSelect={togglePin}>
                 {session.pinnedAt ? (
                   <PinOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 ) : (
@@ -546,34 +546,25 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 {session.pinnedAt ? t("recentChats.unpinChat") : t("recentChats.pinChat")}
                 <DropdownMenuShortcut aria-hidden>P</DropdownMenuShortcut>
               </DropdownMenuItem>
-              <DropdownMenuItem className="text-ui" aria-keyshortcuts="R" onSelect={beginRename}>
+              <DropdownMenuItem aria-keyshortcuts="R" onSelect={beginRename}>
                 <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 {t("recentChats.rename")}
                 <DropdownMenuShortcut aria-hidden>R</DropdownMenuShortcut>
               </DropdownMenuItem>
               {session.archived ? (
-                <DropdownMenuItem
-                  className="text-ui"
-                  aria-keyshortcuts="A"
-                  onSelect={toggleArchive}
-                >
+                <DropdownMenuItem aria-keyshortcuts="A" onSelect={toggleArchive}>
                   <ArchiveRestore className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   {t("recentChats.unarchive")}
                   <DropdownMenuShortcut aria-hidden>A</DropdownMenuShortcut>
                 </DropdownMenuItem>
               ) : (
-                <DropdownMenuItem
-                  className="text-ui"
-                  aria-keyshortcuts="A"
-                  onSelect={toggleArchive}
-                >
+                <DropdownMenuItem aria-keyshortcuts="A" onSelect={toggleArchive}>
                   <Archive className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   {t("recentChats.archive")}
                   <DropdownMenuShortcut aria-hidden>A</DropdownMenuShortcut>
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem
-                className="text-ui"
                 variant="destructive"
                 onSelect={() => setPendingDeleteId(session.id)}
               >
@@ -655,10 +646,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="bottom" align="end">
-                  <DropdownMenuItem
-                    className="text-ui"
-                    onSelect={() => togglePinnedProject(projectPath)}
-                  >
+                  <DropdownMenuItem onSelect={() => togglePinnedProject(projectPath)}>
                     {pinned ? (
                       <PinOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
                     ) : (

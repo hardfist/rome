@@ -2,16 +2,17 @@ import {
   accountRef,
   BOND_LADDER,
   compareAccountCursors,
+  compareStreamCursors,
   formatWhatsAppPhone,
-  isSilentAccount,
   matchesQuery,
   normalizeBondLevel,
-  type AccountDirectory,
+  type AccountCounts,
   type AccountDynamic,
   type BondLadderLevel,
   type DirectoryAccount,
   type PersonCounts,
   type PersonResource,
+  type StreamAccount,
 } from "@rome/api-types/people";
 
 // The People page's derivations, kept out of the components so the stream, the
@@ -83,11 +84,32 @@ export interface PeopleRow {
    * than folding a second time and disagreeing.
    */
   addresses: string[];
+  /**
+   * The row's newest dynamic, or null when there is none — and null on every
+   * account row the directory read produced, which carries no activity at all.
+   * Only the stream renders it.
+   */
   latest: AccountDynamic | null;
+  /**
+   * How much is on record for the row. Zero on every account row: a person's
+   * count is the length of the timeline their dossier pages, and neither
+   * account read answers that question — the directory carries no activity at
+   * all, and the stream carries a preview and nothing beside it.
+   */
   messageCount: number;
-  /** An account with nothing on record that nobody has decided about: a synced
-   *  address-book contact and no more. Never true of a person. */
-  silent: boolean;
+}
+
+/**
+ * What a row says about activity, from whichever account read produced it.
+ *
+ * The directory is a contacts list and its rows carry nothing about what anyone
+ * said, so a row built from one reports none. A stream row is the other way
+ * round: it has a dynamic, which is why it is on the stream at all.
+ */
+function accountActivity(
+  account: DirectoryAccount | StreamAccount,
+): Pick<PeopleRow, "latest" | "messageCount"> {
+  return { latest: "latest" in account ? account.latest : null, messageCount: 0 };
 }
 
 /**
@@ -100,7 +122,7 @@ export interface PeopleRow {
  */
 export function peopleRows(
   people: readonly PersonResource[],
-  accounts: readonly DirectoryAccount[],
+  accounts: readonly (DirectoryAccount | StreamAccount)[],
 ): PeopleRow[] {
   const rows: PeopleRow[] = people.map((person) => ({
     kind: "person",
@@ -113,7 +135,6 @@ export function peopleRows(
     addresses: person.accounts.map((account) => account.channelUserId),
     latest: person.latest,
     messageCount: person.messageCount,
-    silent: false,
   }));
 
   for (const account of accounts) {
@@ -131,9 +152,7 @@ export function peopleRows(
         },
       ],
       addresses: account.addresses,
-      latest: account.latest,
-      messageCount: account.messageCount,
-      silent: isSilentAccount(account),
+      ...accountActivity(account),
     });
   }
 
@@ -174,14 +193,28 @@ export function searchRows(rows: readonly PeopleRow[], query: string): PeopleRow
   return rows.filter((row) => rowMatchesQuery(row, q));
 }
 
-/** The stream's order, and the directory's within a group: newest first, rows
- *  that have never done anything last, ties broken by name and then id so the
- *  sequence is total. The identity stream's order rather than a second one that
- *  happens to agree. */
+/** The stream's order: newest first, rows that have never done anything last,
+ *  ties broken by name and then id so the sequence is total. The account
+ *  stream's order rather than a second one that happens to agree. */
 export function compareRows(a: PeopleRow, b: PeopleRow): number {
-  return compareAccountCursors(
+  return compareStreamCursors(
     { timestamp: a.latest?.timestamp ?? null, displayName: a.displayName, id: a.id },
     { timestamp: b.latest?.timestamp ?? null, displayName: b.displayName, id: b.id },
+  );
+}
+
+/**
+ * The directory's order, within a group: by display name, ties broken by id so
+ * the sequence is total.
+ *
+ * The account contract's own directory order, which is what the server pages
+ * by. A second ordering that happened to agree would disagree at a page
+ * boundary, and the guardian would read one contact twice.
+ */
+export function compareRowsByName(a: PeopleRow, b: PeopleRow): number {
+  return compareAccountCursors(
+    { displayName: a.displayName, ref: a.id },
+    { displayName: b.displayName, ref: b.id },
   );
 }
 
@@ -234,35 +267,31 @@ export interface PeopleGroup {
 }
 
 /**
- * The directory's groups, in ladder order, after the chip, the search box and
- * the silent-contact toggle have each had their say.
+ * The directory's groups, in ladder order, after the chip and the search box
+ * have each had their say.
+ *
+ * Every contact Rome holds is in here: a contacts app hides nobody, and a
+ * roster that held the address book back would answer "no such contact" for
+ * someone the mirror has.
  *
  * Guardian survives every filter: a roster that hid it would read as "you are
  * not in your own people list". Empty groups are dropped rather than rendered
- * as headings with nothing under them — except Unknown while the toggle is what
- * emptied it, since that heading is where the toggle lives.
+ * as headings with nothing under them.
  */
 export function directoryGroups(
   rows: readonly PeopleRow[],
-  options: { filter: PeopleFilter; search: string; showSilent: boolean },
+  options: { filter: PeopleFilter; search: string },
 ): PeopleGroup[] {
   const searching = options.search.trim() !== "";
   const matching = searchRows(rows, options.search);
-  // A search reaches the address book whatever the toggle says: a lookup that
-  // answered "no such contact" for someone the mirror holds is a worse answer
-  // than a long list.
-  const visible = matching.filter((row) => options.showSilent || searching || !row.silent);
 
   return GROUP_ORDER.map((level) => ({
     level,
-    rows: visible.filter((row) => row.level === level).sort(compareRows),
+    rows: matching.filter((row) => row.level === level).sort(compareRowsByName),
   })).filter((group) => {
-    const chipShows =
-      options.filter === "all" ? group.level !== "stranger" : group.level === options.filter;
-    if (group.level === "unknown" && !searching && chipShows) return true;
     if (group.rows.length === 0) return false;
     if (searching || group.level === "guardian") return true;
-    return chipShows;
+    return options.filter === "all" ? group.level !== "stranger" : group.level === options.filter;
   });
 }
 
@@ -271,44 +300,30 @@ export function directoryGroups(
 export type LevelCounts = Record<RowLevel, number>;
 
 /**
- * The two sets of numbers this page renders — the server's, from both reads at
- * once, and meant to disagree.
+ * How many rows sit at each ladder position, from both reads at once.
  *
- * `chips` is what a filter chip can show: what is *waiting on a decision*. A
- * contact the address book synced and nobody has ever heard from is not waiting
- * on anything, so it is not counted, whether or not the directory is currently
- * showing it.
+ * Off the reads rather than the loaded rows. The account read pages, so a tally
+ * over what happened to arrive would report no waiting senders whenever placed
+ * people filled page one.
  *
- * `totals` is what a directory heading counts: everyone in the group as the
- * roster currently stands, silent contacts included once the toggle has asked
- * for them — a heading answers "how many are in here".
- *
- * Both come off the reads rather than the loaded rows. The directory pages, so
- * a count taken over what happened to arrive would report no waiting senders
- * whenever placed people filled page one.
+ * What "unknown" counts is the account read's own answer, and the two views
+ * hand this different ones on purpose: the directory's read is the whole
+ * contacts list, so it counts everyone Rome has not placed, while the stream's
+ * is the accounts something has happened on, so it counts the senders actually
+ * waiting on a decision. Each number describes the listing the reader is
+ * looking at.
  *
  * A linked account is never counted twice: it is already counted under the
  * person it resolves to, which is the same rule that keeps it off the roster as
  * a row of its own.
  */
-export function levelCounts(
-  people: PersonCounts,
-  accounts: Pick<AccountDirectory, "counts" | "silentTotal">,
-  options: { includeSilent: boolean },
-): { chips: LevelCounts; totals: LevelCounts } {
-  const placed = {
+export function levelCounts(people: PersonCounts, accounts: AccountCounts): LevelCounts {
+  return {
     guardian: people.guardian,
     "inner-circle": people["inner-circle"],
     acquaintance: people.acquaintance,
     other: people.other,
-    stranger: accounts.counts.dismissed,
-  };
-  // `counts` describes what the request admitted, so the silent contacts are in
-  // it exactly when the toggle asked for them — and taking them back out is
-  // what keeps the chip counting the same thing in both views.
-  const waiting = accounts.counts.unlinked - (options.includeSilent ? accounts.silentTotal : 0);
-  return {
-    chips: { ...placed, unknown: waiting },
-    totals: { ...placed, unknown: accounts.counts.unlinked },
+    stranger: accounts.dismissed,
+    unknown: accounts.unlinked,
   };
 }

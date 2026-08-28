@@ -203,6 +203,52 @@
       }
     }
   },
+  "appKeys": {
+    "title": "App keys",
+    "subtitle": "Passwords and API keys that apps on your Rome can use.",
+    "back": "Connections",
+    "openLabel": "Open App keys",
+    "keyCount_one": "{{count}} key",
+    "keyCount_other": "{{count}} keys",
+    "noKeysYet": "None yet",
+    "loading": "Loading app keys",
+    "errorTitle": "App keys couldn't be loaded",
+    "emptyTitle": "No app keys yet",
+    "emptyBody": "Add a key when an app asks for one — like a database password or an API key.",
+    "add": "Add key",
+    "overridden": "Overridden by server settings",
+    "overriddenHint": "A server environment variable with this name takes precedence, so this stored value is not used.",
+    "replace": "Replace",
+    "remove": "Remove",
+    "removeTitle": "Remove {{name}}?",
+    "removeBody": "Apps will no longer be able to read this value. This can't be undone.",
+    "table": {
+      "key": "Key",
+      "value": "Value",
+      "actions": "Actions"
+    },
+    "valueHidden": "Value hidden",
+    "form": {
+      "titleAdd": "New key",
+      "titleReplace": "Replace {{name}}",
+      "close": "Close",
+      "labelField": "What is this key for?",
+      "labelPlaceholder": "e.g. My shop database password",
+      "nameField": "Name apps use",
+      "namePlaceholder": "e.g. SHOP_DB_PASSWORD",
+      "nameHint": "Uppercase letters, digits, and underscores.",
+      "valueField": "Secret value",
+      "valueHint": "Rome keeps this hidden after you save it. To change it later, you'll retype it.",
+      "valueRequired": "Enter the secret value.",
+      "consent": "Any app installed on your Rome will be able to read this.",
+      "save": "Save for all apps",
+      "saving": "Saving…",
+      "cancel": "Cancel"
+    },
+    "saved": "Saved. Apps can now read {{name}}.",
+    "savedOverridden": "Saved, but a server setting with the same name takes precedence — the value you entered is not in use.",
+    "removed": "Removed {{name}}."
+  },
   "trust": {
     "title": "Bond Level Rules",
     "trustedLevels": {

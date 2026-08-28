@@ -5,14 +5,14 @@ import {
   compareDisplayNames,
   compareTimelineEntries,
   comparePeople,
-  encodeAccountCursor,
+  encodeStreamCursor,
   latestDynamic,
   normalizeBondLevel,
-  parseAccountCursor,
+  parseStreamCursor,
   parseTimelineCursor,
   personMatchesQuery,
   timelineCursor,
-  type AccountCursor,
+  type StreamCursor,
   type DirectoryAccount,
   type PersonResource,
   type TimelineEntry,
@@ -61,8 +61,6 @@ const account = (
   state: "unlinked",
   personId: null,
   personName: null,
-  messageCount: 0,
-  latest: null,
   ...over,
 });
 
@@ -95,8 +93,8 @@ describe("timeline cursor", () => {
   });
 });
 
-describe("account cursor", () => {
-  const cursor = (over: Partial<AccountCursor> = {}): AccountCursor => ({
+describe("stream cursor", () => {
+  const cursor = (over: Partial<StreamCursor> = {}): StreamCursor => ({
     timestamp: 300,
     displayName: "a|b",
     id: "whatsapp:41|7",
@@ -107,20 +105,20 @@ describe("account cursor", () => {
     // A display name is guardian-supplied text and an id carries a jid, so
     // neither can be trusted to avoid the separator: an unescaped one shifts
     // the split and resumes the page at a position no row occupies.
-    expect(parseAccountCursor(encodeAccountCursor(cursor()))).toEqual(cursor());
+    expect(parseStreamCursor(encodeStreamCursor(cursor()))).toEqual(cursor());
   });
 
   it("round-trips a row that has never done anything", () => {
     expect(
-      parseAccountCursor(encodeAccountCursor(cursor({ timestamp: null })))?.timestamp,
+      parseStreamCursor(encodeStreamCursor(cursor({ timestamp: null })))?.timestamp,
     ).toBeNull();
   });
 
   it("rejects a value that is not a cursor", () => {
-    expect(parseAccountCursor("whatsapp:a")).toBeNull();
-    expect(parseAccountCursor("nope|nope|")).toBeNull();
-    expect(parseAccountCursor("%E0%A4%A|a|whatsapp:a")).toBeNull();
-    expect(parseAccountCursor(null)).toBeNull();
+    expect(parseStreamCursor("whatsapp:a")).toBeNull();
+    expect(parseStreamCursor("nope|nope|")).toBeNull();
+    expect(parseStreamCursor("%E0%A4%A|a|whatsapp:a")).toBeNull();
+    expect(parseStreamCursor(null)).toBeNull();
   });
 });
 

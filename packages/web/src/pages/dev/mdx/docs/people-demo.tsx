@@ -53,7 +53,6 @@ function row(
     addresses: account ? [account.channelUserId] : [],
     latest: null,
     messageCount: 0,
-    silent: false,
     ...over,
   };
 }
@@ -294,10 +293,10 @@ const DIRECTORY: { level: RowLevel; total: number; rows: PeopleRow[] }[] = [
         displayName: "Ana Ruiz",
         level: "acquaintance",
         kind: "account",
+        // Synced from an address book and never messaged. The directory holds
+        // nobody back, and its row says the same thing about them it says about
+        // everyone: who they are, and where to reach them.
         accounts: on("whatsapp", "34600555321@s.whatsapp.net"),
-        // Synced from an address book and never messaged: the row says so
-        // where a handle would otherwise sit.
-        silent: true,
       }),
     ],
   },

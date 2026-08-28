@@ -1453,6 +1453,11 @@ export interface TalkRouter {
 export interface ChannelMessageHook {
   register(): Promise<void>;
   registerConnection(connectionId: string, service: string): void;
+  /** Detach every subscription `register`/`registerConnection` took out, so
+   * the host can swap in a replacement instance (e.g. after an app-keys
+   * environment change) without double-handling inbound messages. A hook
+   * without this method cannot be hot-swapped and stays live until restart. */
+  unregister?(): void;
 }
 
 export interface ActionRunContext {
@@ -2265,7 +2270,14 @@ export type AppLifecycleCreateParams =
   | {
       appId: string;
       name: string;
-      from: { appId: string };
+      /** Copies local installed code or downloads a pinned Store bundle; never installs the source. */
+      from:
+        | {
+            appId: string;
+            /** Reject a source changed since the user confirmed this Store version. */
+            expectedSource?: { listingId: string; version: string; contentHash: string };
+          }
+        | { listingId: string; version: string; contentHash: string };
       rootPath?: never;
       template?: never;
     };

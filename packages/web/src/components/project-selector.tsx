@@ -1,6 +1,6 @@
 import { forwardRef, useMemo, useRef, type Ref } from "react";
 import type { TFunction } from "i18next";
-import { Check, ChevronDown, Folder, FolderPlus, X } from "lucide-react";
+import { Check, ChevronDown, FolderPlus, X } from "lucide-react";
 import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import {
   Command,
@@ -131,24 +131,19 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
         <PopoverTrigger asChild>
           <Button
             type="button"
-            variant="ghost"
-            size="md"
-            className={cn(
-              "group relative max-w-[200px] touch-target",
-              isDefault
-                ? "bg-surface-muted/60 text-muted-foreground hover:bg-surface-muted"
-                : "bg-surface-muted text-foreground hover:bg-surface-hover",
-            )}
+            // The fill is the variant's job: transparent while the default
+            // project is in play, filled once a real one is, and each variant
+            // carries its own open-state fill through `aria-expanded`. `ghost`
+            // sets no resting colour, so the label takes one or it reads as the
+            // loudest thing in a row of muted chrome.
+            variant={isDefault ? "ghost" : "secondary"}
+            size="sm"
+            className={cn("max-w-[200px] touch-target", isDefault && "text-muted-foreground")}
             title={isDefault ? t("project.buttonLabel") : draftProjectLabel}
             aria-label={t("project.buttonLabel")}
           >
-            <Folder
-              className="size-3.5 shrink-0"
-              fill={isDefault ? "none" : "currentColor"}
-              aria-hidden
-            />
             <span className="truncate">{isDefault ? defaultProjectName : draftProjectLabel}</span>
-            <ChevronDown className="size-3 shrink-0 opacity-50" aria-hidden />
+            <ChevronDown data-icon="inline-end" aria-hidden="true" />
           </Button>
         </PopoverTrigger>
 

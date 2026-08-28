@@ -57,6 +57,8 @@ import { createAccountNames } from "../channels/account-names.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
+import { AppKeysRepository } from "../db/repositories/app-keys.js";
+import { AppKeyInjector } from "../app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
@@ -119,6 +121,30 @@ export function createTestDb(): TestDb {
     db,
     close: () => sqlite.close(),
   };
+}
+
+// countingDb — a database that records how many passes are made over it
+
+/**
+ * `db` with every read counted, for a test that asserts how many times a store
+ * was walked rather than what it answered.
+ *
+ * Only `all` is counted, which is the one verb a read-only SQL adapter uses.
+ * Everything else — the inserts a test seeds with, the schema it seeds into —
+ * passes through untouched and uncounted.
+ */
+export function countingDb(db: DrizzleDb): { db: DrizzleDb; passes: () => number } {
+  let passes = 0;
+  const counted = new Proxy(db, {
+    get(target, property, receiver) {
+      if (property !== "all") return Reflect.get(target, property, receiver);
+      return (...args: Parameters<DrizzleDb["all"]>) => {
+        passes += 1;
+        return target.all(...args);
+      };
+    },
+  });
+  return { db: counted as DrizzleDb, passes: () => passes };
 }
 
 // MockModelProvider — returns predetermined AgentMessage sequences
@@ -385,6 +411,10 @@ export async function buildTestDeps(
   });
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
+  // A private env object per deps bag: route tests exercise apply/remove
+  // without touching the real process.env of the test runner.
+  const appKeysRepo = new AppKeysRepository(db);
+  const appKeyInjector = new AppKeyInjector({});
   const policiesRepo = new PoliciesRepository(db);
   const webchatRepo = new WebChatRepository(db);
   const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
@@ -548,6 +578,11 @@ export async function buildTestDeps(
     approvalHandler,
     backendTurnRunner,
     settingsRepo,
+    appKeysRepo,
+    appKeyInjector,
+    // Production's refresh also salts the module cache and reloads hook
+    // chains; the deps bag has neither, so mirror the worker-pool slice.
+    refreshAppRuntime: () => actionEngine.restartWorkerWarmPool(),
     appRuntimeRepositories,
     policiesRepo,
     webchatRepo,

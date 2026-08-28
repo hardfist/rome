@@ -10,20 +10,25 @@ import {
   parseAccountCursor,
   parseAccountState,
   parsePersonFilterLevel,
+  parseStreamCursor,
   personMatchesLevel,
   personMatchesQuery,
   sliceAccountDirectory,
+  sliceAccountStream,
+  type AccountDynamic,
   type DirectoryAccount,
   type PersonResource,
+  type StreamAccount,
 } from "@rome/api-types/people";
 import i18n from "@/i18n";
 import PeoplePage from "./PeoplePage";
 
 // The People page as the guardian drives it: a stream that routes to whoever
-// has something new, and a directory that reads the roster. The derivations
-// behind grouping and counts are pinned in `people/people-model.test.ts`; what
-// is under test here is the page wiring — which request a control sends, what
-// it shows afterwards, and where a click takes the guardian.
+// has something new, and a directory — a contacts list — that reads the roster.
+// The derivations behind grouping and counts are pinned in
+// `people/people-model.test.ts`; what is under test here is the page wiring —
+// which of the two account reads a view sends, what it shows afterwards, and
+// where a click takes the guardian.
 //
 // The backend is stubbed through the contract's own helpers rather than
 // restated, so a fixture cannot drift from the routes on ordering, filtering,
@@ -91,7 +96,25 @@ const QUIET_PERSON: PersonResource = {
   latest: null,
 };
 
-const UNKNOWN_SENDER: DirectoryAccount = {
+/**
+ * One account as the world holds it: the contacts-list row, plus the activity
+ * the stream read would project. Neither read answers this shape — `directoryRow`
+ * and `streamRow` below cut it down to the one each contract carries.
+ */
+type WorldAccount = DirectoryAccount & {
+  latest: AccountDynamic | null;
+  messageCount: number;
+};
+
+const directoryRow = ({ latest: _l, messageCount: _c, ...row }: WorldAccount): DirectoryAccount =>
+  row;
+
+const streamRow = (account: WorldAccount): StreamAccount | null =>
+  account.latest == null
+    ? null
+    : { ...directoryRow(account), latest: account.latest, messageCount: account.messageCount };
+
+const UNKNOWN_SENDER: WorldAccount = {
   channel: "whatsapp",
   channelUserId: "6591234472@s.whatsapp.net",
   addresses: ["6591234472", "6591234472@s.whatsapp.net"],
@@ -103,7 +126,7 @@ const UNKNOWN_SENDER: DirectoryAccount = {
   messageCount: 12,
 };
 
-const SILENT_CONTACT: DirectoryAccount = {
+const SILENT_CONTACT: WorldAccount = {
   channel: "whatsapp",
   channelUserId: "6588021147@s.whatsapp.net",
   addresses: ["6588021147@s.whatsapp.net"],
@@ -115,7 +138,7 @@ const SILENT_CONTACT: DirectoryAccount = {
   messageCount: 0,
 };
 
-const DISMISSED: DirectoryAccount = {
+const DISMISSED: WorldAccount = {
   channel: "whatsapp",
   channelUserId: "447700900123@s.whatsapp.net",
   addresses: ["447700900123@s.whatsapp.net"],
@@ -127,7 +150,7 @@ const DISMISSED: DirectoryAccount = {
   messageCount: 6,
 };
 
-const LINKED_ACCOUNT: DirectoryAccount = {
+const LINKED_ACCOUNT: WorldAccount = {
   channel: "telegram",
   channelUserId: "418820113",
   addresses: ["418820113"],
@@ -142,7 +165,7 @@ const LINKED_ACCOUNT: DirectoryAccount = {
 /** The world both reads are served from, and every write applies to. */
 interface World {
   people: PersonResource[];
-  accounts: DirectoryAccount[];
+  accounts: WorldAccount[];
   peopleFail: boolean;
   accountsFail: boolean;
 }
@@ -199,7 +222,7 @@ function applyWrite(
   body: WriteBody,
   json: Json,
 ): Response {
-  const holder = (account: DirectoryAccount) => ({
+  const holder = (account: WorldAccount) => ({
     id: account.personId ?? "",
     displayName: account.personName ?? "",
   });
@@ -214,7 +237,7 @@ function applyWrite(
     if (!account) return json({ error: "Unknown account" }, 404);
     if (account.state === "linked") return json(linkConflict(account, holder(account)), 409);
     account.state = verb === "dismiss" ? "dismissed" : "unlinked";
-    return json(account);
+    return json(directoryRow(account));
   }
 
   if (path === "/api/people" && method === "POST") {
@@ -280,7 +303,7 @@ function applyWrite(
  * hands back a different world rather than a patched local state.
  */
 function mockApi(
-  world: { people?: PersonResource[]; accounts?: DirectoryAccount[] } = {},
+  world: { people?: PersonResource[]; accounts?: WorldAccount[] } = {},
   options: {
     limit?: number;
     peopleFail?: boolean;
@@ -321,15 +344,32 @@ function mockApi(
       return applyWrite(state, method, parsed.pathname, body ?? {}, json);
     }
 
+    // The two account reads over one world: the contacts list, and the recents
+    // surface. Which one the page asked for is the view's own answer, so a test
+    // that drove the wrong view reads the wrong rows rather than none.
+    if (parsed.pathname === "/api/accounts/stream") {
+      if (state.accountsFail) return json({ error: "directory unavailable" }, 500);
+      return json(
+        sliceAccountStream(
+          state.accounts.flatMap((account) => streamRow(account) ?? []),
+          {
+            query: params.get("q"),
+            state: parseAccountState(params.get("state")),
+            cursor: parseStreamCursor(params.get("cursor")),
+            limit: options.limit ?? null,
+          },
+        ),
+      );
+    }
+
     if (url.includes("/api/accounts")) {
       if (state.accountsFail) return json({ error: "directory unavailable" }, 500);
       return json(
-        sliceAccountDirectory(state.accounts, {
+        sliceAccountDirectory(state.accounts.map(directoryRow), {
           query: params.get("q"),
           state: parseAccountState(params.get("state")),
           cursor: parseAccountCursor(params.get("cursor")),
           limit: options.limit ?? null,
-          includeSilent: params.get("includeSilent") === "true",
         }),
       );
     }
@@ -433,8 +473,9 @@ describe("PeoplePage stream", () => {
     renderPage();
 
     await screen.findByText("Wei Chen");
-    // The silent contact is not waiting on a decision, so the browsing view's
-    // count leaves it out — and the number is the server's either way.
+    // The stream's read is the accounts something has happened on, so its count
+    // of unlinked ones is the senders waiting on a decision — a contact nobody
+    // has ever heard from is not one, and never reaches this view.
     await waitFor(() => expect(within(chip(/^Unknown/)).getByText("1")).toBeTruthy());
     expect(within(chip(/^All/)).queryByText(/^\d+$/)).toBeNull();
   });
@@ -473,18 +514,19 @@ describe("PeoplePage stream", () => {
     expect(await screen.findByText("person page")).toBeTruthy();
   });
 
-  it("searches the server, reaching contacts no page has loaded", async () => {
+  it("sends the search term to the server rather than filtering what loaded", async () => {
     const user = userEvent.setup();
-    const { calls } = mockApi({ people: [FRIEND], accounts: [SILENT_CONTACT] });
+    const { calls } = mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER] });
     renderPage();
 
     await screen.findByText("Wei Chen");
-    await user.type(screen.getByRole("searchbox", { name: /search people/i }), "jonas");
+    await user.type(screen.getByRole("searchbox", { name: /search people/i }), "rachel");
 
-    // A search reaches the address book whatever the toggle says — the
-    // endpoint's rule, and the reason the term goes to the server at all.
-    expect(await screen.findByText("Jonas Tan")).toBeTruthy();
-    await waitFor(() => expect(calls.some((c) => c.url.includes("q=jonas"))).toBe(true));
+    expect(await screen.findByText("Rachel Lim")).toBeTruthy();
+    await waitFor(() => expect(calls.some((c) => c.url.includes("q=rachel"))).toBe(true));
+    // The account read pages, so a filter over the rows that happened to arrive
+    // would answer "no such contact" for someone further down the listing.
+    expect(screen.queryByText("Wei Chen")).toBeNull();
   });
 
   it("sends one request for a typed word rather than one per letter", async () => {
@@ -515,47 +557,56 @@ describe("PeoplePage directory", () => {
     await screen.findByText("Wei Chen");
     await showDirectory(user);
 
-    // Everyone is in a group, the quiet person included — a roster answers
-    // "who does Rome know", not "who said something".
+    // Everyone is in a group, the quiet person and the address-book contact
+    // included — a contacts list answers "who does Rome know", not "who said
+    // something".
     expect(await screen.findByText("Nadia Petrova")).toBeTruthy();
     expect(screen.getByText("Zhangfan Dong")).toBeTruthy();
+    expect(screen.getByText("Jonas Tan")).toBeTruthy();
     // The heading's number is the directory's own, not the rows on screen.
     const unknown = screen.getByRole("heading", { name: "Unknown" }).parentElement!;
-    expect(within(unknown).getByText("1")).toBeTruthy();
+    expect(within(unknown).getByText("2")).toBeTruthy();
   });
 
-  it("offers the silent contacts it is holding back, and asks the server for them", async () => {
+  it("reads the contacts list rather than the stream, and shows no activity in it", async () => {
     const user = userEvent.setup();
-    const { calls } = mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER, SILENT_CONTACT] });
+    const { calls } = mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER] });
+    renderPage();
+
+    await screen.findByText("Wei Chen");
+    expect(screen.getByText("on my way")).toBeTruthy();
+    await showDirectory(user);
+
+    const accountReads = () =>
+      calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/accounts"));
+    await waitFor(() =>
+      expect(accountReads().some((c) => !c.url.startsWith("/api/accounts/stream"))).toBe(true),
+    );
+    // No preview and no count anywhere in the view — the read carries neither.
+    await waitFor(() => expect(screen.queryByText("on my way")).toBeNull());
+    expect(screen.queryByText("Are you free Saturday?")).toBeNull();
+    expect(screen.queryByText(/\d+ messages?/)).toBeNull();
+  });
+
+  it("still offers the placement gestures on an account nobody has decided about", async () => {
+    const user = userEvent.setup();
+    mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER] });
     renderPage();
 
     await screen.findByText("Wei Chen");
     await showDirectory(user);
 
-    // Browsing holds the address book back; the toggle says how many are there.
-    expect(screen.queryByText("Jonas Tan")).toBeNull();
-    await user.click(await screen.findByLabelText(/Include never-messaged contacts \(1\)/));
-
-    expect(await screen.findByText("Jonas Tan")).toBeTruthy();
-    await waitFor(() => expect(calls.some((c) => c.url.includes("includeSilent=true"))).toBe(true));
+    // The contacts row carries the same three verbs the stream's dense row does
+    // — the decision is available wherever the account is.
+    await screen.findByText("Rachel Lim");
+    expect(screen.getByRole("button", { name: "Create" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Link" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Treat as stranger" })).toBeTruthy();
   });
 
-  it("keeps the Unknown heading when the toggle is what emptied it", async () => {
+  it("pages the directory by name, resuming at the cursor the server named", async () => {
     const user = userEvent.setup();
-    mockApi({ people: [FRIEND], accounts: [SILENT_CONTACT] });
-    renderPage();
-
-    await screen.findByText("Wei Chen");
-    await showDirectory(user);
-
-    // The heading carries the toggle, so an address book with no waiting
-    // senders in front of it would otherwise have no way back on screen.
-    expect(await screen.findByRole("heading", { name: "Unknown" })).toBeTruthy();
-  });
-
-  it("pages the directory by the cursor the server named", async () => {
-    const user = userEvent.setup();
-    const second: DirectoryAccount = {
+    const second: WorldAccount = {
       ...UNKNOWN_SENDER,
       channelUserId: "6580001111@s.whatsapp.net",
       addresses: ["6580001111@s.whatsapp.net"],
@@ -565,17 +616,32 @@ describe("PeoplePage directory", () => {
     const { calls } = mockApi({ accounts: [UNKNOWN_SENDER, second] }, { limit: 1 });
     renderPage();
 
-    await user.click(chip(/^Unknown/));
-    // Newest first, so the older sender sits on the page after this one.
-    expect(await screen.findByText("Rachel Lim")).toBeTruthy();
-    expect(screen.queryByText("Priya Nair")).toBeNull();
+    await showDirectory(user);
+    // By name, so Priya comes first however recently Rachel said something.
+    expect(await screen.findByText("Priya Nair")).toBeTruthy();
+    expect(screen.queryByText("Rachel Lim")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Show more" }));
 
     // Appended, not swapped in: paging is reading further down a listing.
-    expect(await screen.findByText("Priya Nair")).toBeTruthy();
-    expect(screen.getByText("Rachel Lim")).toBeTruthy();
+    expect(await screen.findByText("Rachel Lim")).toBeTruthy();
+    expect(screen.getByText("Priya Nair")).toBeTruthy();
     expect(calls.some((c) => c.url.includes("cursor="))).toBe(true);
+  });
+
+  it("reaches a contact no page has loaded through the search box", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockApi({ people: [FRIEND], accounts: [SILENT_CONTACT] });
+    renderPage();
+
+    await screen.findByText("Wei Chen");
+    await showDirectory(user);
+    await user.type(screen.getByRole("searchbox", { name: /search people/i }), "jonas");
+
+    // The contacts list is where a lookup lands: every account is in it, and the
+    // term goes to the server rather than filtering whichever page arrived.
+    expect(await screen.findByText("Jonas Tan")).toBeTruthy();
+    await waitFor(() => expect(calls.some((c) => c.url.includes("q=jonas"))).toBe(true));
   });
 });
 

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { AccountDirectory, DirectoryAccount, PersonResource } from "@rome/api-types/people";
+import type {
+  AccountCounts,
+  DirectoryAccount,
+  PersonResource,
+  StreamAccount,
+} from "@rome/api-types/people";
 import {
   directoryGroups,
   levelCounts,
@@ -12,7 +17,12 @@ import {
 // The People page reads two nouns — a person and the accounts they are reachable
 // at — and renders one ladder over both. What is pinned here is the join: which
 // contract row becomes which ladder position, how the two interleave in the
-// stream, and whose numbers the chips and headings show.
+// stream, how the contacts list orders, and whose numbers the chips and headings
+// show.
+//
+// Two account shapes, because there are two account reads. `contact` is the
+// directory's row — everyone, and nothing about what was said. `spoke` is the
+// stream's — an account something has happened on, with the line to preview.
 
 const now = Math.floor(Date.now() / 1000);
 
@@ -28,7 +38,8 @@ function person(over: Partial<PersonResource> = {}): PersonResource {
   };
 }
 
-function account(over: Partial<DirectoryAccount> = {}): DirectoryAccount {
+/** One row of the contacts list. */
+function contact(over: Partial<DirectoryAccount> = {}): DirectoryAccount {
   const channelUserId = over.channelUserId ?? "883104221";
   return {
     channel: "telegram",
@@ -38,16 +49,18 @@ function account(over: Partial<DirectoryAccount> = {}): DirectoryAccount {
     state: "unlinked",
     personId: null,
     personName: null,
-    latest: { source: "telegram", timestamp: now - 300, preview: "is this the right number?" },
-    messageCount: 1,
     ...over,
   };
 }
 
-function directory(accounts: DirectoryAccount[], over: Partial<AccountDirectory> = {}) {
-  const counts = { unlinked: 0, linked: 0, dismissed: 0 };
-  for (const row of accounts) counts[row.state] += 1;
-  return { accounts, nextCursor: null, counts, silentTotal: 0, ...over } satisfies AccountDirectory;
+/** The same account on the stream, with the dynamic that put it there. */
+function spoke(over: Partial<StreamAccount> = {}): StreamAccount {
+  return {
+    ...contact(over),
+    latest: { source: "telegram", timestamp: now - 300, preview: "is this the right number?" },
+    messageCount: 1,
+    ...over,
+  };
 }
 
 const rowsOf = (rows: PeopleRow[]) => rows.map((row) => row.displayName);
@@ -65,8 +78,8 @@ describe("peopleRows", () => {
     const rows = peopleRows(
       [],
       [
-        account({ channelUserId: "1", state: "unlinked" }),
-        account({ channelUserId: "2", state: "dismissed" }),
+        contact({ channelUserId: "1", state: "unlinked" }),
+        contact({ channelUserId: "2", state: "dismissed" }),
       ],
     );
     expect(rows.map((row) => row.level)).toEqual(["unknown", "stranger"]);
@@ -79,7 +92,7 @@ describe("peopleRows", () => {
     const rows = peopleRows(
       [person()],
       [
-        account({
+        contact({
           channel: "telegram",
           channelUserId: "418820113",
           state: "linked",
@@ -98,7 +111,7 @@ describe("peopleRows", () => {
     const rows = peopleRows(
       [],
       [
-        account({
+        contact({
           channelUserId: "1555@s.whatsapp.net",
           addresses: ["1555", "1555@s.whatsapp.net"],
         }),
@@ -113,7 +126,7 @@ describe("streamRows", () => {
     const rows = peopleRows(
       [person({ latest: { source: "telegram", timestamp: now - 900, preview: "older" } })],
       [
-        account({
+        spoke({
           channelUserId: "new",
           displayName: "Devika",
           latest: { source: "whatsapp", timestamp: now - 60, preview: "newer" },
@@ -134,8 +147,8 @@ describe("streamRows", () => {
     const rows = peopleRows(
       [person()],
       [
-        account({ channelUserId: "waiting", displayName: "Jules" }),
-        account({ channelUserId: "spam", displayName: "Prize", state: "dismissed" }),
+        spoke({ channelUserId: "waiting", displayName: "Jules" }),
+        spoke({ channelUserId: "spam", displayName: "Prize", state: "dismissed" }),
       ],
     );
     expect(rowsOf(streamRows(rows, { search: "", filter: "all" }))).toEqual(["Ray Oster"]);
@@ -149,20 +162,26 @@ describe("streamRows", () => {
         person({ id: "me", displayName: "Mock Guardian", bondLevel: "guardian" }),
         person({ id: "quiet", displayName: "Nadia", latest: null, messageCount: 0 }),
       ],
-      [account({ channelUserId: "silent", displayName: "Jonas", latest: null, messageCount: 0 })],
+      [],
     );
     // A stream row is something that happened, and it is about somebody else.
+    // The read holds back the accounts nothing happened on; a person the
+    // guardian entered by hand is on the people listing either way, so this end
+    // of the rule is the client's.
     expect(rowsOf(streamRows(rows, { search: "", filter: "all" }))).toEqual([]);
   });
 
   it("lets a search reach the quiet ones, whatever chip is lit — guardian excepted", () => {
     const rows = peopleRows(
-      [person({ id: "me", displayName: "Mock Guardian", bondLevel: "guardian" })],
-      [account({ channelUserId: "silent", displayName: "Jonas Tan", latest: null })],
+      [
+        person({ id: "me", displayName: "Mock Guardian", bondLevel: "guardian" }),
+        person({ id: "quiet", displayName: "Nadia Petrova", latest: null, accounts: [] }),
+      ],
+      [],
     );
     // Someone typing a name wants that person wherever they sit on the ladder.
-    expect(rowsOf(streamRows(rows, { search: "jonas", filter: "inner-circle" }))).toEqual([
-      "Jonas Tan",
+    expect(rowsOf(streamRows(rows, { search: "nadia", filter: "inner-circle" }))).toEqual([
+      "Nadia Petrova",
     ]);
     expect(rowsOf(streamRows(rows, { search: "mock", filter: "all" }))).toEqual([]);
   });
@@ -177,9 +196,10 @@ describe("directoryGroups", () => {
         person({ id: "sam", displayName: "Sam Okafor", bondLevel: "colleague" }),
       ],
       [
-        account({ channelUserId: "waiting", displayName: "Jules" }),
-        account({ channelUserId: "spam", displayName: "Prize", state: "dismissed" }),
-        account({ channelUserId: "quiet", displayName: "Jonas Tan", latest: null }),
+        contact({ channelUserId: "waiting", displayName: "Jules" }),
+        contact({ channelUserId: "spam", displayName: "Prize", state: "dismissed" }),
+        contact({ channelUserId: "quiet", displayName: "Jonas Tan" }),
+        contact({ channelUserId: "abby", displayName: "Abby Nunes" }),
       ],
     );
 
@@ -189,68 +209,61 @@ describe("directoryGroups", () => {
       group.rows.map((row) => row.displayName),
     ]);
 
-  it("groups everyone in ladder order, holding the address book back", () => {
-    expect(groupsOf({ filter: "all", search: "", showSilent: false })).toEqual([
-      ["unknown", ["Jules"]],
+  it("groups everyone in ladder order, and orders each group by name", () => {
+    // A contacts list: every account Rome holds is in here, and the order
+    // within a group is the name, not what anyone last said.
+    expect(groupsOf({ filter: "all", search: "" })).toEqual([
+      ["unknown", ["Abby Nunes", "Jonas Tan", "Jules"]],
       ["guardian", ["Mock Guardian"]],
       ["inner-circle", ["Ray Oster"]],
       ["other", ["Sam Okafor"]],
     ]);
   });
 
-  it("keeps the Unknown heading when the toggle is what emptied it", () => {
-    const groups = directoryGroups(
-      peopleRows([person({ id: "ray" })], [account({ channelUserId: "quiet", latest: null })]),
-      { filter: "all", search: "", showSilent: false },
-    );
-    // The heading carries the toggle, so an address book with no waiting
-    // senders in front of it would otherwise have no way back on screen.
-    const unknown = groups.find((group) => group.level === "unknown");
-    expect(unknown?.rows).toEqual([]);
-    expect(unknown).toBeDefined();
-  });
-
-  it("shows the silent contacts once they are asked for", () => {
-    const groups = groupsOf({ filter: "all", search: "", showSilent: true });
-    expect(groups.find(([level]) => level === "unknown")?.[1]).toEqual(["Jules", "Jonas Tan"]);
-  });
-
   it("holds both unplaced ends back from All, and enters each on purpose", () => {
-    // "All" means the placed people plus the senders waiting on a decision;
+    // "All" means the placed people plus the accounts nobody has placed;
     // dismissal is entered deliberately.
-    expect(
-      groupsOf({ filter: "all", search: "", showSilent: false }).map(([level]) => level),
-    ).not.toContain("stranger");
+    expect(groupsOf({ filter: "all", search: "" }).map(([level]) => level)).not.toContain(
+      "stranger",
+    );
     // The guardian rides along, as in every view — see below.
-    expect(groupsOf({ filter: "stranger", search: "", showSilent: false })).toEqual([
+    expect(groupsOf({ filter: "stranger", search: "" })).toEqual([
       ["guardian", ["Mock Guardian"]],
       ["stranger", ["Prize"]],
     ]);
   });
 
   it("keeps the guardian in their own people list, whatever the chip says", () => {
-    const groups = groupsOf({ filter: "inner-circle", search: "", showSilent: false });
+    const groups = groupsOf({ filter: "inner-circle", search: "" });
     expect(groups.map(([level]) => level)).toContain("guardian");
   });
 
-  it("reaches the address book through a search whatever the toggle says", () => {
-    const groups = groupsOf({ filter: "all", search: "jonas", showSilent: false });
-    expect(groups).toEqual([["unknown", ["Jonas Tan"]]]);
+  it("reaches the address book through a search, whatever chip is lit", () => {
+    expect(groupsOf({ filter: "inner-circle", search: "jonas" })).toEqual([
+      ["unknown", ["Jonas Tan"]],
+    ]);
+  });
+
+  it("drops a group nothing sits in rather than heading an empty one", () => {
+    const groups = directoryGroups(peopleRows([person({ id: "ray" })], []), {
+      filter: "all",
+      search: "",
+    });
+    expect(groups.map((group) => group.level)).toEqual(["inner-circle"]);
   });
 });
 
 describe("levelCounts", () => {
-  const directoryCounts = (over = {}) =>
-    directory([], { counts: { unlinked: 6, linked: 12, dismissed: 2 }, silentTotal: 4, ...over });
+  const people = { all: 9, guardian: 1, "inner-circle": 3, acquaintance: 4, other: 1 };
+  const accounts = (over: Partial<AccountCounts> = {}): AccountCounts => ({
+    unlinked: 6,
+    linked: 12,
+    dismissed: 2,
+    ...over,
+  });
 
   it("reads every number off the server, never off the loaded rows", () => {
-    const { totals } = levelCounts(
-      { all: 9, guardian: 1, "inner-circle": 3, acquaintance: 4, other: 1 },
-      directoryCounts(),
-      { includeSilent: false },
-    );
-
-    expect(totals).toEqual({
+    expect(levelCounts(people, accounts())).toEqual({
       unknown: 6,
       guardian: 1,
       "inner-circle": 3,
@@ -260,31 +273,18 @@ describe("levelCounts", () => {
     });
     // Linked accounts are counted under the person they resolve to, never again
     // as accounts — the two nouns describe one roster.
-    expect(Object.values(totals).reduce((a, b) => a + b, 0)).toBe(9 + 6 + 2);
+    expect(Object.values(levelCounts(people, accounts())).reduce((a, b) => a + b, 0)).toBe(
+      9 + 6 + 2,
+    );
   });
 
-  it("counts what is waiting on a decision on the chip, and the group on the heading", () => {
-    const people = { all: 9, guardian: 1, "inner-circle": 3, acquaintance: 4, other: 1 };
-    // Browsing: the directory holds the address book back, so its own count of
-    // unlinked accounts is the waiting ones and nothing else.
-    const browsing = levelCounts(people, directoryCounts(), { includeSilent: false });
-    expect(browsing.chips.unknown).toBe(6);
-    expect(browsing.totals.unknown).toBe(6);
-
-    // The toggle admits four contacts nobody has ever heard from. The heading
-    // counts them — it answers "how many are in here" — and the chip does not:
-    // a contact that has never said anything is not waiting on a decision, and
-    // a chip that grew when the address book came on screen would report ten
-    // senders to triage where there are six.
-    const showing = levelCounts(
-      people,
-      directoryCounts({ counts: { unlinked: 10, linked: 12, dismissed: 2 } }),
-      {
-        includeSilent: true,
-      },
-    );
-    expect(showing.chips.unknown).toBe(6);
-    expect(showing.totals.unknown).toBe(10);
+  it("counts whatever the read the view is on counts under Unknown", () => {
+    // The stream's read is the accounts something has happened on, so its
+    // Unknown is the senders waiting on a decision. The directory's is the whole
+    // contacts list, so its Unknown is everyone Rome has not placed — a bigger
+    // number describing a bigger listing, which is the one on screen.
+    expect(levelCounts(people, accounts({ unlinked: 6 })).unknown).toBe(6);
+    expect(levelCounts(people, accounts({ unlinked: 4_212 })).unknown).toBe(4_212);
   });
 });
 
@@ -292,13 +292,13 @@ describe("rowHandle", () => {
   it("renders a WhatsApp account as its phone number", () => {
     const [row] = peopleRows(
       [],
-      [account({ channel: "whatsapp", channelUserId: "14155550142@s.whatsapp.net" })],
+      [contact({ channel: "whatsapp", channelUserId: "14155550142@s.whatsapp.net" })],
     );
     expect(rowHandle(row)).toBe("+1 (415) 555-0142");
   });
 
   it("falls back to the raw identifier on a channel with no phone shape", () => {
-    const [row] = peopleRows([], [account({ channel: "discord", channelUserId: "6128843201" })]);
+    const [row] = peopleRows([], [contact({ channel: "discord", channelUserId: "6128843201" })]);
     expect(rowHandle(row)).toBe("6128843201");
   });
 });

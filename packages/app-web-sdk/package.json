@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/app-web-sdk",
-  "version": "0.2.21",
+  "version": "0.3.0",
   "description": "Web runtime and CLI SDK for Rome apps",
   "license": "MIT",
   "type": "module",
@@ -36,7 +36,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@rome-os/ui": "workspace:^",
     "@rsbuild/plugin-react": "^2.0.0",
     "@rslib/core": "^0.21.3",
     "@tailwindcss/postcss": "^4.1.0",
@@ -57,5 +56,13 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@rome-os/ui": "^0.2.2"
+  },
+  "peerDependenciesMeta": {
+    "@rome-os/ui": {
+      "optional": true
+    }
   }
 }

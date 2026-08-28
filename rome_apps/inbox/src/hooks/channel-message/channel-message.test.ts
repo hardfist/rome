@@ -235,4 +235,17 @@ describe("ChannelMessageHook", () => {
       expect.objectContaining({ channel: "whatsapp", connectionId: WHATSAPP_ID }),
     );
   });
+
+  it("unregister detaches every subscription and a fresh register resubscribes", async () => {
+    harness.hook.unregister();
+
+    await expect(harness.emit(TELEGRAM_ID, message())).rejects.toThrow("no subscription");
+    await expect(harness.emit(WHATSAPP_ID, message())).rejects.toThrow("no subscription");
+
+    // The host swaps in a replacement after an app-keys change; register() on
+    // the (here: same) instance must resubscribe everything talkRouter lists.
+    await harness.hook.register();
+    await harness.emit(TELEGRAM_ID, message({ text: "after reload" }));
+    expect(harness.run).toHaveBeenCalledTimes(1);
+  });
 });

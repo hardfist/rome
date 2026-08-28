@@ -20,11 +20,11 @@ import {
 } from "@/components/ui/select";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { cn } from "@/lib/utils";
-import { UnknownRow } from "./rows";
+import { DirectoryRow, UnknownRow } from "./rows";
 import { levelLabelKey } from "./rows";
 import { TransferConfirm } from "./transfer";
 import { usePeopleWrites } from "./use-writes";
-import type { PeopleRow } from "./people-model";
+import type { PeopleRow, PeopleView } from "./people-model";
 
 // Placing an account that nobody has decided about, and taking one back.
 //
@@ -251,6 +251,18 @@ function LinkForm({
 }
 
 /**
+ * The row an entry's gestures sit on, which is the view's own answer.
+ *
+ * The stream's row is dense: a placement decision runs on the evidence — which
+ * channel, which number, what they last said — so all of it is on the row. The
+ * directory carries none of that, so its row is the contacts line every other
+ * row in that view is, and the buttons sit at the end of it.
+ */
+function entryRow(variant: PeopleView) {
+  return variant === "directory" ? DirectoryRow : UnknownRow;
+}
+
+/**
  * One unplaced account, with the gestures that place it.
  *
  * Nothing is handed back to a parent to refresh: every verb here settles by
@@ -260,10 +272,13 @@ function LinkForm({
 export function UnknownEntry({
   row,
   people,
+  variant,
 }: {
   row: PeopleRow;
   /** The people a link can land on — the listing's own rows. */
   people: PersonResource[];
+  /** Which view this row is in — see {@link entryRow}. */
+  variant: PeopleView;
 }) {
   const { t } = useTranslation("people");
   const writes = usePeopleWrites();
@@ -347,9 +362,10 @@ export function UnknownEntry({
     }
   }
 
+  const Row = entryRow(variant);
   return (
     <div>
-      <UnknownRow
+      <Row
         row={row}
         actions={
           !action && (
@@ -450,12 +466,11 @@ export function UnknownEntry({
 /**
  * An account the guardian dismissed, with the gesture that undoes it.
  *
- * The same dense row the Unknown view uses, because the decision runs on the
- * same evidence: a restore is worth making on what the sender actually sent,
- * not on a name in a roster. No confirmation — a restore only puts the account
- * back where a decision is still owed.
+ * The same row the Unknown view uses in whichever view it is in, because the
+ * decision runs on the same evidence. No confirmation — a restore only puts the
+ * account back where a decision is still owed.
  */
-export function DismissedEntry({ row }: { row: PeopleRow }) {
+export function DismissedEntry({ row, variant }: { row: PeopleRow; variant: PeopleView }) {
   const { t } = useTranslation("people");
   const writes = usePeopleWrites();
   const [acting, setActing] = useState(false);
@@ -474,9 +489,10 @@ export function DismissedEntry({ row }: { row: PeopleRow }) {
     }
   }
 
+  const Row = entryRow(variant);
   return (
     <div>
-      <UnknownRow
+      <Row
         row={row}
         actions={
           <Button

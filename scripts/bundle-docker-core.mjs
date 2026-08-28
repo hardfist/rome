@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { cp, readdir, stat } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const coreRoot = resolve(projectRoot, "packages/core");
 // Static template trees copied into core/dist so the published runtime can find
 // them. The app templates back `op: "create"`; the memory template seeds a fresh
 // profile's memory/ dir on first boot (MEMORY.md, IDENTITY.md, relationship/,
@@ -63,48 +63,71 @@ async function loadEsbuild() {
   throw new Error("Unable to load workspace esbuild dependency for Docker core bundling.");
 }
 
-if (process.env.ROME_DOCKER_APP_CODE_MODE !== "compiled") {
-  console.log("Skipping Docker core bundling; ROME_DOCKER_APP_CODE_MODE is not compiled.");
-  process.exit(0);
+export function dockerBundleOptions(format = "esm") {
+  return {
+    bundle: true,
+    platform: "node",
+    target: "node24",
+    format,
+    packages: "external",
+    sourcemap: false,
+    legalComments: "none",
+    logLevel: "info",
+    plugins: [
+      {
+        name: "bundle-api-types",
+        setup(build) {
+          // This private workspace package exports TypeScript source. Resolve it
+          // from the original importer and inline it, including relative .js
+          // imports that point to .ts files. Plain Node cannot do that mapping,
+          // and the relocated Caddy script has no Core workspace dependencies.
+          build.onResolve({ filter: /^@rome\/api-types(?:\/|$)/ }, ({ path, resolveDir }) => ({
+            path: createRequire(resolve(resolveDir, "package.json")).resolve(path),
+          }));
+        },
+      },
+    ],
+  };
 }
-
-const sharedConfig = {
-  bundle: true,
-  platform: "node",
-  target: "node24",
-  format: "esm",
-  packages: "external",
-  sourcemap: false,
-  legalComments: "none",
-  logLevel: "info",
-};
 
 const entrypoints = [
-  ["src/index.ts", "dist/index.js"],
-  ["src/daemon/index.ts", "dist/daemon/index.js"],
-  ["src/actions/worker.ts", "dist/actions/worker.js"],
+  ["packages/core/src/index.ts", "packages/core/dist/index.js", "esm"],
+  ["packages/core/src/daemon/index.ts", "packages/core/dist/daemon/index.js", "esm"],
+  ["packages/core/src/actions/worker.ts", "packages/core/dist/actions/worker.js", "esm"],
+  ["scripts/generate-caddyfile.ts", "dist/scripts/generate-caddyfile.js", "cjs"],
 ];
 
-const { build } = await loadEsbuild();
-
-await Promise.all(
-  entrypoints.map(([entry, outfile]) =>
-    build({
-      ...sharedConfig,
-      entryPoints: [resolve(coreRoot, entry)],
-      outfile: resolve(coreRoot, outfile),
-    }),
-  ),
-);
-
-for (const [srcRel, destRel, label] of bundledTemplates) {
-  const src = resolve(projectRoot, srcRel);
-  const dest = resolve(coreRoot, destRel);
-  if (!(await pathExists(src))) {
-    throw new Error(`Expected ${label} at ${src} but it does not exist; aborting bundle.`);
+async function main() {
+  if (process.env.ROME_DOCKER_APP_CODE_MODE !== "compiled") {
+    console.log("Skipping Docker runtime bundling; ROME_DOCKER_APP_CODE_MODE is not compiled.");
+    return;
   }
-  await cp(src, dest, { recursive: true });
-  console.log(`Copied ${label} → ${dest}`);
+
+  const { build } = await loadEsbuild();
+
+  await Promise.all(
+    entrypoints.map(([entry, outfile, format]) =>
+      build({
+        ...dockerBundleOptions(format),
+        entryPoints: [resolve(projectRoot, entry)],
+        outfile: resolve(projectRoot, outfile),
+      }),
+    ),
+  );
+
+  for (const [srcRel, destRel, label] of bundledTemplates) {
+    const src = resolve(projectRoot, srcRel);
+    const dest = resolve(projectRoot, "packages/core", destRel);
+    if (!(await pathExists(src))) {
+      throw new Error(`Expected ${label} at ${src} but it does not exist; aborting bundle.`);
+    }
+    await cp(src, dest, { recursive: true });
+    console.log(`Copied ${label} → ${dest}`);
+  }
+
+  console.log(`Bundled Docker runtime entrypoints (${entrypoints.length} files).`);
 }
 
-console.log(`Bundled Docker core entrypoints (${entrypoints.length} files).`);
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  await main();
+}

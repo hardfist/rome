@@ -11,7 +11,6 @@ import { ArrowUp, Lock, Paperclip, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
 import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
 import { ProjectSelector } from "@/components/project-selector";
 import { SourceConnect } from "@/components/sync/SourceConnect";
@@ -813,7 +812,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           Approve. Neutral throughout except the single Approve CTA. */}
       {designingInteraction?.onApprove && (
         <ButtonGroup className="mb-2 w-full rounded-12 shadow-card-hover">
-          <ButtonGroupText className="min-w-0 flex-1 gap-2 border-border bg-surface px-3 text-foreground">
+          <ButtonGroupText className="min-w-0 flex-1 gap-2 border-border bg-surface px-3">
             <Sparkles className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate">
               <span>{designingInteraction.agentLabel}</span> submitted a result — approve it, or
@@ -1003,13 +1002,18 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               guardianLabel={guardianLabel}
             />
           )}
-          <IconButton
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={() => fileInputRef.current?.click()}
             disabled={isComposerBusy}
-            label={t("composer.uploadFiles")}
-            icon={<Paperclip aria-hidden />}
-            className="touch-target text-muted-foreground hover:text-foreground"
-          />
+            aria-label={t("composer.uploadFiles")}
+            title={t("composer.uploadFiles")}
+            className="touch-target"
+          >
+            <Paperclip aria-hidden />
+          </Button>
           {showModelSelector && modelSelectorEnabled && (
             <ModelSelectorMenu
               open={modelMenuOpen}
@@ -1032,7 +1036,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               <Button
                 type="button"
                 variant="outline"
-                size="icon-md"
+                size="icon-sm"
                 onClick={onStop}
                 className="touch-target"
                 title={t("composer.stopGenerating")}
@@ -1047,7 +1051,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                   ? "secondary"
                   : "default"
               }
-              size="icon-md"
+              size="icon-sm"
               onClick={() => void runSend()}
               disabled={
                 isComposerBusy || (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)

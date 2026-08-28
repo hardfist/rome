@@ -140,11 +140,14 @@ describe("ConnectionsSection — list of rows", () => {
     expect(emailRow.querySelector("svg.lucide-mail")).toBeTruthy();
   });
 
-  it("does not navigate — rows are buttons, not links", () => {
+  it("does not navigate — service rows are buttons, only the app-keys row links out", () => {
     renderSection([...minimalConnections(), oauth("github")]);
 
-    // The list no longer renders anchor navigation; each row opens a dialog.
-    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    // Service rows render no anchor navigation; each opens a dialog. The one
+    // link in the list is the app-keys entry row, which routes to its page.
+    const links = screen.queryAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute("href")).toBe("/settings/connections/app-keys");
     expect(screen.getByRole("button", { name: "Open GitHub" })).toBeTruthy();
   });
 
