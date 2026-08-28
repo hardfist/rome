@@ -1,33 +1,68 @@
-// One adapter per message store a person's history can come from, and the
-// order they claim an account in. The seam and the merge are in timeline.ts;
-// the SQL plumbing every adapter here shares is in timeline-sql.ts.
+// Which stores a person's history comes from, and the order they claim an
+// account in. The stores themselves are the channels' — one `Messages` adapter
+// each, in channels/ — and the merge over them is timeline.ts's.
 //
-// Direct threads only. Each adapter scopes itself by the account's own
-// addresses, so a group conversation — addressed by the group rather than by
-// the person — never reaches a person's timeline.
+// Also the fold from a person's channel mappings to the accounts those stores
+// are read for, since the two are the same question asked of one channel: which
+// addresses are one account, and what was said at them.
+//
+// The `TimelineSource` adapters below the list are the previous shape of the
+// same four stores, and nothing calls them any more; the SQL plumbing they
+// share is in timeline-sql.ts.
+//
+// Direct threads only, on either shape. Each adapter scopes itself by the
+// account's own addresses, so a group conversation — addressed by the group
+// rather than by the person — never reaches a person's timeline.
 
 import { sql } from "drizzle-orm";
 import type { TalkAccounts } from "../channels/accounts.js";
+import { linkedInMessages } from "../channels/linkedin-messages.js";
+import type { Messages } from "../channels/messages.js";
 // How a stored agent message reads — which way it went, and the line it
 // renders as — defined once beside the `Messages` store over the same rows.
-import { agentMessageOutbound, messageContentText } from "../channels/messages-agent.js";
+import {
+  agentMessageOutbound,
+  agentMessages,
+  messageContentText,
+} from "../channels/messages-agent.js";
+import { sentinelLogMessages } from "../channels/messages-sentinel.js";
+import { whatsAppMessages } from "../channels/whatsapp-messages.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { TimelineAccount, TimelineSource } from "./timeline.js";
 import { accountPairs, addressesOn, inList, sqlTimelineSource } from "./timeline-sql.js";
 
 /**
- * The stores a person's timeline is read from, in the order they claim an
- * account.
+ * The stores a person's history is read from, in the order they claim an
+ * account — the list `assignAccounts` walks, for the page and for the listing
+ * row alike.
  *
- * The order is the precedence the seam's {@link TimelineSource} contract
- * describes: a channel mirror holds the conversation as the channel has it, so
- * it outranks Rome's own transcript of the same messages, which in turn
- * outranks the sentinel's triage record. An account only the sentinel saw still
- * gets its exchanges — the sentinel is last, not excluded.
+ * The order is a precedence: a channel mirror holds the conversation as the
+ * channel has it, so it outranks Rome's own transcript of the same messages,
+ * which in turn outranks the sentinel's triage record. An account only the
+ * sentinel saw still gets its exchanges — the sentinel is last, not excluded.
  *
  * The cost of that precedence: an account with a mirrored conversation shows
  * the conversation, and the sentinel's own record of an exchange inside it
  * stays behind Rome's reply as the channel delivered it.
+ *
+ * Adding a store is one more `Messages` adapter appended here. Nothing above
+ * knows how many there are or what they read.
+ */
+export function personMessageStores(deps: { db: DrizzleDb }): Messages[] {
+  return [
+    whatsAppMessages(deps.db),
+    linkedInMessages(deps.db),
+    agentMessages(deps.db),
+    sentinelLogMessages(deps.db),
+  ];
+}
+
+/**
+ * The same four stores as {@link TimelineSource}s.
+ *
+ * @deprecated Nothing reads a person's history through these any more —
+ * {@link personMessageStores} is the list both the timeline and the people
+ * listing walk. Kept only until the account directory moves over too.
  */
 export function personTimelineSources(deps: { db: DrizzleDb }): TimelineSource[] {
   return [

@@ -1,7 +1,7 @@
 // A person's history, merged across every account they are linked to. The
 // entry shape, the ordering and the cursor are the contract's
-// (@rome/api-types/people); this module is the seam the stores plug into and
-// the merge above it.
+// (@rome/api-types/people); a store is the channel's (`Messages`, in
+// channels/messages.js); this module is only the merge above them.
 
 import {
   compareTimelineEntries,
@@ -10,6 +10,7 @@ import {
   type TimelineEntry,
   type TimelinePage,
 } from "@rome/api-types/people";
+import type { MessageAccount, Messages } from "../channels/messages.js";
 
 /**
  * One account a person is reachable at, as a timeline read addresses it.
@@ -45,21 +46,14 @@ export interface AccountDigest {
 }
 
 /**
- * One message store, as a person's timeline reads it.
+ * One message store, as a person's timeline used to read it.
  *
- * Adding a store is one implementation of this interface listed alongside the
- * others; nothing above here knows how many there are or what they read.
+ * Superseded by `Messages`: the merge below reads stores through that
+ * interface, and nothing calls `holds`, `digest` or this `read` any more. The
+ * declaration and its SQL implementations survive only until the account
+ * directory moves too, and go with them.
  *
- * The store answers which accounts it holds as well as what it holds for them,
- * because the stores overlap rather than partition. One inbound WhatsApp
- * message is a `wa_messages` row, a `rome_agent_messages` row on the channel
- * session, and — when the sentinel triaged it — a `sentinel_log` row as well.
- * Merging all three renders one message three times, and the copies carry
- * different ids at different timestamps, so no after-the-fact dedupe survives
- * a page boundary. Instead each account's timeline comes from exactly one
- * store: the stores are asked in order, and the first one that holds an
- * account owns it — for the page ({@link holds}, then {@link read}) and for
- * the summary ({@link digest}) alike.
+ * @deprecated Read a store as {@link Messages}.
  */
 export interface TimelineSource {
   /** Stable, for tests and logs. Never {@link TimelineEntry.source}, which
@@ -109,8 +103,8 @@ export interface TimelineSource {
  * the only scope there is.
  */
 export async function readPersonTimeline(
-  sources: readonly TimelineSource[],
-  accounts: readonly TimelineAccount[],
+  stores: readonly Messages[],
+  accounts: readonly MessageAccount[],
   options: { cursor?: TimelineEntry | null; limit: number },
 ): Promise<TimelinePage> {
   const cursor = options.cursor ?? null;
@@ -121,8 +115,8 @@ export async function readPersonTimeline(
     // page of exactly `limit` merged entries is otherwise indistinguishable
     // from an exhausted history, and answering null there truncates the
     // timeline at a boundary the client cannot resume past.
-    (await assignAccounts(sources, accounts)).map(([source, held]) =>
-      source.read({ accounts: held, cursor, limit: limit + 1 }),
+    (await assignAccounts(stores, accounts)).map(([store, held]) =>
+      store.read({ accounts: held, after: cursor, limit: limit + 1 }),
     ),
   );
 
@@ -144,23 +138,42 @@ export async function readPersonTimeline(
  * Each store paired with the accounts it owns: the first store that holds an
  * account takes it, and no later store is offered it.
  *
- * The one place that rule is applied. Every read of a person's history — the
+ * The rule exists because the stores overlap rather than partition. One inbound
+ * WhatsApp message is a `wa_messages` row, a `rome_agent_messages` row on the
+ * channel session, and — when the sentinel triaged it — a `sentinel_log` row as
+ * well. Merging all three renders one message three times, and the copies carry
+ * different ids at different timestamps, so no after-the-fact dedupe survives a
+ * page boundary. Instead each account's history comes from exactly one store.
+ *
+ * Ownership is derived rather than asked for: a store that answers a `latest`
+ * for an account is a store that holds it, and `Messages` states that `latest`
+ * is the head of the very history `read` pages. A separate "do you hold this"
+ * verb would be a second answer to the same question, free to disagree with the
+ * first — a row previewing an entry from one store while the page beneath it
+ * opens on another's.
+ *
+ * The one place the rule is applied. Every read of a person's history — the
  * page here, the summary in activity.ts — goes through this, because a summary
  * that claimed accounts on its own terms could count an exchange the page
  * attributes to a different store.
+ *
+ * One `latest` per account, and the whole store's worth raised before any is
+ * awaited: an adapter that groups the calls of a tick — every SQL one does —
+ * settles a whole directory's ownership in one pass over the store rather than
+ * one per row.
  */
-export async function assignAccounts(
-  sources: readonly TimelineSource[],
-  accounts: readonly TimelineAccount[],
-): Promise<Array<[TimelineSource, TimelineAccount[]]>> {
-  const assigned: Array<[TimelineSource, TimelineAccount[]]> = [];
+export async function assignAccounts<Account extends MessageAccount>(
+  stores: readonly Messages[],
+  accounts: readonly Account[],
+): Promise<Array<[Messages, Account[]]>> {
+  const assigned: Array<[Messages, Account[]]> = [];
   let unclaimed = [...accounts];
-  for (const source of sources) {
+  for (const store of stores) {
     if (unclaimed.length === 0) break;
-    const held = new Set(await source.holds(unclaimed));
-    const taken = unclaimed.filter((account) => held.has(account));
-    if (taken.length > 0) assigned.push([source, taken]);
-    unclaimed = unclaimed.filter((account) => !held.has(account));
+    const heads = await Promise.all(unclaimed.map((account) => store.latest([account])));
+    const taken = unclaimed.filter((_, index) => heads[index] != null);
+    if (taken.length > 0) assigned.push([store, taken]);
+    unclaimed = unclaimed.filter((_, index) => heads[index] == null);
   }
   return assigned;
 }

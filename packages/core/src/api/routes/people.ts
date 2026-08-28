@@ -19,7 +19,7 @@ import { mergePeople } from "../../people/merge.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
 import { updatePerson } from "../../people/update.js";
 import { readPersonTimeline } from "../../people/timeline.js";
-import { personTimelineSources, timelineAccounts } from "../../people/timeline-sources.js";
+import { personMessageStores, timelineAccounts } from "../../people/timeline-sources.js";
 import type { ApiDeps } from "../deps.js";
 
 // The People surface. What a person and their accounts are, how the listing
@@ -166,7 +166,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
 
     return c.json(
       await readPersonTimeline(
-        personTimelineSources(deps),
+        personMessageStores(deps),
         accounts.filter((account) => !channel || account.channel === channel),
         { cursor, limit: timelinePageLimit(c.req.query("limit")) },
       ),

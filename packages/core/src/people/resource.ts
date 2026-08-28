@@ -16,7 +16,7 @@ import type { TalkAccounts } from "../channels/accounts.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { readPeopleActivity } from "./activity.js";
-import { personTimelineSources, timelineAccounts } from "./timeline-sources.js";
+import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
 
 export interface PeopleReadDeps {
   db: DrizzleDb;
@@ -78,7 +78,7 @@ async function serialize(
     ),
     deps.accountNames.displayNames(refs),
   ]);
-  const activity = await readPeopleActivity(personTimelineSources(deps), accountsByPerson);
+  const activity = await readPeopleActivity(personMessageStores(deps), accountsByPerson);
 
   let next = 0;
   return persons.map((person, i) => ({
