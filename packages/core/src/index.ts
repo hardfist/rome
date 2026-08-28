@@ -137,6 +137,7 @@ import {
   createAppActionsSubscriber,
   createNoopChannelMessageHook,
   createChannelMessageHookFromCatalog,
+  createChannelMessageHookReloader,
   registerAppActions,
 } from "./actions/app-actions-wiring.js";
 import type { ChannelMessageHook } from "./hooks/types.js";
@@ -1004,6 +1005,23 @@ async function main() {
   connectionRegistry.onUnlocked("talk", (connection) => {
     messageHook.registerConnection(connection.id, connection.service);
   });
+  // App-keys refreshes recreate this hook: it is instantiated once and held by
+  // the subscription closures above, so an env value captured in its module
+  // graph would otherwise outlive the key edit. The let-binding is the single
+  // handle — the onUnlocked callback reads it at call time, so a swap re-routes
+  // future unlocks, and register() on the fresh instance re-subscribes the
+  // already-unlocked connections via talkRouter.list().
+  const reloadChannelMessageHook = messageHandlerRegistered
+    ? createChannelMessageHookReloader({
+        catalog: appCatalog,
+        deps: { actionEngine, talkRouter, conversationSettings },
+        getCurrent: () => messageHook,
+        setCurrent: (hook) => {
+          messageHook = hook;
+        },
+        onSkip: (reason) => log.warn(reason),
+      })
+    : null;
 
   // Fold the legacy providerAccounts rows into the grant ledger
   // BEFORE load(), so rehydration re-materializes each provider grant exactly
@@ -1116,6 +1134,15 @@ async function main() {
     await actionEngine.restartWorkerWarmPool();
     await reloadLifecycleHooks("app-keys-change");
     await reloadTurnMiddlewareHooks("app-keys-change");
+    if (reloadChannelMessageHook) {
+      try {
+        await reloadChannelMessageHook();
+      } catch (err) {
+        log.warn("channel-message hook reload failed; keeping the previous instance", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   };
   const publicAccessState = new PublicAccessState();
   try {

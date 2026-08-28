@@ -65,6 +65,7 @@ export function createNoopChannelMessageHook(): ChannelMessageHook {
   return {
     async register() {},
     registerConnection() {},
+    unregister() {},
   };
 }
 
@@ -270,4 +271,42 @@ export async function createChannelMessageHookFromCatalog(
   throw new Error(
     `Hook "${hookRef.publicName}" must export createHook(deps) from ${hookRef.absolutePath}`,
   );
+}
+
+/**
+ * Rebuilds the live channel-message hook from the catalog — the app-keys
+ * refresh path. The hook is instantiated once at boot and retained by
+ * subscription closures, so recreating it is the only way a module-scope env
+ * capture in its module graph follows a key change. The swap is
+ * double-dispatch-safe: the old instance detaches before the new one
+ * registers, and a hook without `unregister()` is left in place (stale but
+ * single) rather than doubled. If the fresh instance fails to register, the
+ * previous one is re-registered so inbound messages keep flowing; the error
+ * propagates for the caller to report.
+ */
+export function createChannelMessageHookReloader(options: {
+  catalog: AppCatalog;
+  deps: unknown;
+  getCurrent: () => ChannelMessageHook;
+  setCurrent: (hook: ChannelMessageHook) => void;
+  onSkip?: (reason: string) => void;
+}): () => Promise<void> {
+  return async () => {
+    const previous = options.getCurrent();
+    if (typeof previous.unregister !== "function") {
+      options.onSkip?.("channel-message hook has no unregister(); keeping the current instance");
+      return;
+    }
+    const reloaded = await createChannelMessageHookFromCatalog(options.catalog, options.deps);
+    if (!reloaded) return;
+    previous.unregister();
+    options.setCurrent(reloaded);
+    try {
+      await reloaded.register();
+    } catch (err) {
+      options.setCurrent(previous);
+      await previous.register();
+      throw err;
+    }
+  };
 }

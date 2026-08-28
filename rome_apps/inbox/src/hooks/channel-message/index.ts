@@ -32,6 +32,13 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     this.subscriptions.set(connectionId, unsubscribe);
   }
 
+  unregister(): void {
+    for (const unsubscribe of this.subscriptions.values()) {
+      unsubscribe();
+    }
+    this.subscriptions.clear();
+  }
+
   private async handleMessage(
     connectionId: string,
     service: string,
