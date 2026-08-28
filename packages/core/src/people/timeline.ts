@@ -166,14 +166,47 @@ export async function assignAccounts<Account extends MessageAccount>(
   stores: readonly Messages[],
   accounts: readonly Account[],
 ): Promise<Array<[Messages, Account[]]>> {
+  const owned = await assignAccountHeads(stores, accounts);
   const assigned: Array<[Messages, Account[]]> = [];
+  for (const store of stores) {
+    const held = accounts.filter((account) => owned.get(account)?.store === store);
+    if (held.length > 0) assigned.push([store, held]);
+  }
+  return assigned;
+}
+
+/**
+ * {@link assignAccounts}, keeping the entry that settled each account rather
+ * than only who owns it.
+ *
+ * The `latest` a store answers is what decides ownership, and it is also the
+ * head of the history that store will page — the same entry, by the law
+ * `Messages` states. A caller that wants both therefore asks once: the account
+ * stream previews exactly what it claims by, and cannot drift from the page it
+ * opens onto by reading the two from separate calls.
+ *
+ * `assignAccounts` is this with the heads dropped, so the ownership rule above
+ * is applied in one place whichever of the two a caller needs.
+ *
+ * Keyed by the given account objects themselves, so a caller reads its answer
+ * back off the values it passed in.
+ */
+export async function assignAccountHeads<Account extends MessageAccount>(
+  stores: readonly Messages[],
+  accounts: readonly Account[],
+): Promise<Map<Account, { store: Messages; head: TimelineEntry }>> {
+  const owned = new Map<Account, { store: Messages; head: TimelineEntry }>();
   let unclaimed = [...accounts];
   for (const store of stores) {
     if (unclaimed.length === 0) break;
     const heads = await Promise.all(unclaimed.map((account) => store.latest([account])));
-    const taken = unclaimed.filter((_, index) => heads[index] != null);
-    if (taken.length > 0) assigned.push([store, taken]);
-    unclaimed = unclaimed.filter((_, index) => heads[index] == null);
+    const next: Account[] = [];
+    unclaimed.forEach((account, index) => {
+      const head = heads[index];
+      if (head == null) next.push(account);
+      else owned.set(account, { store, head });
+    });
+    unclaimed = next;
   }
-  return assigned;
+  return owned;
 }

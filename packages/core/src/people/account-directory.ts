@@ -17,6 +17,7 @@ import {
   latestDynamic,
   type DirectoryAccount,
   type StreamAccount,
+  type TimelineEntry,
 } from "@rome/api-types/people";
 import { compareCodePoints } from "@rome/api-types/identities";
 import { STRANGER_PERSON_ID } from "../constants.js";
@@ -25,7 +26,8 @@ import { foldAccounts, mirrorRegistry, type MirrorPlane } from "../channels/acco
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
-import { latestPerAccount, personMessageStores } from "./message-stores.js";
+import { assignAccountHeads } from "./timeline.js";
+import { personMessageStores } from "./timeline-sources.js";
 
 export interface AccountDirectoryDeps {
   whatsAppAccounts: MirrorPlane;
@@ -76,26 +78,76 @@ export async function readAccountDirectory(
  * ever heard from has no position in an order made of timestamps, so it is
  * absent rather than listed last.
  *
- * The dynamic comes from the message stores, claimed in the precedence
- * `personMessageStores` states — the stores and the order a person's timeline
- * is read from. So a row previews the entry the page beneath it opens on, and
- * being on the stream at all means those stores answered something: silence is
- * `latest` answering nothing rather than a flag any producer sets.
+ * The dynamic is the entry that claims the account, through the same
+ * `assignAccountHeads` the person's own page and the people listing settle
+ * ownership with, over the same `personMessageStores` precedence. So a row
+ * previews exactly what the page beneath it opens on, and being on the stream
+ * at all means some store answered a `latest`: silence is that answering
+ * nothing rather than a flag any producer sets.
  *
- * One round of reads, not one per row: every account is asked about before any
- * answer is awaited, so each store serves the whole stream in a single pass.
+ * Read in rounds rather than all at once — see {@link ADDRESSES_PER_ROUND}.
  */
 export async function readAccountStream(deps: AccountDirectoryDeps): Promise<StreamAccount[]> {
   const accounts = await observeAccounts(deps);
-  const latest = await latestPerAccount(
-    personMessageStores(deps),
-    accounts.map(({ channel, addresses }) => ({ channel, addresses })),
-  );
-  return accounts.flatMap((account, i) => {
-    const newest = latest[i];
-    const dynamic = latestDynamic(newest ? [newest] : []);
+  const stores = personMessageStores(deps);
+
+  const heads = new Map<DirectoryAccount, TimelineEntry>();
+  for (const round of rounds(accounts)) {
+    for (const [account, owned] of await assignAccountHeads(stores, round)) {
+      heads.set(account, owned.head);
+    }
+  }
+
+  return accounts.flatMap((account) => {
+    const head = heads.get(account);
+    const dynamic = latestDynamic(head ? [head] : []);
     return dynamic === null ? [] : [{ ...account, latest: dynamic }];
   });
+}
+
+/**
+ * How many addresses one round of ownership reads covers.
+ *
+ * A SQL store answers a whole round in one statement, binding a bounded handful
+ * of variables per address in it, and SQLite refuses any statement carrying
+ * more than 32,766 of them. This is the one read that asks about a whole
+ * address book at once, and an address book is thousands of contacts — so
+ * asking about all of them in a single round is a stream that fails outright on
+ * an ordinary WhatsApp directory rather than one that pages it.
+ *
+ * A thousand addresses leaves that ceiling more than an order of magnitude of
+ * headroom while keeping the rounds few, and so the passes over each store few:
+ * the grouping that makes a directory cost one pass instead of one per row
+ * still holds, just per round rather than once.
+ *
+ * Bounded here rather than inside the stores: the ceiling is a property of the
+ * statement a store builds, but only a caller knows it is about to ask about
+ * every account there is, and a store cannot chunk work it is handed a call at
+ * a time.
+ */
+const ADDRESSES_PER_ROUND = 1000;
+
+/**
+ * The accounts split into rounds no wider than {@link ADDRESSES_PER_ROUND}.
+ *
+ * By addresses rather than by accounts because that is what the stores are
+ * scoped by: an account reachable three ways costs three times what one
+ * reachable a single way does. An account wider than a whole round still gets
+ * one of its own rather than being dropped.
+ */
+function* rounds(accounts: readonly DirectoryAccount[]): Generator<DirectoryAccount[]> {
+  let round: DirectoryAccount[] = [];
+  let addresses = 0;
+  for (const account of accounts) {
+    if (round.length > 0 && addresses + account.addresses.length > ADDRESSES_PER_ROUND) {
+      yield round;
+      round = [];
+      addresses = 0;
+    }
+    round.push(account);
+    addresses += account.addresses.length;
+  }
+  if (round.length > 0) yield round;
 }
 
 /**

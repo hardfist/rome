@@ -21,7 +21,7 @@ import {
 import { seedBaseline } from "../test/seeds.js";
 import { readAccountStream } from "./account-directory.js";
 import { readPersonTimeline } from "./timeline.js";
-import { personTimelineSources } from "./timeline-sources.js";
+import { personMessageStores } from "./timeline-sources.js";
 
 /** A WhatsApp contact the mirror holds a conversation for, and whom the
  *  sentinel also logged — more recently than the mirror's newest message. */
@@ -123,9 +123,9 @@ describe("readAccountStream", () => {
 
   /** The head of the timeline the row opens onto, read the way the person page
    *  reads it. */
-  async function timelineHead(account: StreamAccount) {
+  async function timelineHead(account: { channel: string; addresses: string[] }) {
     const page = await readPersonTimeline(
-      personTimelineSources(deps),
+      personMessageStores(deps),
       [{ channel: account.channel, addresses: account.addresses }],
       { limit: 1 },
     );
@@ -165,9 +165,7 @@ describe("readAccountStream", () => {
     // Silence is not a flag a producer sets: it is `latest` answering nothing.
     const stream = await readAccountStream(deps);
     expect(find(stream, "whatsapp", SILENT_JID)).toBeUndefined();
-    expect(
-      await timelineHead({ channel: "whatsapp", addresses: [SILENT_JID] } as StreamAccount),
-    ).toBeNull();
+    expect(await timelineHead({ channel: "whatsapp", addresses: [SILENT_JID] })).toBeNull();
   });
 
   it("says nothing about how much is on record", async () => {
@@ -221,4 +219,46 @@ describe("readAccountStream", () => {
     expect(big.length).toBe(small.length + 20);
     expect(counted.passes() - after).toBe(passes);
   });
+
+  it("answers an address book too wide for one statement", async () => {
+    // A SQL store answers a round in one statement, binding about six variables
+    // per account in it, and SQLite refuses a statement carrying more than
+    // 32,766 — so one unsplit round runs out somewhere above five thousand
+    // accounts. This is the read that asks about a whole address book, and an
+    // address book reaches this size, so asked all at once it fails outright
+    // with "too many SQL variables" instead of answering a stream.
+    const CONTACTS = 6000;
+    const jid = (i: number) => `1555${String(i).padStart(7, "0")}@s.whatsapp.net`;
+    await deps.whatsAppStoreRepo.upsertContacts(
+      Array.from({ length: CONTACTS }, (_, i) => ({
+        jid: jid(i),
+        phoneNumber: `1555${String(i).padStart(7, "0")}`,
+        name: `Contact ${i}`,
+      })),
+    );
+    await deps.whatsAppStoreRepo.upsertMessages(
+      Array.from({ length: CONTACTS }, (_, i) => ({
+        id: `wa-bulk-${i}`,
+        chatJid: jid(i),
+        senderJid: jid(i),
+        fromMe: false,
+        timestamp: new Date("2026-08-19T10:00:00Z"),
+        type: "text",
+        text: `line ${i}`,
+        hasMedia: false,
+      })),
+    );
+
+    const counted = countingDb(testDb.db);
+    const before = counted.passes();
+    const stream = await readAccountStream({ ...deps, db: counted.db });
+
+    expect(stream.length).toBeGreaterThanOrEqual(CONTACTS);
+    expect(find(stream, "whatsapp", jid(CONTACTS - 1))?.latest.preview).toBe(
+      `line ${CONTACTS - 1}`,
+    );
+    // Split into rounds, not into one read per account: a few passes per store,
+    // nowhere near the thousands a per-row read would cost.
+    expect(counted.passes() - before).toBeLessThan(20);
+  }, 60_000);
 });
