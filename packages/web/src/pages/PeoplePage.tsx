@@ -18,6 +18,7 @@ import {
   parsePeopleFilter,
   PEOPLE_VIEW_PATH,
   peoplePath,
+  personPath,
   SEARCH_PARAM,
   streamRows,
   type LevelCounts,
@@ -172,8 +173,15 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
   // Only a person has a dossier: a dossier is a merged history, and a history
   // is what a person has. An account nobody has placed carries its evidence on
   // its own row instead.
+  //
+  // The address being left goes with it, so the dossier's back link returns to
+  // this view on this chip and this term rather than to whichever entry happens
+  // to sit behind it.
   const openRow = (row: PeopleRow) => {
-    if (row.kind === "person") navigate(`/people/${encodeURIComponent(row.id)}`);
+    if (row.kind !== "person") return;
+    navigate(personPath(row.id), {
+      state: { from: peoplePath(view, { filter, search }) },
+    });
   };
 
   const loading = roster.isPending;

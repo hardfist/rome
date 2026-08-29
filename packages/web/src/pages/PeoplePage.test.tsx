@@ -435,7 +435,7 @@ function renderPage(entry = "/people") {
           <Route path="/people" element={<PeopleIndexRedirect />} />
           <Route path="/people/latest" element={<PeoplePage view="latest" />} />
           <Route path="/people/directory" element={<PeoplePage view="directory" />} />
-          <Route path="/people/:personId" element={<div>person page</div>} />
+          <Route path="/people/person/:personId" element={<div>person page</div>} />
         </Routes>
         <Address />
         <Back />
@@ -448,7 +448,12 @@ function renderPage(entry = "/people") {
  *  put in it. Rendered inside the router so it sees every navigation. */
 function Address() {
   const location = useLocation();
-  return <div data-testid="address">{`${location.pathname}${location.search}`}</div>;
+  return (
+    <>
+      <div data-testid="address">{`${location.pathname}${location.search}`}</div>
+      <div data-testid="origin">{(location.state as { from?: string } | null)?.from ?? ""}</div>
+    </>
+  );
 }
 
 /** The browser's back button, which `MemoryRouter` has no chrome for. What it
@@ -1120,5 +1125,22 @@ describe("PeoplePage puts its controls in the address", () => {
 
     expect(await screen.findByText("Wei Chen")).toBeTruthy();
     expect(checked("All")).toBe(true);
+  });
+});
+
+// A dossier is opened from a view, and the view it was opened from is what its
+// back link owes the guardian. The address travels with the navigation rather
+// than being inferred from history, which a merge rewrites.
+describe("PeoplePage hands the dossier the view it was opened from", () => {
+  it("names the view, the chip and the term the person was reached from", async () => {
+    const user = userEvent.setup();
+    mockApi({ people: [GUARDIAN, FRIEND, QUIET_PERSON] });
+    renderPage("/people/directory?level=inner-circle");
+
+    await user.click(await screen.findByRole("button", { name: /Wei Chen/ }));
+
+    expect(await screen.findByText("person page")).toBeTruthy();
+    expect(screen.getByTestId("address").textContent).toBe("/people/person/wei-chen");
+    expect(screen.getByTestId("origin").textContent).toBe("/people/directory?level=inner-circle");
   });
 });

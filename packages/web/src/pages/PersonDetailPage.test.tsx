@@ -13,7 +13,7 @@ import {
   type PersonResource,
 } from "@rome/api-types/people";
 import i18n from "@/i18n";
-import PersonDetailPage from "./PersonDetailPage";
+import PersonDetailPage, { PersonLegacyRedirect } from "./PersonDetailPage";
 
 // The person page: who they are on top, the merged timeline below. What is under
 // test is that the page reads the two routes that own it — `GET /api/people/:id`
@@ -213,14 +213,17 @@ function mockApi(
  *  dossier is the address they arrived on. */
 function renderPage(id = "wei-chen", before?: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const entries = before ? [before, `/people/${id}`] : [`/people/${id}`];
+  const entries = before
+    ? [before, { pathname: `/people/person/${id}`, state: { from: before } }]
+    : [`/people/person/${id}`];
   const view = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
         <Routes>
           <Route path="/people/latest" element={<div>the stream</div>} />
           <Route path="/people/directory" element={<div>the directory</div>} />
-          <Route path="/people/:personId" element={<PersonDetailPage />} />
+          <Route path="/people/person/:personId" element={<PersonDetailPage />} />
+          <Route path="/people/:personId" element={<PersonLegacyRedirect />} />
         </Routes>
         <Address />
       </MemoryRouter>
@@ -564,5 +567,58 @@ describe("PersonDetailPage management", () => {
     await user.click(await screen.findByRole("option", { name: "Inner circle" }));
 
     expect(await screen.findByRole("alert")).toBeTruthy();
+  });
+});
+
+// A person id is a slug of the guardian's own display name, so `latest` and
+// `directory` are ids a guardian can mint. The dossier answers under its own
+// segment for that reason, and the address a person was reached by keeps
+// working.
+describe("PersonDetailPage is reachable whatever the guardian named the person", () => {
+  it("opens a person whose id collides with a view name", async () => {
+    mockApi({ person: { ...PERSON, id: "latest", displayName: "Latest" } });
+    renderPage("latest");
+
+    expect(await screen.findByRole("heading", { name: "Latest" })).toBeTruthy();
+  });
+
+  it("forwards the address a person used to be reached by", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    mockApi();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/people/wei-chen"]}>
+          <Routes>
+            <Route path="/people/latest" element={<div>the stream</div>} />
+            <Route path="/people/person/:personId" element={<PersonDetailPage />} />
+            <Route path="/people/:personId" element={<PersonLegacyRedirect />} />
+          </Routes>
+          <Address />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Wei Chen" })).toBeTruthy();
+    expect(screen.getByTestId("address").textContent).toBe("/people/person/wei-chen");
+  });
+});
+
+describe("PersonDetailPage back link survives a merge", () => {
+  it("returns to the view it was opened from, not to the person the merge deleted", async () => {
+    const user = userEvent.setup();
+    mockApi({ people: [DUPLICATE] });
+    renderPage("wei-chen", "/people/directory?level=inner-circle");
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("button", { name: "Merge into another person…" }));
+    await user.click(await screen.findByRole("button", { name: /W\. Chen/ }));
+    await screen.findByRole("heading", { name: "W. Chen" });
+
+    // The merge deleted Wei Chen, so stepping back through history would land
+    // on a dossier that 404s. The survivor carries the origin instead.
+    await user.click(screen.getByRole("button", { name: "People" }));
+
+    expect(await screen.findByText("the directory")).toBeTruthy();
+    expect(screen.getByTestId("address").textContent).toBe("/people/directory?level=inner-circle");
   });
 });

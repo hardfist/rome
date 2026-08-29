@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, CircleAlert } from "lucide-react";
 import { formatWhatsAppPhone, type TimelineEntry } from "@rome/api-types/people";
@@ -10,7 +10,7 @@ import { Avatar } from "./people/avatar";
 import { ChannelPill } from "./people/channel-meta";
 import { clockTime, dayLabel, navigatorLocale, startOfDay } from "./people/format";
 import { PersonManagement } from "./people/manage";
-import { PEOPLE_VIEW_PATH } from "./people/people-model";
+import { PEOPLE_VIEW_PATH, personPath } from "./people/people-model";
 import { usePerson, usePersonTimeline } from "./people/use-roster";
 
 /**
@@ -51,13 +51,13 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Back to where the dossier was opened from, which is a real address now that
-  // each People view has one: a guardian who reached this person from the
-  // directory, on a chip, returns to that and not to the default stream. A
-  // dossier opened by pasted link has nothing behind it — react-router marks
-  // that first entry "default" — so it falls back to the view `/people` is.
-  const back = () =>
-    location.key === "default" ? navigate(PEOPLE_VIEW_PATH.latest) : navigate(-1);
+  // Where the dossier was opened from, carried on the navigation that opened
+  // it. An address rather than a step through history: a merge ends with this
+  // person deleted and the survivor's dossier open, so counting entries
+  // backwards walks onto a person who no longer exists. A dossier reached by
+  // pasted link carries no origin and falls back to the view `/people` is.
+  const origin = (location.state as { from?: string } | null)?.from;
+  const back = () => navigate(origin ?? PEOPLE_VIEW_PATH.latest);
 
   const personQuery = usePerson(personId);
   const timeline = usePersonTimeline(personId);
@@ -143,10 +143,14 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
           </div>
           {/* A merge ends with this person gone, so the page that had them open
               follows the account history to the survivor rather than sitting on
-              a route that now 404s. */}
+              a route that now 404s. It replaces rather than pushes, and hands
+              the survivor the same origin: the entry this dossier occupies
+              names a person the merge just deleted. */}
           <PersonManagement
             person={person}
-            onMerged={(survivorId) => navigate(`/people/${encodeURIComponent(survivorId)}`)}
+            onMerged={(survivorId) =>
+              navigate(personPath(survivorId), { replace: true, state: { from: origin } })
+            }
           />
         </div>
 
@@ -228,6 +232,19 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
       </PageBody>
     </PageShell>
   );
+}
+
+/**
+ * The address a person was reached by before the dossier took its own segment.
+ *
+ * A person id never named a view, so forwarding is unambiguous: `/people/wei-chen`
+ * meant that dossier and still reaches it. The two view segments are matched by
+ * their own routes ahead of this one and never arrive here.
+ */
+export function PersonLegacyRedirect() {
+  const params = useParams<{ personId: string }>();
+  const location = useLocation();
+  return <Navigate to={personPath(params.personId ?? "")} state={location.state} replace />;
 }
 
 function BackLink({ onClick }: { onClick: () => void }) {

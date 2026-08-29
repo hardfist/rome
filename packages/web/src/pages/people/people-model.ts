@@ -72,6 +72,18 @@ export const FILTER_PARAM = "level";
 export const SEARCH_PARAM = "q";
 
 /**
+ * Where one person's dossier answers.
+ *
+ * Under its own segment, because a person id is a slug of the display name the
+ * guardian gave them: `generatePersonSlug("Latest")` is `latest`. Sharing the
+ * views' segment would leave a person named after one of them with no address
+ * that reaches their dossier.
+ */
+export function personPath(personId: string): string {
+  return `/people/person/${encodeURIComponent(personId)}`;
+}
+
+/**
  * The chip a URL asks for, or "all" when it names none the rail offers.
  *
  * An address is typed, kept and shared, so it will eventually name a level the

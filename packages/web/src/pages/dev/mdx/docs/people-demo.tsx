@@ -398,7 +398,7 @@ export function ViewSwitcherDemo() {
 export function PersonPageDemo() {
   const { t } = useTranslation("people");
   return (
-    <Frame label="/people/:personId">
+    <Frame label="/people/person/:personId">
       <div className="flex flex-col gap-4 p-2">
         <div className="flex items-start gap-3">
           <Avatar name="Mira Okafor" size="lg" />
