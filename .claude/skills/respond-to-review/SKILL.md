@@ -81,7 +81,7 @@ Routing: link the follow-up issue in the reply, with one line on why it is separ
 | Contradicts a claim the PR description makes | Real — run Test 5 |
 | Names an existing consumer of changed code (shared component, pooled worker) | Real — fix |
 | Comes with a concrete failure sequence you can script | Real — fix |
-| "No action required" / "for the record" / "consider" / "latent" | Decline |
+| Presented by the bot as optional or non-blocking | Decline |
 | Restates a "Not in this PR" item or documented tradeoff | Decline |
 | Needs a caller, input, or implementation that does not exist | Decline |
 | Defect also present on `main` without this diff | Follow-up issue |
