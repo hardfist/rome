@@ -7,7 +7,7 @@ description: Triage and answer automated code-review findings on a PR without gr
 
 Goal end-state: every finding on the PR has exactly one of four answers — a minimal fix with a test, a corrected claim in the PR description, a follow-up issue, or a written decline. The PR's diff grows as little as possible.
 
-The bots present real defects and noise in the same authoritative voice. Classification precedes code. Never start implementing a finding before classifying it.
+Classification precedes code. Never start implementing a finding before classifying it.
 
 ## Phase 1 — Gather and dedupe
 
@@ -21,7 +21,7 @@ gh api "repos/$REPO/pulls/<PR>/comments" --paginate --jq '.[] | "[\(.user.login)
 
 1. Drop reviews marked "This review has been superseded."
 2. Merge duplicate findings — same file, same defect — into one item. Post the answer once and cross-link it from the other thread.
-3. Discard the bots' severity labels and verdicts. Severity does not predict which findings are real. Phase 2 re-derives it from evidence.
+3. Discard the bots' severity labels and verdicts. Phase 2 re-derives priority.
 
 ## Phase 2 — Classify every finding
 
@@ -29,21 +29,21 @@ Run each finding through these tests in order. The first test that matches decid
 
 ### Test 1 — the bot hedged
 
-If the finding contains "no action required", "flagging for the record", "consider", "worth noting", "latent today", "optional", "acceptable", or "retained deliberately", the bot found nothing actionable. Bucket: **decline**, with a one-line acknowledgment.
+If the finding contains "no action required", "flagging for the record", "consider", "worth noting", "latent today", "optional", "acceptable", or "retained deliberately": **decline**, with a one-line acknowledgment.
 
 ### Test 2 — the PR already disclosed it
 
-If the finding restates a "Not in this PR" item, a stated tradeoff, or a documented transitional state, the decision is already made in the open. Bucket: **decline**, pointing at the section that covers it.
+If the finding restates a "Not in this PR" item, a stated tradeoff, or a documented transitional state: **decline**, pointing at the section that covers it.
 
 ### Test 3 — no caller can reach it
 
-A real finding names a defect reachable today: on `main` plus this diff, with the callers and inputs that exist. Ask what concrete caller, with what concrete input, hits the defect. If the answer needs a future adapter, a third-party implementation, an input no caller produces, or a scale nothing is wired to reach, the defect cannot happen. Bucket: **decline**, stating what would have to exist first. If the concern matters later, one sentence in the interface contract or a follow-up issue records it. Code does not.
+Ask what concrete caller, with what concrete input, hits the defect on `main` plus this diff. If the answer needs a future adapter, a third-party implementation, an input no caller produces, or a scale nothing is wired to reach: **decline**, stating what would have to exist first. If the concern matters later, record it as one sentence in the interface contract or as a follow-up issue.
 
 ### Test 4 — the defect predates the diff
 
-If the defect exists on `main` without this diff — "other entrypoints have the same problem", "the release process must also move" — it is adjacent work, not review response. Bucket: **follow-up issue**, linked from the reply.
+If the defect exists on `main` without this diff: **follow-up issue**, linked from the reply.
 
-One exception: if the PR's own contract makes the old defect load-bearing — for example, the PR claims parity with the code that carries it — fix it in this PR.
+Exception: if the PR's own claims depend on the old code being correct — for example, a claim of parity with it — fix the defect in this PR.
 
 ### Test 5 — code or claim
 
@@ -62,23 +62,23 @@ For each finding in the **fix** bucket:
 1. Reproduce the finding as a failing test against real callers. If no such test can be written, return the finding to Phase 2 as a decline.
 2. Make the smallest change that passes. Prefer deleting or narrowing over adding. A defensive branch requires both a test that fails without it and a caller that can reach it.
 3. Check that reverting the fix fails exactly the new test.
-4. Watch the accumulated response diff. When it nears a third of the PR's own diff, stop — the work is scope growth, and every added line is new surface for the next review round. Shrink a claim or move the rest to a follow-up issue.
+4. When the accumulated response diff nears a third of the PR's own diff, stop. Shrink a claim or move the rest to a follow-up issue.
 
 ## Phase 4 — Answer every thread
 
-No finding is skipped silently. The written decline is what stops the same finding from recurring on the next PR.
+No finding is skipped silently.
 
 Accepting:
 
 - Confirm it plainly: "Confirmed and fixed in `<commit>` — this was real."
 - State the reproduction: what the failing test asserts and how it failed before the fix.
-- Add what the bot's analysis missed, if anything — a worse failure mode, a second call site given the same guard.
+- Add what the bot's analysis missed, if anything.
 
 Declining:
 
 - Disclosed tradeoff: one sentence pointing at the PR section that covers it.
-- Unreachable scenario: name the caller or input that would have to exist first, and where the concern is recorded if it is worth recording.
-- Intended behavior: "This is intended" plus the reason is a complete reply.
+- Unreachable scenario: name the caller or input that would have to exist first.
+- Intended behavior: "This is intended" plus the reason.
 
 Routing: link the follow-up issue in the reply, with one line on why it is separate work.
 
@@ -95,4 +95,4 @@ Routing: link the follow-up issue in the reply, with one line on why it is separ
 | Defect also present on `main` without this diff | Follow-up issue |
 | "Also fix these other places" | Follow-up issue |
 
-A thorough PR description makes this skill cheap to run. Every "Not in this PR" line and stated tradeoff turns a potential debate into a one-sentence decline. Write those sections before requesting review.
+A "Not in this PR" line or a stated tradeoff in the PR description turns a finding into a one-sentence decline. Write those sections before requesting review.
