@@ -59,42 +59,68 @@ describe("LinkedInStoreRepository", () => {
     expect(cursor?.lastMessageAt?.getTime()).toBe(at.getTime());
   });
 
-  it("markThreadSynced advances the watermark and records group metadata", async () => {
-    await repo.upsertThreads([thread("t1", new Date())]);
+  // The group flag is read through what it decides rather than read back as a
+  // field: a thread LinkedIn calls a group is not one of its members' direct
+  // threads, so its messages stop counting towards that member. That is the
+  // whole reason the poller stores the flag, and the only reader left.
+  const memberOf = async (participantId: string) =>
+    (await repo.listParticipants()).find((row) => row.participantId === participantId);
+
+  /** One mirrored 1:1 thread with a single message on it. */
+  const seedDirectThread = async (threadId: string) => {
+    await repo.upsertThreads([thread(threadId, new Date("2026-08-19T20:00:00Z"))]);
+    await repo.upsertThreadParticipants(threadId, [
+      { participantId: "ACoAAAda0001", name: "Ada Lovelace", isSelf: false },
+      { participantId: "ACoAASelf001", name: "Guardian", isSelf: true },
+    ]);
+    await repo.upsertMessages([
+      {
+        messageId: `${threadId}-m1`,
+        threadId,
+        sentAt: new Date("2026-08-19T19:00:00Z"),
+        senderName: "Ada Lovelace",
+        senderProfileUrl: null,
+        senderHeadline: null,
+        senderType: "member",
+        senderIsSelf: false,
+        text: "See you Sunday?",
+        subject: null,
+        reactionCount: null,
+      },
+    ]);
+  };
+
+  it("markThreadSynced advances the watermark and records the group flag", async () => {
+    await seedDirectThread("t1");
+    expect((await memberOf("ACoAAAda0001"))?.messageCount).toBe(1);
+
     await repo.markThreadSynced("t1", {
       conversationTitle: "Weekend plans",
       isGroup: true,
     });
 
-    const cursor = (await repo.getThreadCursors(["t1"])).get("t1");
-    expect(cursor?.lastSyncedAt).not.toBeNull();
-    const row = (await repo.listThreads()).find((t) => t.threadId === "t1");
-    expect(row?.conversationName).toBe("Weekend plans");
-    expect(row?.isGroup).toBe(true);
+    expect((await repo.getThreadCursors(["t1"])).get("t1")?.lastSyncedAt).not.toBeNull();
+    // The snapshot said "group", so the thread stops being Ada's history.
+    expect((await memberOf("ACoAAAda0001"))?.messageCount).toBe(0);
   });
 
   it("null snapshot metadata never clears what an earlier snapshot learned", async () => {
-    await repo.upsertThreads([thread("t1", new Date())]);
-    await repo.markThreadSynced("t1", {
-      conversationTitle: "Weekend plans",
-      isGroup: true,
-    });
+    await seedDirectThread("t1");
+    await repo.markThreadSynced("t1", { conversationTitle: "Weekend plans", isGroup: true });
     // A later snapshot from an older plugin reports nothing.
-    await repo.markThreadSynced("t1", {
-      conversationTitle: null,
-      isGroup: null,
-    });
+    await repo.markThreadSynced("t1", { conversationTitle: null, isGroup: null });
 
-    const row = (await repo.listThreads()).find((t) => t.threadId === "t1");
-    expect(row?.conversationName).toBe("Weekend plans");
-    expect(row?.isGroup).toBe(true);
+    // Still a group. A null that overwrote would silently hand nine other
+    // people's words back to Ada.
+    expect((await memberOf("ACoAAAda0001"))?.messageCount).toBe(0);
   });
 
-  it("a never-snapshotted thread reads isGroup as unknown, not 1:1", async () => {
-    await repo.upsertThreads([thread("t1", new Date())]);
-    const row = (await repo.listThreads()).find((t) => t.threadId === "t1");
-    expect(row?.isGroup).toBeNull();
-    expect(row?.participantCount).toBeNull();
+  it("a never-snapshotted thread is unknown rather than a group", async () => {
+    await seedDirectThread("t1");
+    // No snapshot has run, so the flag is null — and null is not a group, or a
+    // thread would be withheld from its own counterparty until one did.
+    expect((await repo.getThreadCursors(["t1"])).get("t1")?.lastSyncedAt).toBeNull();
+    expect((await memberOf("ACoAAAda0001"))?.messageCount).toBe(1);
   });
 
   it("message upsert is idempotent and refreshes mutable fields", async () => {
@@ -119,74 +145,6 @@ describe("LinkedInStoreRepository", () => {
     const history = await repo.fetchHistory("t1", new Date(0));
     expect(history).toHaveLength(1);
     expect(history[0].text).toBe("See you Sunday at 7?");
-  });
-
-  it("listThreads returns newest-conversation-first with message counts", async () => {
-    await repo.upsertThreads([
-      thread("t-old", new Date("2026-08-10T10:00:00Z")),
-      thread("t-new", new Date("2026-08-19T10:00:00Z")),
-      {
-        threadId: "t-silent",
-        threadUrl: "https://www.linkedin.com/messaging/thread/t-silent/",
-        personName: "Quiet Contact",
-        lastMessagePreview: null,
-        lastMessageAt: null,
-        unread: false,
-      },
-    ]);
-    await repo.upsertMessages([
-      {
-        messageId: "m1",
-        threadId: "t-new",
-        sentAt: new Date("2026-08-19T10:00:00Z"),
-        senderName: "Ada Lovelace",
-        senderProfileUrl: null,
-        senderHeadline: null,
-        senderType: "member",
-        senderIsSelf: false,
-        text: "hello",
-        subject: null,
-        reactionCount: null,
-      },
-    ]);
-
-    const rows = await repo.listThreads();
-    expect(rows.map((r) => r.threadId)).toEqual(["t-new", "t-old", "t-silent"]);
-    expect(rows[0].messageCount).toBe(1);
-    expect(rows[0].lastMessageAt).toBe(Math.floor(Date.parse("2026-08-19T10:00:00Z") / 1000));
-    expect(rows[0].unread).toBe(true);
-    expect(rows[2].lastMessageAt).toBeNull();
-  });
-
-  it("getMessages returns the newest slice oldest-first and honors before", async () => {
-    await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
-    const msg = (messageId: string, iso: string) => ({
-      messageId,
-      threadId: "t1",
-      sentAt: new Date(iso),
-      senderName: "Ada Lovelace",
-      senderProfileUrl: null,
-      senderHeadline: "Engineer",
-      senderType: "member",
-      senderIsSelf: false,
-      text: messageId,
-      subject: null,
-      reactionCount: null,
-    });
-    await repo.upsertMessages([
-      msg("m1", "2026-08-19T10:00:00Z"),
-      msg("m2", "2026-08-19T11:00:00Z"),
-      msg("m3", "2026-08-19T12:00:00Z"),
-    ]);
-
-    const latestTwo = await repo.getMessages("t1", { limit: 2 });
-    expect(latestTwo.map((m) => m.messageId)).toEqual(["m2", "m3"]);
-    expect(latestTwo[0].timestamp).toBe(Math.floor(Date.parse("2026-08-19T11:00:00Z") / 1000));
-
-    const beforeM3 = await repo.getMessages("t1", {
-      before: Math.floor(Date.parse("2026-08-19T12:00:00Z") / 1000),
-    });
-    expect(beforeM3.map((m) => m.messageId)).toEqual(["m1", "m2"]);
   });
 
   it("fetchHistory scopes by thread, filters by since, and orders chronologically", async () => {
@@ -478,100 +436,9 @@ describe("LinkedInStoreRepository", () => {
     // The count a reader sees is a fact about the stored membership, not a
     // scalar the thread snapshot volunteered. The two used to be independent —
     // the number said "5" while the table held three people and nothing could
-    // tell which was wrong.
+    // tell which was wrong. No read hands that count out any more, so what is
+    // left to hold is the schema: the column that allowed the disagreement.
     describe("participant count derived from membership", () => {
-      it("the count a reader sees is the size of the stored membership", async () => {
-        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
-        await repo.upsertThreadParticipants("t1", [ada, grace, self]);
-
-        const row = (await repo.listThreads()).find((t) => t.threadId === "t1");
-        expect(row?.participantCount).toBe(3);
-        expect(row?.participantCount).toBe((await repo.getThreadParticipants("t1")).length);
-      });
-
-      it("a re-read that changed the membership moves the count with it", async () => {
-        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
-        await repo.upsertThreadParticipants("t1", [ada, grace, self]);
-        // Grace left.
-        await repo.upsertThreadParticipants("t1", [ada, self]);
-
-        const row = (await repo.listThreads()).find((t) => t.threadId === "t1");
-        expect(row?.participantCount).toBe(2);
-      });
-
-      it("a snapshot cannot set a count that disagrees with the membership", async () => {
-        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
-        await repo.upsertThreadParticipants("t1", [ada, self]);
-        // A snapshot lands afterwards; whatever it claims about the thread, the
-        // count still describes the two people actually stored.
-        await repo.markThreadSynced("t1", { conversationTitle: "Weekend plans", isGroup: true });
-
-        const row = (await repo.listThreads()).find((t) => t.threadId === "t1");
-        expect(row?.participantCount).toBe(2);
-      });
-
-      it("a thread whose membership has never been read reports no count", async () => {
-        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
-        await repo.markThreadSynced("t1", { conversationTitle: null, isGroup: false });
-
-        const row = (await repo.listThreads()).find((t) => t.threadId === "t1");
-        expect(row?.participantCount).toBeNull();
-        expect((await repo.getThreadParticipantSet("t1")).lastReadAt).toBeNull();
-      });
-
-      it("a thread seeded only from stored messages reports no count", async () => {
-        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
-        await repo.upsertMessages([
-          {
-            messageId: "m1",
-            threadId: "t1",
-            sentAt: new Date("2026-08-19T19:00:00Z"),
-            senderName: "Ada Lovelace",
-            senderProfileUrl: `https://www.linkedin.com/in/${ada.participantId}/`,
-            senderHeadline: "Engineer",
-            senderType: "member",
-            senderIsSelf: false,
-            text: "hi",
-            subject: null,
-            reactionCount: null,
-          },
-        ]);
-        await repo.backfillParticipantsFromMessages();
-
-        // The seed proves Ada is in the thread but says nothing about anyone
-        // who has not posted, so "1" would be a number nobody vouched for.
-        expect(await repo.getThreadParticipants("t1")).toHaveLength(1);
-        const row = (await repo.listThreads()).find((t) => t.threadId === "t1");
-        expect(row?.participantCount).toBeNull();
-      });
-
-      it("a thread read as empty reports zero rather than unknown", async () => {
-        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
-        await repo.upsertThreadParticipants("t1", []);
-
-        const row = (await repo.listThreads()).find((t) => t.threadId === "t1");
-        expect(row?.participantCount).toBe(0);
-      });
-
-      it("each thread's count is its own", async () => {
-        await repo.upsertThreads([
-          thread("t1", new Date("2026-08-19T20:00:00Z")),
-          thread("t2", new Date("2026-08-18T20:00:00Z")),
-          thread("t3", new Date("2026-08-17T20:00:00Z")),
-        ]);
-        await repo.upsertThreadParticipants("t1", [ada, grace, self]);
-        await repo.upsertThreadParticipants("t2", [ada, self]);
-
-        const byThread = new Map(
-          (await repo.listThreads()).map((t) => [t.threadId, t.participantCount]),
-        );
-        expect(byThread.get("t1")).toBe(3);
-        expect(byThread.get("t2")).toBe(2);
-        expect(byThread.get("t3")).toBeNull();
-      });
-
-      // The scalar column is what allowed the disagreement in the first place;
-      // with the count derived there is nothing left for it to hold.
       it("the migrations drop the standalone participant_count column", () => {
         const columns = testDb.db.all(
           sql`SELECT name FROM pragma_table_info('linkedin_threads')`,

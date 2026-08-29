@@ -24,48 +24,7 @@ export { linkedInMemberIdFromProfileUrl };
 
 const UPSERT_CHUNK = 200;
 const HISTORY_READ_LIMIT = 1000;
-const THREADS_READ_LIMIT = 10000;
 const PARTICIPANTS_READ_LIMIT = 10000;
-
-/** One mirrored thread, as `listThreads` hands it back. */
-export interface LinkedInThreadRow {
-  threadId: string;
-  threadUrl: string;
-  personName: string | null;
-  /** Raw group title only — never a joined-names fallback. */
-  conversationName: string | null;
-  lastMessagePreview: string | null;
-  /** Unix seconds, or null when the listing carried no timestamp yet. */
-  lastMessageAt: number | null;
-  unread: boolean;
-  /** LinkedIn's group flag; null until the first snapshot reports it. */
-  isGroup: boolean | null;
-  /**
-   * How many people are on the thread, counted from the stored membership —
-   * null until that membership has been read authoritatively. Null therefore
-   * means "not known yet", never "nobody": a thread only seeded from stored
-   * messages has rows but no count, because senders prove who has posted and
-   * say nothing about who else is listening.
-   */
-  participantCount: number | null;
-  counterpartyType: string | null;
-  category: string | null;
-  messageCount: number;
-}
-
-/** One message of a mirrored thread, as `getMessages` hands it back. */
-export interface LinkedInMessageRow {
-  messageId: string;
-  senderName: string | null;
-  senderHeadline: string | null;
-  senderProfileUrl: string | null;
-  senderIsSelf: boolean;
-  /** Unix seconds — sent_at when LinkedIn reported one, else first-seen. */
-  timestamp: number;
-  text: string | null;
-  subject: string | null;
-  reactionCount: number | null;
-}
 
 /**
  * One mirrored LinkedIn identity, annotated with whether it has been promoted
@@ -159,7 +118,15 @@ function chunked<T>(items: T[], size: number): T[][] {
 /**
  * Durable store for the LinkedIn inbox mirror (threads + recent message
  * history). Writes are fed by the inbox poller as a {@link LinkedInSyncSink};
- * reads serve the poller's watermarks and the history talk feature.
+ * reads serve the poller's watermarks, the account plane's fold over mirrored
+ * identities, and the history talk feature.
+ *
+ * Nothing here hands a thread or its messages to a reader as a thread. The
+ * dashboard reads LinkedIn through the person contract like every other
+ * channel, so every read out of this mirror is addressed by identity —
+ * {@link LinkedInStoreRepository.listParticipants}, scoped by
+ * {@link DIRECT_THREADS}. A thread-shaped read here would have no caller but a
+ * thread-shaped surface, and there is none.
  */
 export class LinkedInStoreRepository implements LinkedInSyncSink {
   constructor(private db: DrizzleDb) {}
@@ -280,92 +247,6 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
         ...(opts.isGroup != null ? { isGroup: opts.isGroup } : {}),
       })
       .where(sql`${linkedinThreads.threadId} = ${threadId}`);
-  }
-
-  /**
-   * The mirrored inbox, newest-conversation-first then by name — the People
-   * tab's LinkedIn section. Far simpler than the WhatsApp analog: threads are
-   * already one row each, so there is no identity folding to do.
-   */
-  async listThreads(): Promise<LinkedInThreadRow[]> {
-    const rows = (await this.db.all(sql`
-      SELECT
-        t.thread_id AS threadId,
-        t.thread_url AS threadUrl,
-        t.person_name AS personName,
-        t.conversation_name AS conversationName,
-        t.last_message_preview AS lastMessagePreview,
-        t.last_message_at AS lastMessageAt,
-        t.unread AS unread,
-        t.is_group AS isGroup,
-        CASE WHEN t.participants_last_read_at IS NULL THEN NULL ELSE (
-          SELECT COUNT(*) FROM linkedin_thread_participants tp
-          WHERE tp.thread_id = t.thread_id
-        ) END AS participantCount,
-        t.counterparty_type AS counterpartyType,
-        t.category AS category,
-        (SELECT COUNT(*) FROM linkedin_messages m WHERE m.thread_id = t.thread_id)
-          AS messageCount
-      FROM linkedin_threads t
-      ORDER BY (t.last_message_at IS NULL) ASC, t.last_message_at DESC,
-        lower(coalesce(t.person_name, t.conversation_name, t.thread_id)) ASC
-      LIMIT ${THREADS_READ_LIMIT}
-    `)) as Array<Record<string, unknown>>;
-
-    return rows.map((r) => ({
-      threadId: String(r.threadId),
-      threadUrl: String(r.threadUrl),
-      personName: (r.personName as string | null) ?? null,
-      conversationName: (r.conversationName as string | null) ?? null,
-      lastMessagePreview: (r.lastMessagePreview as string | null) ?? null,
-      lastMessageAt: r.lastMessageAt == null ? null : Number(r.lastMessageAt),
-      unread: Boolean(r.unread),
-      isGroup: r.isGroup == null ? null : Boolean(r.isGroup),
-      participantCount: r.participantCount == null ? null : Number(r.participantCount),
-      counterpartyType: (r.counterpartyType as string | null) ?? null,
-      category: (r.category as string | null) ?? null,
-      messageCount: Number(r.messageCount ?? 0),
-    }));
-  }
-
-  /** Recent messages for one thread, oldest→newest (newest at the bottom). */
-  async getMessages(
-    threadId: string,
-    opts: { limit?: number; before?: number } = {},
-  ): Promise<LinkedInMessageRow[]> {
-    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
-    const beforeClause =
-      opts.before != null ? sql`AND coalesce(m.sent_at, m.created_at) < ${opts.before}` : sql``;
-    const rows = (await this.db.all(sql`
-      SELECT
-        m.message_id AS messageId,
-        m.sender_name AS senderName,
-        m.sender_headline AS senderHeadline,
-        m.sender_profile_url AS senderProfileUrl,
-        m.sender_is_self AS senderIsSelf,
-        coalesce(m.sent_at, m.created_at) AS timestamp,
-        m.text AS text,
-        m.subject AS subject,
-        m.reaction_count AS reactionCount
-      FROM linkedin_messages m
-      WHERE m.thread_id = ${threadId} ${beforeClause}
-      ORDER BY coalesce(m.sent_at, m.created_at) DESC, m.rowid DESC
-      LIMIT ${limit}
-    `)) as Array<Record<string, unknown>>;
-
-    return rows
-      .map((r) => ({
-        messageId: String(r.messageId),
-        senderName: (r.senderName as string | null) ?? null,
-        senderHeadline: (r.senderHeadline as string | null) ?? null,
-        senderProfileUrl: (r.senderProfileUrl as string | null) ?? null,
-        senderIsSelf: Boolean(r.senderIsSelf),
-        timestamp: Number(r.timestamp),
-        text: (r.text as string | null) ?? null,
-        subject: (r.subject as string | null) ?? null,
-        reactionCount: r.reactionCount == null ? null : Number(r.reactionCount),
-      }))
-      .reverse();
   }
 
   /**

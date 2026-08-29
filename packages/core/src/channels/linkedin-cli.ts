@@ -1,9 +1,15 @@
 // The opencli boundary for the LinkedIn channel: one process runner plus the
-// parsers/classifiers for the commands the channel consumes (`whoami`, `inbox`,
-// `thread-snapshot`, `safe-send`). opencli drives Rome's server-side Chrome
-// over CDP, and the LinkedIn session lives in that browser's profile — Rome
-// never holds a LinkedIn credential; it holds the right to use the logged-in
-// browser.
+// parsers/classifiers for the commands the channel consumes (`whoami`,
+// `inbox`, `thread-snapshot`, `thread-participants`). opencli drives Rome's
+// server-side Chrome over CDP, and the LinkedIn session lives in that browser's
+// profile — Rome never holds a LinkedIn credential; it holds the right to use
+// the logged-in browser.
+//
+// Every command wrapped here is a read. Rome wrapped `linkedin safe-send` too,
+// for the People page's LinkedIn composer; that composer is gone and nothing
+// else sends, so the wrapper went with it. The opencli command is untouched
+// and still reachable from a shell — what Rome no longer has is a LinkedIn
+// send path a dashboard request can reach.
 //
 // Error taxonomy mirrors connections/errors.ts: an auth wall / logged-out
 // session is `OpencliAuthError` (the caller maps it to CredentialRejected);
@@ -378,69 +384,4 @@ export async function readLinkedInThreadParticipants(
     opts,
   );
   return parseThreadParticipants(result);
-}
-
-// ── safe-send ────────────────────────────────────────────────────────────
-
-const safeSendRowSchema = z.object({
-  status: z.literal("sent"),
-  recipient: z.string().min(1),
-  reason: z.string().min(1),
-  thread_url: z.string().min(1),
-  message_chars: z.number(),
-});
-
-export interface LinkedInSafeSendInput {
-  threadUrl: string;
-  expectedName: string;
-  message: string;
-}
-
-export interface LinkedInSafeSendResult {
-  status: "sent";
-  recipient: string;
-  reason: string;
-  threadUrl: string;
-  messageChars: number;
-}
-
-/** Parse the single confirmation row emitted by `linkedin safe-send --send`. */
-export function parseSafeSend(result: OpencliResult): LinkedInSafeSendResult {
-  const raw = parseJsonOutput("linkedin safe-send", result);
-  const rows = z.array(safeSendRowSchema).length(1).safeParse(raw);
-  if (!rows.success) {
-    throw new OpencliCommandError("linkedin safe-send", "unexpected output shape");
-  }
-  const row = rows.data[0]!;
-  return {
-    status: row.status,
-    recipient: row.recipient,
-    reason: row.reason,
-    threadUrl: row.thread_url,
-    messageChars: row.message_chars,
-  };
-}
-
-/**
- * Send one reply through opencli's fail-closed LinkedIn writer. The command
- * verifies the exact thread and visible recipient before it fills the
- * composer, then verifies them again before Send.
- */
-export async function safeSendLinkedInReply(
-  input: LinkedInSafeSendInput,
-  run: RunOpencli = runOpencli,
-): Promise<LinkedInSafeSendResult> {
-  const result = await run([
-    "linkedin",
-    "safe-send",
-    "--thread-url",
-    input.threadUrl,
-    "--expected-name",
-    input.expectedName,
-    "--message",
-    input.message,
-    "--send",
-    "true",
-  ]);
-  return parseSafeSend(result);
 }

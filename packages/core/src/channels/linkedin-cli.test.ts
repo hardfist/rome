@@ -3,12 +3,10 @@ import {
   OpencliAuthError,
   OpencliCommandError,
   parseInbox,
-  parseSafeSend,
   parseThreadParticipants,
   parseThreadSnapshot,
   parseWhoami,
   readLinkedInThreadParticipants,
-  safeSendLinkedInReply,
   type OpencliResult,
 } from "./linkedin-cli.js";
 
@@ -195,72 +193,6 @@ describe("parseThreadSnapshot", () => {
     expect(messages[1].conversationIsGroup).toBe(true);
     expect(messages[1].conversationTitle).toBe("Pitch review");
     expect(messages[1].participantCount).toBe(3);
-  });
-});
-
-describe("safeSendLinkedInReply", () => {
-  it("calls opencli safe-send with thread verification and send enabled", async () => {
-    const run = vi.fn(async () =>
-      ok(
-        JSON.stringify([
-          {
-            status: "sent",
-            recipient: "Ada Lovelace",
-            reason: "verified",
-            thread_url: "https://www.linkedin.com/messaging/thread/2-abc==/",
-            message_chars: 18,
-            screenshot: "",
-          },
-        ]),
-      ),
-    );
-
-    const result = await safeSendLinkedInReply(
-      {
-        threadUrl: "https://www.linkedin.com/messaging/thread/2-abc==/",
-        expectedName: "Ada Lovelace",
-        message: "Thursday works!",
-      },
-      run,
-    );
-
-    expect(run).toHaveBeenCalledWith([
-      "linkedin",
-      "safe-send",
-      "--thread-url",
-      "https://www.linkedin.com/messaging/thread/2-abc==/",
-      "--expected-name",
-      "Ada Lovelace",
-      "--message",
-      "Thursday works!",
-      "--send",
-      "true",
-    ]);
-    expect(result).toEqual({
-      status: "sent",
-      recipient: "Ada Lovelace",
-      reason: "verified",
-      threadUrl: "https://www.linkedin.com/messaging/thread/2-abc==/",
-      messageChars: 18,
-    });
-  });
-
-  it("rejects a dry-run result because the reply was not sent", () => {
-    expect(() =>
-      parseSafeSend(
-        ok(
-          JSON.stringify([
-            {
-              status: "verified_dry_run",
-              recipient: "Ada Lovelace",
-              reason: "verified",
-              thread_url: "https://www.linkedin.com/messaging/thread/2-abc==/",
-              message_chars: 18,
-            },
-          ]),
-        ),
-      ),
-    ).toThrow(OpencliCommandError);
   });
 });
 
