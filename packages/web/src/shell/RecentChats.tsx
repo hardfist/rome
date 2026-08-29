@@ -218,6 +218,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const renamingRef = useRef(false);
   const activeSessionId = activeSessionFromPath(location.pathname);
   const searchShortcut = chatSearchShortcutForPlatform();
 
@@ -444,6 +445,10 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   );
 
   const startRename = useCallback((session: ChatSession) => {
+    // Rename is the one row action that moves focus into the row, so the
+    // closing menu must not restore focus on top of it. The flag tells the
+    // menu below to skip that restore.
+    renamingRef.current = true;
     // Defer entering edit mode until the row menu has fully closed, so its
     // focus restoration doesn't blur (and prematurely commit) the new input.
     setEditingValue(session.name);
@@ -565,6 +570,17 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
             <DropdownMenuContent
               side="bottom"
               align="end"
+              onCloseAutoFocus={(event) => {
+                // Radix restores focus to the trigger as the menu closes, but
+                // the trigger is display:none while the row is renaming, so the
+                // restore lands on <body> and blurs the rename input — which
+                // commits the rename before a key is typed. The rename path
+                // owns focus, so skip the restore there and leave it for every
+                // other action, where returning to the trigger is right.
+                if (!renamingRef.current) return;
+                renamingRef.current = false;
+                event.preventDefault();
+              }}
               onKeyDown={(event) => {
                 // Radix composes this ahead of its own typeahead and drops that
                 // handler once the event is defaulted. Without the preventDefault

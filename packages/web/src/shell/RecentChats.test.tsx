@@ -596,6 +596,24 @@ describe("RecentChats", () => {
     expect(screen.getByText("Renamed chat")).toBeTruthy();
   });
 
+  it("leaves focus in the rename input once the menu has closed", async () => {
+    // The actions trigger is display:none while the row renames, so Radix's
+    // focus restore would land on <body>, blur the input, and commit the
+    // rename before a key is typed.
+    mockSessions([activeSession()]);
+    const user = userEvent.setup();
+
+    renderRecentChats();
+    await screen.findByText("Active chat");
+
+    await user.click(screen.getByRole("button", { name: "Chat actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+
+    const input = await screen.findByRole("textbox", { name: "Chat name" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(document.activeElement).toBe(input);
+  });
+
   it("cancels a rename on Escape without PATCHing", async () => {
     const spy = mockSessions([activeSession()]);
     const user = userEvent.setup();
