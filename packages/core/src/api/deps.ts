@@ -2,7 +2,6 @@ import type { ActionEngine } from "../actions/engine.js";
 import type { ActionLoader } from "../actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
-import type { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import type { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import type { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import type { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
@@ -79,9 +78,9 @@ export interface ApiDeps {
   /** WhatsApp's account plane over that mirror — who it can reach, folded onto
    *  one account per person, and what was last said to each. */
   whatsAppAccounts: WhatsAppAccounts;
-  /** Durable mirror of the LinkedIn inbox + message history (People tab). */
-  linkedInStoreRepo: LinkedInStoreRepository;
-  /** The account plane over that mirror. */
+  /** LinkedIn's account plane over its own inbox mirror — the same shape
+   *  WhatsApp's is, and all the API needs of LinkedIn. The mirror behind it is
+   *  the poller's and the timeline's; no route reads it directly. */
   linkedInAccounts: LinkedInAccounts;
   /** What each platform calls an account, over every address book Rome mirrors
    *  and the names senders put on their own messages — the display name a

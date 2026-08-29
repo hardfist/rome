@@ -42,9 +42,7 @@ const webSources = [
 function hits(pattern: RegExp): string[] {
   return webSources.flatMap((path) => {
     const source = readFileSync(path, "utf8");
-    return [...source.matchAll(pattern)].map(
-      (match) => `${relative(webRoot, path)}:${match[0]}`,
-    );
+    return [...source.matchAll(pattern)].map((match) => `${relative(webRoot, path)}:${match[0]}`);
   });
 }
 

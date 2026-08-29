@@ -27,7 +27,7 @@ const HISTORY_READ_LIMIT = 1000;
 const THREADS_READ_LIMIT = 10000;
 const PARTICIPANTS_READ_LIMIT = 10000;
 
-/** One thread row for the People tab's LinkedIn section. */
+/** One mirrored thread, as `listThreads` hands it back. */
 export interface LinkedInThreadRow {
   threadId: string;
   threadUrl: string;
@@ -53,7 +53,7 @@ export interface LinkedInThreadRow {
   messageCount: number;
 }
 
-/** One message row of `/api/linkedin/threads/:threadId/messages`. */
+/** One message of a mirrored thread, as `getMessages` hands it back. */
 export interface LinkedInMessageRow {
   messageId: string;
   senderName: string | null;

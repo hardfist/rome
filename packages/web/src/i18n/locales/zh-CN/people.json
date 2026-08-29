@@ -134,30 +134,6 @@
     "today": "今天",
     "yesterday": "昨天"
   },
-  "linkedin": {
-    "heading": "领英消息",
-    "description": "由领英连接从你的领英收件箱同步",
-    "searchPlaceholder": "搜索姓名或消息预览…",
-    "emptyForSearch": "没有匹配的对话",
-    "loadingThreads": "正在加载对话…",
-    "emptyTitle": "暂无领英对话",
-    "emptyHint": "还没有同步内容——如果尚未连接领英,请到设置中连接。",
-    "groupChat": "群组对话",
-    "participants_one": "{{count}} 位参与者",
-    "participants_other": "{{count}} 位参与者",
-    "thread": "领英对话",
-    "unread": "未读",
-    "messages": "消息",
-    "dialogTitle": "消息 · {{name}}",
-    "openInLinkedIn": "在领英中打开",
-    "loading": "正在加载消息…",
-    "noMessages": "尚未同步到消息",
-    "noMessagesHint": "消息会在下次同步后出现——Rome 每小时检查数次。",
-    "composerPlaceholder": "在领英中回复",
-    "send": "发送",
-    "sendFailed": "领英回复发送失败 — 点按重试",
-    "notConnected": "领英尚未连接 — 请先在设置中连接再回复。"
-  },
   "createForm": {
     "nameLabel": "姓名",
     "bondLevelLabel": "亲密度"

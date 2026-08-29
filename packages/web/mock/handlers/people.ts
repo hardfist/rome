@@ -11,12 +11,6 @@ import {
   whatsAppDisplayName,
   type TimelineEntry,
 } from "@rome/api-types/people";
-import type {
-  LinkedInMessage,
-  LinkedInThread,
-  WhatsAppContact,
-  WhatsAppMessage,
-} from "@/pages/people/channel-mirror-shapes";
 
 /**
  * The People tab's in-memory store: the curated people, the sentinel log, and
@@ -28,6 +22,48 @@ import type {
  * to the thread a mirror endpoint opens, and a send lands where the next read
  * of either surface will find it.
  */
+
+// The WhatsApp mirror's own shapes, which are on neither noun of the /people
+// contract: a thread is a conversation rather than an account, so nothing here
+// reaches a /accounts row.
+//
+// They live in this file because this file is their only reader. The dashboard
+// reads the channel-blind contract instead, and core still serves
+// `/api/whatsapp/contacts*` for callers outside it — so the mock keeps standing
+// in for routes that exist, and nothing else needs the definitions to do it.
+
+/** One row of `/api/whatsapp/contacts/:jid/messages`. */
+interface WhatsAppMessage {
+  id: string;
+  senderJid: string | null;
+  senderName: string | null;
+  senderPhoneNumber: string | null;
+  fromMe: boolean;
+  /** Unix seconds. */
+  timestamp: number;
+  type: string | null;
+  text: string | null;
+  hasMedia: boolean;
+  pushName: string | null;
+  reactsToId: string | null;
+}
+
+/** One row of `/api/whatsapp/contacts`. */
+interface WhatsAppContact {
+  jid: string;
+  phoneNumber: string | null;
+  name: string | null;
+  notify: string | null;
+  verifiedName: string | null;
+  imgUrl: string | null;
+  chatName: string | null;
+  isGroup: boolean;
+  linkedPersonId: string | null;
+  linkedPersonName: string | null;
+  lastMessageAt: number | null;
+  lastMessagePreview: string | null;
+  messageCount: number;
+}
 
 const MINUTE = 60;
 const HOUR = 60 * MINUTE;
@@ -87,6 +123,11 @@ const HIKES_JID = "120363041948572901@g.us";
  *  a synced channel. Production feeds all three from one message and one push
  *  name, so they read them from here. Her contact row needs no entry of its own:
  *  it projects off the thread. */
+// LinkedIn addresses a member by its bare member id, which is the
+// `channelUserId` an inbound LinkedIn message resolves through.
+const LI_ARVIND_MEMBER = "ACoAAArvind01";
+const LI_CALEB_MEMBER = "ACoAACaleb02";
+
 const DEVIKA_NAME = "Devika";
 const DEVIKA_LATEST = { text: "Are you going on Saturday?", at: 3 * HOUR };
 
@@ -147,6 +188,17 @@ export const persons: PersonFixture[] = [
     displayName: "Mira Chen",
     bondLevel: "acquaintance",
     channelMappings: [{ channel: "whatsapp", channelUserId: MIRA_JID }],
+  },
+  {
+    // Reachable on LinkedIn and nowhere else. LinkedIn used to be a section of
+    // its own below this page, on its own endpoints, because a thread resolved
+    // to no person; it resolves now, so this row is how the channel appears —
+    // a contact in the directory with a history on their own page, the same as
+    // a WhatsApp-only contact.
+    id: "arvind-srivastav",
+    displayName: "Arvind Srivastav",
+    bondLevel: "acquaintance",
+    channelMappings: [{ channel: "linkedin", channelUserId: LI_ARVIND_MEMBER }],
   },
   {
     id: "hollis-park",
@@ -246,6 +298,26 @@ export const sentinelSenders: SentinelRow[] = (
       displayName: "kev_4410",
       lastMessage: "saw your post about the rome setup, mind if I ask a couple questions?",
       lastMessageAt: secondsAgo(2 * DAY),
+    },
+    {
+      // The placed half of LinkedIn: this sender is mapped onto a person, so it
+      // never reaches the discovery queue and its exchange is what that person's
+      // page shows.
+      channel: "linkedin",
+      channelUserId: LI_ARVIND_MEMBER,
+      displayName: "Arvind Srivastav",
+      lastMessage: "Great meeting you at the robotics meetup — would love to compare notes.",
+      lastMessageAt: secondsAgo(4 * HOUR),
+      reply: "Likewise! Free Thursday afternoon?",
+    },
+    {
+      // The unplaced half: a LinkedIn sender waiting on a decision, sitting in
+      // the same queue behind the same Unknown chip as every other channel's.
+      channel: "linkedin",
+      channelUserId: LI_CALEB_MEMBER,
+      displayName: "Caleb Cater",
+      lastMessage: "Added comments on the deck — see section 3.",
+      lastMessageAt: secondsAgo(2 * HOUR),
     },
     {
       // A channel the page has no pill styling for. It renders the raw channel
@@ -677,125 +749,10 @@ function sentinelEntriesFor(mapping: AccountRef): TimelineEntry[] {
   return entries;
 }
 
-// ── LinkedIn inbox mirror fixtures ──────────────────────────────────
-// Two threads exercise both dialog shapes: a 1:1 with a subject-carrying
-// InMail and reactions, and a group conversation (personName + conversationName)
-// so the sender labels render.
-const LI_ARVIND_THREAD = "2-mock-arvind==";
-const LI_FOUNDERS_THREAD = "2-mock-founders==";
-
-const liSelf = (id: string, text: string, timestamp: number): LinkedInMessage => ({
-  messageId: id,
-  senderName: "Rome Guardian",
-  senderHeadline: null,
-  senderProfileUrl: "https://www.linkedin.com/in/rome-guardian/",
-  senderIsSelf: true,
-  timestamp,
-  text,
-  subject: null,
-  reactionCount: null,
-});
-
-const liTheir = (
-  id: string,
-  sender: { name: string; headline: string | null; profileUrl: string | null },
-  text: string,
-  timestamp: number,
-  extra: Partial<LinkedInMessage> = {},
-): LinkedInMessage => ({
-  messageId: id,
-  senderName: sender.name,
-  senderHeadline: sender.headline,
-  senderProfileUrl: sender.profileUrl,
-  senderIsSelf: false,
-  timestamp,
-  text,
-  subject: null,
-  reactionCount: null,
-  ...extra,
-});
-
-const LI_ARVIND = {
-  name: "Arvind Srivastav",
-  headline: "Founder at Signalwing",
-  profileUrl: "https://www.linkedin.com/in/arvind-mock/",
-};
-const LI_CALEB = {
-  name: "Caleb Cater",
-  headline: "Developer Relations",
-  profileUrl: "https://www.linkedin.com/in/caleb-mock/",
-};
-
-const linkedinMessagesByThread: Record<string, LinkedInMessage[]> = {
-  [LI_ARVIND_THREAD]: [
-    liTheir(
-      "li-arvind-1",
-      LI_ARVIND,
-      "Great meeting you at the robotics meetup — would love to compare notes.",
-      yesterdayAt(9, 40),
-      { subject: "Following up from Tuesday" },
-    ),
-    liSelf("li-arvind-2", "Likewise! Free Thursday afternoon?", yesterdayAt(10, 5)),
-    liTheir("li-arvind-3", LI_ARVIND, "Thursday works. Calendar invite sent.", secondsAgo(3_600), {
-      reactionCount: 1,
-    }),
-  ],
-  [LI_FOUNDERS_THREAD]: [
-    liTheir(
-      "li-founders-1",
-      LI_ARVIND,
-      "Sharing the pitch review notes here.",
-      yesterdayAt(15, 12),
-    ),
-    liTheir(
-      "li-founders-2",
-      LI_CALEB,
-      "Added comments on the deck — see section 3.",
-      secondsAgo(7_200),
-    ),
-    liSelf("li-founders-3", "Thanks both, reading now.", secondsAgo(5_400)),
-  ],
-};
-
-const linkedinThreads: LinkedInThread[] = [
-  {
-    // The producer's real 1:1 shape: conversationName is the raw title only,
-    // so it is null here even though the thread has a counterparty name —
-    // group-ness is the isGroup flag, never a name heuristic.
-    threadId: LI_ARVIND_THREAD,
-    threadUrl: `https://www.linkedin.com/messaging/thread/${LI_ARVIND_THREAD}/`,
-    personName: "Arvind Srivastav",
-    conversationName: null,
-    lastMessagePreview: "Thursday works. Calendar invite sent.",
-    lastMessageAt: secondsAgo(3_600),
-    unread: true,
-    isGroup: false,
-    participantCount: 2,
-    counterpartyType: "member",
-    category: "INBOX,PRIMARY_INBOX",
-    messageCount: 3,
-  },
-  {
-    // A real group with no single personName: the card's title falls back to
-    // the conversation title, and the badge comes from isGroup alone.
-    threadId: LI_FOUNDERS_THREAD,
-    threadUrl: `https://www.linkedin.com/messaging/thread/${LI_FOUNDERS_THREAD}/`,
-    personName: null,
-    conversationName: "Founder pitch review",
-    lastMessagePreview: "Thanks both, reading now.",
-    lastMessageAt: secondsAgo(5_400),
-    unread: false,
-    isGroup: true,
-    participantCount: 3,
-    counterpartyType: "member",
-    category: "INBOX,PRIMARY_INBOX",
-    messageCount: 3,
-  },
-];
-
-/** The per-channel message and send endpoints. Not the people contract —
+/** The WhatsApp mirror's message and send endpoints. Not the people contract —
  *  a thread is a conversation rather than an account — so they keep their own
- *  paths and are served straight off the store above. */
+ *  paths and are served straight off the store above. Nothing in the dashboard
+ *  reads them; they stand in for routes core still serves to other callers. */
 export const channelMirrorHandlers = [
   http.get("/api/whatsapp/contacts", () => {
     const rows = whatsappContacts.map((contact) => {
@@ -822,30 +779,6 @@ export const channelMirrorHandlers = [
     return HttpResponse.json(rows);
   }),
 
-  http.get("/api/linkedin/threads", () => {
-    // The repository's ORDER BY: threads with a listed timestamp first, newest
-    // first, then by display name.
-    const rows = [...linkedinThreads].sort((a, b) => {
-      if ((a.lastMessageAt === null) !== (b.lastMessageAt === null)) {
-        return a.lastMessageAt === null ? 1 : -1;
-      }
-      if (a.lastMessageAt !== b.lastMessageAt) {
-        return (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0);
-      }
-      const nameOf = (t: LinkedInThread) => t.personName ?? t.conversationName ?? t.threadId;
-      return nameOf(a).localeCompare(nameOf(b));
-    });
-    return HttpResponse.json(rows);
-  }),
-
-  http.get("/api/linkedin/threads/:threadId/messages", ({ params, request }) => {
-    const thread = linkedinMessagesByThread[String(params.threadId)] ?? [];
-    const raw = Number(new URL(request.url).searchParams.get("limit"));
-    // Newest `limit`, handed back oldest-first, same as the real route.
-    const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 500) : 50;
-    return HttpResponse.json(thread.slice(-limit));
-  }),
-
   http.get("/api/whatsapp/contacts/:jid/messages", ({ params, request }) => {
     const thread = threads[String(params.jid)] ?? [];
     const raw = Number(new URL(request.url).searchParams.get("limit"));
@@ -853,27 +786,6 @@ export const channelMirrorHandlers = [
     // long thread opens on its tail rather than its beginning.
     const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 500) : 50;
     return HttpResponse.json(thread.slice(-limit));
-  }),
-
-  // The real write goes through opencli `linkedin safe-send`; the mock applies
-  // the same request contract, then appends the browser-visible send that a
-  // later mirror sync would persist.
-  http.post("/api/linkedin/threads/:threadId/send", async ({ params, request }) => {
-    const threadId = String(params.threadId);
-    const body = (await request.json().catch(() => ({}))) as { text?: unknown };
-    const text = typeof body.text === "string" ? body.text.trim() : "";
-    if (!text) return HttpResponse.json({ error: "text is required" }, { status: 400 });
-
-    const thread = linkedinThreads.find((candidate) => candidate.threadId === threadId);
-    if (!thread) return HttpResponse.json({ error: "LinkedIn thread not found" }, { status: 404 });
-
-    const messages = (linkedinMessagesByThread[threadId] ??= []);
-    const now = secondsAgo(0);
-    messages.push(liSelf(`li-sent-${threadId}-${messages.length}`, text, now));
-    thread.lastMessagePreview = text;
-    thread.lastMessageAt = now;
-    thread.messageCount = messages.length;
-    return HttpResponse.json({ ok: true, recipient: thread.personName ?? thread.conversationName });
   }),
 
   // The real route hands the text to the adapter and persists nothing; Baileys

@@ -417,9 +417,6 @@ function mockApi(
       });
     }
 
-    // The page also carries the LinkedIn mirror, which reads its own endpoint.
-    // These tests are about the two contract views, so it answers empty.
-    if (url.includes("/api/linkedin/threads")) return json([]);
     return json({});
   }) as typeof fetch);
   return { calls, state };

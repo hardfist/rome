@@ -268,9 +268,7 @@ describe("PersonDetailPage", () => {
       id: "priya-nair",
       displayName: "Priya Nair",
       bondLevel: "acquaintance",
-      accounts: [
-        { channel: "linkedin", channelUserId: "ACoAAPriya01", displayName: "Priya Nair" },
-      ],
+      accounts: [{ channel: "linkedin", channelUserId: "ACoAAPriya01", displayName: "Priya Nair" }],
       messageCount: 2,
       latest: {
         source: "linkedin",

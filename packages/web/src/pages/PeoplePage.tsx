@@ -22,7 +22,6 @@ import {
   type RowLevel,
 } from "./people/people-model";
 import { usePeopleRoster } from "./people/use-roster";
-import { LinkedInSection } from "./people/linkedin";
 
 /**
  * The People page: an activity stream and a roster, over two reads.
@@ -40,6 +39,13 @@ import { LinkedInSection } from "./people/linkedin";
  * /api/accounts` for the contacts list, `GET /api/accounts/stream` for the
  * recents surface — joined in `people-model.ts`. A person's history is a third
  * read, `GET /api/people/:id/messages`, and it belongs to the person page.
+ *
+ * Nothing here knows a channel. LinkedIn was the last one with a surface of its
+ * own — a section below both views, reading its own mirror, for as long as a
+ * LinkedIn thread resolved to no person. It resolves now, so LinkedIn arrives
+ * through the same two reads as everything else and is placed, dismissed and
+ * opened by the same gestures. A channel added after this page was written
+ * lands here the same way, without a section.
  *
  * Every number on screen is the server's. The directory pages, so a count taken
  * over the rows that happened to arrive would report no waiting senders as soon
@@ -259,12 +265,6 @@ export default function PeoplePage() {
             </Button>
           </div>
         )}
-
-        {/* LinkedIn threads are mirrored conversations, not accounts: they
-            never reach `/api/accounts`, so neither view above can render them.
-            The section sits below both until a LinkedIn account can be linked
-            to a person, at which point it goes away with its module. */}
-        <LinkedInSection />
       </PageBody>
     </PageShell>
   );

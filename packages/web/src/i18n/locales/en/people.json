@@ -134,30 +134,6 @@
     "today": "Today",
     "yesterday": "Yesterday"
   },
-  "linkedin": {
-    "heading": "LinkedIn messages",
-    "description": "Synced from your LinkedIn inbox by the LinkedIn connection",
-    "searchPlaceholder": "Search name or preview…",
-    "emptyForSearch": "No conversations match your search",
-    "loadingThreads": "Loading conversations…",
-    "emptyTitle": "No LinkedIn conversations",
-    "emptyHint": "Nothing has synced yet — if LinkedIn isn't connected, connect it in Settings.",
-    "groupChat": "Group conversation",
-    "participants_one": "{{count}} participant",
-    "participants_other": "{{count}} participants",
-    "thread": "LinkedIn conversation",
-    "unread": "Unread",
-    "messages": "Messages",
-    "dialogTitle": "Messages · {{name}}",
-    "openInLinkedIn": "Open in LinkedIn",
-    "loading": "Loading messages…",
-    "noMessages": "No messages synced yet",
-    "noMessagesHint": "Messages appear after the next sync — Rome checks a few times an hour.",
-    "composerPlaceholder": "Reply on LinkedIn",
-    "send": "Send",
-    "sendFailed": "LinkedIn reply wasn't sent — tap to retry",
-    "notConnected": "LinkedIn isn't connected — link it in Settings to reply."
-  },
   "createForm": {
     "nameLabel": "Name",
     "bondLevelLabel": "Bond level"

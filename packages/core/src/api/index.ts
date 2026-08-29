@@ -31,7 +31,6 @@ import { buildInfoRoutes } from "./routes/build-info.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
-import { linkedinThreadsRoutes } from "./routes/linkedin-threads.js";
 import { accountsRoutes } from "./routes/accounts.js";
 import { accountDecisionRoutes } from "./routes/account-decisions.js";
 import { peopleRoutes } from "./routes/people.js";
@@ -153,7 +152,6 @@ export function buildApp(
   api.route("/", accountsRoutes(deps));
   api.route("/", accountDecisionRoutes(deps));
   api.route("/", whatsappContactsRoutes(deps));
-  api.route("/", linkedinThreadsRoutes(deps));
   api.route("/", sentinelLogRoutes(deps));
   api.route("/", webhookInvocationsRoutes(deps));
   api.route("/", actionExecutionsRoutes(deps));

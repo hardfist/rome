@@ -1209,7 +1209,6 @@ async function main() {
       personMappingRepo,
       whatsAppStoreRepo,
       whatsAppAccounts,
-      linkedInStoreRepo,
       linkedInAccounts,
       accountNames,
       webchatRepo,
