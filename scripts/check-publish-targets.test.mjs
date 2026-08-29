@@ -15,9 +15,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path) => readFileSync(resolve(root, path), "utf8");
 
-const configuredPackages = Object.keys(
-  JSON.parse(read("release-please-config.json")).packages,
-);
+const configuredPackages = Object.keys(JSON.parse(read("release-please-config.json")).packages);
 
 /** The JSON array literal the `all` branch of sdk-publish.yml echoes. */
 function manualAllTargets() {
