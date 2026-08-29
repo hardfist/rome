@@ -190,7 +190,7 @@ export interface SelectionSlice {
   applyTreeClick(path: string, mods: TreeClickModifiers): string[];
   clearMultiSelect(): void;
   prepareContextMenu(node: Pick<TreeNode, "path" | "type">): string[];
-  navigateToPath(path: string | null, opts?: { replace?: boolean }): void;
+  navigateToPath(path: string | null, opts?: { replace?: boolean; showHistory?: boolean }): void;
 }
 
 export interface FileSlice {
@@ -264,7 +264,10 @@ export interface UiSlice {
   filesPaneDrillPath: string | null;
   setSearchQuery(value: string): void;
   setShowSearch(value: boolean): void;
-  setShowHistory(value: boolean): void;
+  /** Opens or closes the history panel, fetching its entries on open. The panel
+   * is a view (`docs/northstars/view-urls.md`), so this also moves the URL;
+   * `syncUrl: false` is for the sync that reads the URL in the first place. */
+  setShowHistory(value: boolean, opts?: { syncUrl?: boolean }): void;
   setNameDialog(value: NameDialogState | null): void;
   setDeleteConfirm(value: DeleteConfirmState | null): void;
   setMoveDialog(value: MoveDialogState | null): void;

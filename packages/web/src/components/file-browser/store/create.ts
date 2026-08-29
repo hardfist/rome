@@ -14,7 +14,7 @@ import {
 import { getFileBrowserPathChangeUpdate } from "@/lib/file-browser-path-change";
 import {
   getFileBrowserDirectoryAncestors,
-  getFileBrowserUrlPath,
+  getFileBrowserUrlLocation,
 } from "@/lib/file-browser-routing";
 import {
   getNextBrowserSelection,
@@ -72,8 +72,7 @@ interface CreateResponse {
 export type FileBrowserStoreApi = StoreApi<FileBrowserState>;
 
 export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserStoreApi {
-  const { apiBasePath, logicalRootPath, queryClient, navigate, getRouteSnapshot, embedded } =
-    config;
+  const { apiBasePath, logicalRootPath, queryClient, embedded } = config;
 
   const resolveQueryKey = (path: string) =>
     ["file-browser", logicalRootPath, "resolve", path] as const;
@@ -102,7 +101,7 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
     return data;
   }
 
-  const initialRouteSnapshot = getRouteSnapshot();
+  const initialRouteSnapshot = config.getRouteSnapshot();
 
   const store = createStore<FileBrowserState>()((set, get) => {
     /**
@@ -303,12 +302,17 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
 
         navigateToPath(path, opts) {
           if (embedded) return;
+          // Read the router off `config`, not the factory's closure: `navigate`
+          // and the route snapshot are re-bound every render and synced into
+          // state, so the captured pair reports the first render forever.
+          const { navigate, getRouteSnapshot } = get().config;
           const route = getRouteSnapshot();
-          const nextPathname = getFileBrowserUrlPath(logicalRootPath, path);
-          const hideSidebar = new URLSearchParams(route.search).get("hideSidebar");
-          const nextLocation = hideSidebar === "1" ? `${nextPathname}?hideSidebar=1` : nextPathname;
-          get().refs.acceptedBrowserPath = nextPathname;
-          if (route.pathname === nextPathname) return;
+          const nextLocation = getFileBrowserUrlLocation(logicalRootPath, path, {
+            route,
+            showHistory: opts?.showHistory,
+          });
+          get().refs.acceptedBrowserPath = nextLocation;
+          if (`${route.pathname}${route.search}${route.hash}` === nextLocation) return;
           navigate(nextLocation, { replace: opts?.replace ?? false });
         },
 
@@ -745,8 +749,13 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         setShowSearch(value) {
           set((s) => ({ ui: { ...s.ui, showSearch: value } }));
         },
-        setShowHistory(value) {
+        setShowHistory(value, opts) {
           set((s) => ({ ui: { ...s.ui, showHistory: value } }));
+          const selectedPath = get().selection.selectedPath;
+          if (opts?.syncUrl !== false && selectedPath) {
+            get().selection.navigateToPath(selectedPath, { showHistory: value });
+          }
+          if (value) void get().ui.loadHistory();
         },
         setNameDialog(value) {
           set((s) => ({ ui: { ...s.ui, nameDialog: value } }));
@@ -779,7 +788,7 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         async loadHistory() {
           const selectedPath = get().selection.selectedPath;
           if (!selectedPath) return;
-          set((s) => ({ ui: { ...s.ui, showHistory: true, loadingHistory: true } }));
+          set((s) => ({ ui: { ...s.ui, loadingHistory: true } }));
           try {
             const response = await fetch(
               `${apiBasePath}/history?path=${encodeURIComponent(selectedPath)}`,

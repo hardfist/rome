@@ -2,8 +2,11 @@ import { useEffect } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { isCancelledError, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useFileBrowserStoreApi } from "../store/context";
-import { getFileBrowserRouteLogicalPath } from "@/lib/file-browser-routing";
+import { useFileBrowserStore, useFileBrowserStoreApi } from "../store/context";
+import {
+  getFileBrowserRouteLogicalPath,
+  isFileBrowserHistoryUrl,
+} from "@/lib/file-browser-routing";
 
 /**
  * URL-as-SSOT bridge. When the route changes, we resolve the
@@ -17,6 +20,9 @@ export function useUrlSelectionSync(opts: { embedded: boolean }) {
   const params = useParams<{ "*"?: string }>();
   const queryClient = useQueryClient();
   const wildcard = params["*"];
+  const historyInUrl = isFileBrowserHistoryUrl(location.search);
+  const selectedPath = useFileBrowserStore((s) => s.selection.selectedPath);
+  const showHistory = useFileBrowserStore((s) => s.ui.showHistory);
 
   useEffect(() => {
     if (opts.embedded) return;
@@ -110,4 +116,13 @@ export function useUrlSelectionSync(opts: { embedded: boolean }) {
     store,
     wildcard,
   ]);
+
+  // Opening a file clears `showHistory`, so this waits on `selectedPath` and
+  // re-runs once the file the URL names has landed.
+  useEffect(() => {
+    if (opts.embedded) return;
+    if (historyInUrl === showHistory) return;
+    if (historyInUrl && !selectedPath) return;
+    store.getState().ui.setShowHistory(historyInUrl, { syncUrl: false });
+  }, [historyInUrl, opts.embedded, selectedPath, showHistory, store]);
 }

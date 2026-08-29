@@ -63,3 +63,33 @@ export function getFileBrowserDirectoryAncestors(path: string, logicalRootPath: 
   }
   return ancestors;
 }
+
+/**
+ * The canonical location for a selection: pathname, then the query the next
+ * view keeps. `hideSidebar` outlives navigation; the open history panel is a
+ * view of its own (`docs/northstars/view-urls.md`) and so rides the URL too.
+ * Every other param is dropped, which is what closes the panel whenever the
+ * selection moves. The hash survives only within one document, since an anchor
+ * means nothing in the next file.
+ */
+export function getFileBrowserUrlLocation(
+  logicalRootPath: string,
+  path: string | null,
+  opts: { route: { pathname: string; search: string; hash: string }; showHistory?: boolean },
+): string {
+  const pathname = getFileBrowserUrlPath(logicalRootPath, path);
+  const next = new URLSearchParams();
+  if (new URLSearchParams(opts.route.search).get("hideSidebar") === "1") {
+    next.set("hideSidebar", "1");
+  }
+  if (opts.showHistory) {
+    next.set("history", "1");
+  }
+  const query = next.toString();
+  const hash = pathname === opts.route.pathname ? opts.route.hash : "";
+  return `${pathname}${query ? `?${query}` : ""}${hash}`;
+}
+
+export function isFileBrowserHistoryUrl(search: string): boolean {
+  return new URLSearchParams(search).get("history") === "1";
+}

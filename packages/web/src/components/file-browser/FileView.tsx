@@ -48,6 +48,8 @@ export function FileViewHeader({ onMobileBack }: { onMobileBack: () => void }) {
   const hasUnflushedDiskWrites = selectedFile?.editable ? content !== lastDiskContent : false;
   const hasUnresolvedEdits = hasChanges || hasUnflushedDiskWrites;
 
+  const toggleHistory = () => store.getState().ui.setShowHistory(!showHistory);
+
   const autoSavePolicy = selectedFile?.editable
     ? store.getState().file.resolveAutoSavePolicy(selectedFile)
     : null;
@@ -158,13 +160,7 @@ export function FileViewHeader({ onMobileBack }: { onMobileBack: () => void }) {
         )}
         <button
           type="button"
-          onClick={() => {
-            if (showHistory) {
-              store.getState().ui.setShowHistory(false);
-              return;
-            }
-            void store.getState().ui.loadHistory();
-          }}
+          onClick={toggleHistory}
           className={`hidden rounded-8 px-3 py-1 text-ui @min-[1024px]/fb:inline-flex ${
             showHistory
               ? "bg-info-bg text-info-fg"
@@ -175,13 +171,7 @@ export function FileViewHeader({ onMobileBack }: { onMobileBack: () => void }) {
         </button>
         <button
           type="button"
-          onClick={() => {
-            if (showHistory) {
-              store.getState().ui.setShowHistory(false);
-              return;
-            }
-            void store.getState().ui.loadHistory();
-          }}
+          onClick={toggleHistory}
           className={`rounded-8 p-2 @min-[1024px]/fb:hidden ${
             showHistory
               ? "bg-info-bg text-info-fg"

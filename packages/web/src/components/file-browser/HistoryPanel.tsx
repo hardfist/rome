@@ -7,7 +7,10 @@ export function HistoryPanel() {
   const loadingHistory = useFileBrowserStore((s) => s.ui.loadingHistory);
 
   return (
-    <div className="hidden w-80 flex-shrink-0 overflow-y-auto border-l border-border bg-surface-muted p-4 @min-[1024px]/fb:block">
+    <section
+      aria-label={t("history.heading")}
+      className="hidden w-80 flex-shrink-0 overflow-y-auto border-l border-border bg-surface-muted p-4 @min-[1024px]/fb:block"
+    >
       <h3 className="mb-3 text-section text-muted-foreground">{t("history.heading")}</h3>
       {loadingHistory ? (
         <p className="text-ui text-subtle-foreground">{t("history.loading")}</p>
@@ -37,7 +40,7 @@ export function HistoryPanel() {
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
