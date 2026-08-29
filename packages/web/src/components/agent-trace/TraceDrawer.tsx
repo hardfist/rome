@@ -163,11 +163,16 @@ export function TraceDrawer({
     }
     const key = `${remoteTargetKey}:${includeSubagentUsage}:${retryNonce}`;
     if (loadedKeyRef.current === key) return;
-    let cancelled = false;
     loadedKeyRef.current = key;
     if (loadedTargetKeyRef.current !== remoteTargetKey) setRemoteTrace(null);
     setError(null);
     setLoading(true);
+    // The key in the ref, not the effect run, decides whose result counts. An
+    // effect that re-runs for the same key returns above and leaves this load
+    // to finish; anything else has already claimed the ref, so this load lands
+    // nowhere. Tying it to the effect run instead would strand `loading` on
+    // every re-render that happened mid-fetch.
+    const superseded = () => loadedKeyRef.current !== key;
     (async () => {
       try {
         const trace = storedId
@@ -175,7 +180,7 @@ export function TraceDrawer({
           : turnTarget
             ? await loadTurnTrace(turnTarget.sessionId, turnTarget.turnId, includeSubagentUsage)
             : null;
-        if (cancelled) return;
+        if (superseded()) return;
         if (!trace) {
           setError(t("trace.drawer.notAvailable"));
           return;
@@ -183,19 +188,16 @@ export function TraceDrawer({
         loadedTargetKeyRef.current = remoteTargetKey;
         setRemoteTrace(trace);
       } catch (err) {
-        if (cancelled) return;
+        if (superseded()) return;
         setError(
           err instanceof Error
             ? t("trace.drawer.loadFailedReason", { reason: err.message })
             : t("trace.drawer.loadFailed"),
         );
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!superseded()) setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [
     remoteTargetKey,
     storedId,

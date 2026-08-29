@@ -106,6 +106,44 @@ describe("traceDrawerOpenPlacementClass", () => {
   });
 });
 
+describe("TraceDrawer stored load", () => {
+  it("still shows a trace whose load outlived a dependency change", async () => {
+    let resolveTrace: (snapshot: TraceSnapshot) => void = () => {};
+    const pending = new Promise<TraceSnapshot>((resolve) => {
+      resolveTrace = resolve;
+    });
+    const target = {
+      kind: "stored" as const,
+      messageId: "parent-trace",
+      sessionId: "parent-session",
+      turnId: "parent-turn",
+      summary: targetSummary,
+    };
+    const drawer = (loadStoredTrace: () => Promise<TraceSnapshot>) => (
+      <TraceDrawer
+        target={target}
+        onClose={() => {}}
+        loadStoredTrace={loadStoredTrace}
+        renderInlineBlock={(block) =>
+          block.type === "result" && block.accounting ? (
+            <UsageSummaryBlock accounting={block.accounting} />
+          ) : null
+        }
+        renderRunBlocks={() => null}
+      />
+    );
+
+    const { rerender } = render(drawer(() => pending));
+    // A re-render that changes a loader dependency — the page's translations
+    // landing, say — must not strand the fetch already in flight for this trace.
+    rerender(drawer(() => pending));
+    resolveTrace(usageSnapshot(true));
+
+    expect(await screen.findByText("13")).toBeTruthy();
+    expect(screen.queryByText("trace.loading")).toBeNull();
+  });
+});
+
 describe("TraceDrawer subagent usage", () => {
   it("loads included usage by default and refetches when the switch is disabled", async () => {
     const loadStoredTrace = vi.fn(async (_messageId: string, include: boolean) =>

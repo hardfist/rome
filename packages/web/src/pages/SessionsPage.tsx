@@ -11,7 +11,15 @@ import {
   SquareActivity,
   X,
 } from "lucide-react";
-import { Link, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -56,7 +64,7 @@ import type {
   RomeSessionsPageResult,
   StreamBlock,
 } from "@/lib/chat-types";
-import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
+import type { TraceSegment, TraceSnapshot, TraceSummary } from "@rome/api-types/trace-segments";
 import type {
   RomeSessionDetail,
   RomeSessionType,
@@ -71,6 +79,14 @@ import type {
 } from "@rome/api-types/sessions";
 import { SessionsOverview, type SessionOverviewGroupDimension } from "./SessionsOverview";
 import {
+  parseSessionSurface,
+  sessionPath,
+  sessionsBasePath,
+  sessionSurfacePath,
+  SESSIONS_FULL_ROUTE_BASE,
+  type SessionSurface,
+} from "./session-surface";
+import {
   costCoverage,
   formatCompactNumber,
   formatCost,
@@ -82,6 +98,13 @@ import {
 } from "./sessions-format";
 
 const PAGE_SIZE = 50;
+// Stand-in header for a trace opened straight from its URL, before the loaded
+// snapshot supplies the real summary.
+const EMPTY_TRACE_SUMMARY: TraceSummary = {
+  distinctApps: [],
+  totalSteps: 0,
+  invocationCounts: {},
+};
 const ALL = "__all__";
 const INTERNAL_SOURCE = "__internal__";
 const NO_OP = () => {};
@@ -835,12 +858,20 @@ function ReadOnlySessionChat({
   session,
   messages,
   liveTurn,
+  surface,
+  onOpenSurface,
+  onCloseSurface,
 }: {
   session: RomeSessionRecord;
   messages: ChatMessage[];
   liveTurn: { turnId: string; snapshot: TraceSnapshot; text: string } | null;
+  surface: SessionSurface;
+  onOpenSurface: (surface: SessionSurface) => void;
+  onCloseSurface: () => void;
 }) {
-  const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
+  // A live trace streams a turn that only exists in this page, so it stays in
+  // state. Stored and turn traces name persisted rows, so the URL holds them.
+  const [liveTraceTarget, setLiveTraceTarget] = useState<TraceDrawerTarget | null>(null);
   const messagesBySession = useMemo(() => {
     const map = new Map<string, ChatMessage[]>();
     for (const message of messages) {
@@ -896,8 +927,33 @@ function ReadOnlySessionChat({
     [],
   );
 
-  const drawerTarget =
-    traceDrawerTarget?.kind === "live" && liveTurn
+  // The drawer's own URL is the source of truth: a stored or turn trace opens
+  // from the address alone, and the loaded messages only enrich its header.
+  const urlTraceTarget = useMemo<TraceDrawerTarget | null>(() => {
+    if (surface.kind === "messageTrace") {
+      const message = messages.find((entry) => entry.id === surface.messageId);
+      return {
+        kind: "stored",
+        messageId: surface.messageId,
+        sessionId: message?.sessionId ?? session.id,
+        turnId: message?.turnId ?? null,
+        summary: message?.traceSummary ?? EMPTY_TRACE_SUMMARY,
+      };
+    }
+    if (surface.kind === "turnTrace") {
+      const message = messages.find((entry) => entry.turnId === surface.turnId);
+      return {
+        kind: "turn",
+        sessionId: session.id,
+        turnId: surface.turnId,
+        summary: message?.traceSummary ?? EMPTY_TRACE_SUMMARY,
+      };
+    }
+    return null;
+  }, [messages, session.id, surface]);
+
+  const liveDrawerTarget =
+    liveTraceTarget?.kind === "live" && liveTurn
       ? {
           kind: "live" as const,
           sessionId: session.id,
@@ -906,14 +962,15 @@ function ReadOnlySessionChat({
           segments: liveTurn.snapshot.segments,
           streaming: true,
         }
-      : traceDrawerTarget;
+      : liveTraceTarget;
+  const drawerTarget = urlTraceTarget ?? liveDrawerTarget;
 
   return (
     <TooltipProvider delayDuration={150}>
       <div className="@container/chat relative flex min-h-0 flex-1 overflow-hidden">
         <div
           className={`relative flex min-h-0 min-w-0 flex-1 flex-col @5xl/chat:transition-[width] @5xl/chat:duration-200 @5xl/chat:ease-out ${traceDrawerContentInsetClass(
-            traceDrawerTarget !== null,
+            drawerTarget !== null,
             false,
           )}`}
         >
@@ -930,7 +987,7 @@ function ReadOnlySessionChat({
               contentRef={NO_OP}
               onOpenLiveTrace={() => {
                 if (!liveTurn) return;
-                setTraceDrawerTarget({
+                setLiveTraceTarget({
                   kind: "live",
                   sessionId: session.id,
                   turnId: liveTurn.turnId,
@@ -938,15 +995,24 @@ function ReadOnlySessionChat({
                   segments: liveTurn.snapshot.segments,
                   streaming: true,
                 });
+                // One drawer at a time: leave the URL surface, which outranks
+                // the live target, or the click would show nothing.
+                if (urlTraceTarget) onCloseSurface();
               }}
-              onOpenStoredTrace={setTraceDrawerTarget}
+              onOpenStoredTrace={(target) => {
+                setLiveTraceTarget(null);
+                if (target.kind === "stored")
+                  onOpenSurface({ kind: "messageTrace", messageId: target.messageId });
+                else if (target.kind === "turn")
+                  onOpenSurface({ kind: "turnTrace", turnId: target.turnId });
+              }}
               actions={actions}
             />
           </div>
         </div>
         <TraceDrawer
           target={drawerTarget}
-          onClose={() => setTraceDrawerTarget(null)}
+          onClose={() => (urlTraceTarget ? onCloseSurface() : setLiveTraceTarget(null))}
           loadStoredTrace={loadStoredTrace}
           allowSubagentUsage
           readOnly
@@ -971,10 +1037,12 @@ function ReadOnlySessionChat({
 
 function SessionDetailsSheet({
   session,
+  basePath,
   open,
   onClose,
 }: {
   session: RomeSessionDetail;
+  basePath: string;
   open: boolean;
   onClose: () => void;
 }) {
@@ -1062,8 +1130,7 @@ function SessionDetailsSheet({
               {session.lineage.parent ? (
                 <Button asChild variant="outline" className="w-full justify-start">
                   <Link
-                    to={`../${encodeURIComponent(session.lineage.parent.id)}`}
-                    relative="path"
+                    to={sessionPath(basePath, session.lineage.parent.id)}
                     state={location.state}
                   >
                     <GitFork />
@@ -1073,11 +1140,7 @@ function SessionDetailsSheet({
               ) : null}
               {session.lineage.children.map((child) => (
                 <Button key={child.id} asChild variant="outline" className="w-full justify-start">
-                  <Link
-                    to={`../${encodeURIComponent(child.id)}`}
-                    relative="path"
-                    state={location.state}
-                  >
+                  <Link to={sessionPath(basePath, child.id)} state={location.state}>
                     <GitFork />
                     Child · {child.displayTitle}
                   </Link>
@@ -1116,12 +1179,12 @@ function SessionDetailsSheet({
   );
 }
 
-function SessionDetailPage({ sessionId }: { sessionId: string }) {
+function SessionDetailPage({ sessionId, surface }: { sessionId: string; surface: SessionSurface }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const fullMode = location.pathname.startsWith("/full/apps/sessions");
+  const basePath = sessionsBasePath(location.pathname);
+  const fullMode = basePath === SESSIONS_FULL_ROUTE_BASE;
   const [session, setSession] = useState<RomeSessionDetail | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1131,6 +1194,18 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     text: string;
   } | null>(null);
 
+  const openSurface = useCallback(
+    (next: SessionSurface) => navigate(sessionSurfacePath(basePath, sessionId, next)),
+    [basePath, navigate, sessionId],
+  );
+  // Opening a surface pushed an entry, so the back button closes it. Closing
+  // pushes the session URL rather than replacing it, so the surface the user
+  // just left stays reachable through back.
+  const closeSurface = useCallback(
+    () => navigate(sessionPath(basePath, sessionId)),
+    [basePath, navigate, sessionId],
+  );
+
   const handleBack = useCallback(() => {
     // BrowserRouter starts its own history index at zero, so an index above
     // zero means there is an in-app entry we can safely return to.
@@ -1139,8 +1214,8 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       navigate(-1);
       return;
     }
-    navigate("/sessions");
-  }, [navigate]);
+    navigate(basePath);
+  }, [basePath, navigate]);
 
   const reloadMessages = useCallback(async () => {
     const result = await listRomeSessionMessages(sessionId);
@@ -1310,11 +1385,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         ) : null}
         {session?.parentSessionId ? (
           <Button asChild variant="outline">
-            <Link
-              to={`../${encodeURIComponent(session.parentSessionId)}`}
-              relative="path"
-              state={location.state}
-            >
+            <Link to={sessionPath(basePath, session.parentSessionId)} state={location.state}>
               <GitFork />
               {session.type === "subagent" ? "Parent" : "Forked from"}
             </Link>
@@ -1329,7 +1400,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           </Button>
         ) : null}
         {session ? (
-          <Button variant="outline" onClick={() => setDetailsOpen(true)}>
+          <Button variant="outline" onClick={() => openSurface({ kind: "details" })}>
             Details
           </Button>
         ) : null}
@@ -1343,13 +1414,21 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           {error ?? "Session not found"}
         </div>
       ) : (
-        <ReadOnlySessionChat session={session} messages={messages} liveTurn={liveTurn} />
+        <ReadOnlySessionChat
+          session={session}
+          messages={messages}
+          liveTurn={liveTurn}
+          surface={surface}
+          onOpenSurface={openSurface}
+          onCloseSurface={closeSurface}
+        />
       )}
       {session ? (
         <SessionDetailsSheet
           session={session}
-          open={detailsOpen}
-          onClose={() => setDetailsOpen(false)}
+          basePath={basePath}
+          open={surface.kind === "details"}
+          onClose={closeSurface}
         />
       ) : null}
     </main>
@@ -1362,13 +1441,24 @@ export default function SessionsPage() {
     <Routes>
       <Route index element={<SessionsIndexPage state={state} view="overview" />} />
       <Route path="all" element={<SessionsIndexPage state={state} view="sessions" />} />
-      <Route path=":sessionId" element={<SessionDetailRoute />} />
+      {/* The splat carries the open surface — details or a trace drawer — so
+          each one has a URL under the session it opens over. */}
+      <Route path=":sessionId/*" element={<SessionDetailRoute />} />
     </Routes>
   );
 }
 
 function SessionDetailRoute() {
-  const { sessionId } = useParams<{ sessionId: string }>();
+  const location = useLocation();
+  const params = useParams<{ sessionId: string; "*": string }>();
+  const sessionId = params.sessionId;
+  const splat = params["*"] ?? "";
+  const surface = parseSessionSurface(splat);
   if (!sessionId) return null;
-  return <SessionDetailPage sessionId={sessionId} />;
+  // A path under the session that names no surface still shows the session, but
+  // from the session's own URL — the chat surface keeps one canonical address.
+  if (surface.kind === "chat" && splat.split("/").filter(Boolean).length > 0) {
+    return <Navigate to={sessionPath(sessionsBasePath(location.pathname), sessionId)} replace />;
+  }
+  return <SessionDetailPage sessionId={sessionId} surface={surface} />;
 }
