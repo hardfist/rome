@@ -26,6 +26,7 @@ import {
 import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { renameSession } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
@@ -148,6 +149,52 @@ const PROJECT_DEFAULT_VISIBLE = 4;
 const PROJECT_LOAD_MORE_COUNT = 10;
 // Keep in sync with the server-side cap in webchat.ts (PATCH /chat/sessions/:id/name).
 const SESSION_NAME_MAX_LENGTH = 50;
+
+/**
+ * The chat's name, linking to the chat and revealing its full text in a
+ * tooltip while the sidebar is too narrow to show it whole.
+ */
+function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
+  // Whether the one-line name is actually clipped ("Rewrite the sessi…").
+  // Measured lazily right before the tooltip could open (pointerenter /
+  // focus) rather than with a ResizeObserver: the answer only matters at that
+  // moment, and hover-time measurement stays correct across sidebar resizes
+  // and rename edits for free.
+  const [nameClipped, setNameClipped] = useState(false);
+  const nameRef = useRef<HTMLSpanElement>(null);
+
+  const syncNameClipped = () => {
+    const el = nameRef.current;
+    setNameClipped(el !== null && el.scrollWidth > el.clientWidth);
+  };
+
+  return (
+    // The bubble mounts only while the name is actually clipped, so a short
+    // name never grows one that just repeats what the row already shows.
+    // Hoverable content is off: it is pure text, and Radix's grace area would
+    // otherwise keep the previous row's name floating while the pointer runs
+    // down the list.
+    <Tooltip disableHoverableContent>
+      <TooltipTrigger asChild>
+        <Link
+          to={`/chat/${id}`}
+          onPointerEnter={syncNameClipped}
+          onFocus={syncNameClipped}
+          className={`flex h-full min-w-0 flex-1 items-center rounded-8 border border-transparent pr-1 outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring ${
+            nested ? "pl-4" : "pl-2"
+          }`}
+        >
+          <span ref={nameRef} className="truncate">
+            {name}
+          </span>
+        </Link>
+      </TooltipTrigger>
+      {/* Right of the row, so the bubble reaches into the page rather than
+          covering the neighbouring chats it was opened to compare against. */}
+      {nameClipped ? <TooltipContent side="right">{name}</TooltipContent> : null}
+    </Tooltip>
+  );
+}
 
 export interface RecentChatsProps {
   onSearch: () => void;
@@ -487,14 +534,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
             }`}
           />
         ) : (
-          <Link
-            to={`/chat/${session.id}`}
-            className={`flex h-full min-w-0 flex-1 items-center rounded-8 border border-transparent pr-1 outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring ${
-              nested ? "pl-4" : "pl-2"
-            }`}
-          >
-            <span className="truncate">{session.name}</span>
-          </Link>
+          <ChatRowLink id={session.id} name={session.name} nested={nested} />
         )}
         <span
           className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
@@ -681,205 +721,218 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const pinnedCollapsed = collapsedGroups.has("section:pinned");
 
   return (
-    <div className="flex flex-col">
-      <div className="flex items-center justify-between px-5 pt-4">
-        <span className="text-body text-foreground">{t("recentChats.title")}</span>
-        <div className="flex items-center gap-1">
-          <IconButton
-            size="sm"
-            label={t("recentChats.search")}
-            title={t("recentChats.searchShortcut", { shortcut: searchShortcut })}
-            onClick={onSearch}
-            icon={<Search aria-hidden />}
-            className="text-subtle-foreground hover:text-foreground"
-          />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <IconButton
-                size="sm"
-                label={t("recentChats.settings")}
-                icon={<Ellipsis aria-hidden />}
-                className="text-subtle-foreground hover:text-foreground"
-              />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="bottom" align="end" className="min-w-[180px]">
-              <div className="px-2 pb-1 pt-1 text-aux text-subtle-foreground">
-                {t("recentChats.groupBy")}
-              </div>
-              {[
-                { mode: "date" as const, label: t("recentChats.groupByDate") },
-                { mode: "project" as const, label: t("recentChats.groupByProjects") },
-              ].map(({ mode, label }) => {
-                const selected = groupMode === mode;
-                return (
-                  <DropdownMenuItem
-                    key={mode}
-                    onSelect={() => setGroupMode(mode)}
-                    className={selected ? "text-ui text-foreground" : "text-ui text-foreground/85"}
-                  >
-                    <span>{label}</span>
-                    {selected ? (
-                      <Check className="ml-auto h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
-                    ) : null}
-                  </DropdownMenuItem>
-                );
-              })}
-              <div className="px-2 pb-1 pt-2 text-aux text-subtle-foreground">
-                {t("recentChats.status")}
-              </div>
-              {[
-                { value: "all" as const, label: t("recentChats.statusAll") },
-                { value: "active" as const, label: t("recentChats.statusActive") },
-                { value: "archived" as const, label: t("recentChats.statusArchived") },
-              ].map(({ value, label }) => {
-                const selected = statusFilter === value;
-                return (
-                  <DropdownMenuItem
-                    key={value}
-                    onSelect={() => setStatusFilter(value)}
-                    className={selected ? "text-ui text-foreground" : "text-ui text-foreground/85"}
-                  >
-                    <span>{label}</span>
-                    {selected ? (
-                      <Check className="ml-auto h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
-                    ) : null}
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-      <div className="px-3 pt-2 pb-3">
-        {hasPinned ? (
-          <section
-            aria-labelledby="recent-chats-pinned-heading"
-            className="mb-4"
-            data-pinned-section
-          >
-            <button
-              type="button"
-              id="recent-chats-pinned-heading"
-              onClick={() => toggleGroup("section:pinned")}
-              aria-expanded={!pinnedCollapsed}
-              className="flex items-center gap-2 rounded-4 border border-transparent px-2 pb-1 pt-3 text-aux text-subtle-foreground transition outline-none hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
-            >
-              {t("recentChats.pinned")}
-              {pinnedCollapsed ? (
-                <ChevronRightIcon className="h-3.5 w-3.5" aria-hidden />
-              ) : (
-                <ChevronDownIcon className="h-3.5 w-3.5" aria-hidden />
-              )}
-            </button>
-            {pinnedCollapsed ? null : (
-              <div className="space-y-1">
-                {pinnedChats.map((session) => renderChatRow(session))}
-                {pinnedProjects.map(({ projectPath, name, items }) =>
-                  renderProjectGroup({
-                    key: `pinned-project:${projectPath}`,
-                    label: name,
-                    items,
-                    projectPath,
-                    pinned: true,
-                  }),
-                )}
-              </div>
-            )}
-          </section>
-        ) : null}
-        {phase === "loading" ? (
-          <div className="space-y-1 px-2 py-2" aria-hidden>
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-4/5" />
-            <Skeleton className="h-8 w-3/5" />
+    // skipDelayDuration 0 makes every row wait out the delay on its own:
+    // Radix's default grace window would otherwise pop each name instantly
+    // once one has opened, strobing the list as the pointer runs down it.
+    <TooltipProvider delayDuration={300} skipDelayDuration={0}>
+      <div className="flex flex-col">
+        <div className="flex items-center justify-between px-5 pt-4">
+          <span className="text-body text-foreground">{t("recentChats.title")}</span>
+          <div className="flex items-center gap-1">
+            <IconButton
+              size="sm"
+              label={t("recentChats.search")}
+              title={t("recentChats.searchShortcut", { shortcut: searchShortcut })}
+              onClick={onSearch}
+              icon={<Search aria-hidden />}
+              className="text-subtle-foreground hover:text-foreground"
+            />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <IconButton
+                  size="sm"
+                  label={t("recentChats.settings")}
+                  icon={<Ellipsis aria-hidden />}
+                  className="text-subtle-foreground hover:text-foreground"
+                />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="bottom" align="end" className="min-w-[180px]">
+                <div className="px-2 pb-1 pt-1 text-aux text-subtle-foreground">
+                  {t("recentChats.groupBy")}
+                </div>
+                {[
+                  { mode: "date" as const, label: t("recentChats.groupByDate") },
+                  { mode: "project" as const, label: t("recentChats.groupByProjects") },
+                ].map(({ mode, label }) => {
+                  const selected = groupMode === mode;
+                  return (
+                    <DropdownMenuItem
+                      key={mode}
+                      onSelect={() => setGroupMode(mode)}
+                      className={
+                        selected ? "text-ui text-foreground" : "text-ui text-foreground/85"
+                      }
+                    >
+                      <span>{label}</span>
+                      {selected ? (
+                        <Check className="ml-auto h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
+                      ) : null}
+                    </DropdownMenuItem>
+                  );
+                })}
+                <div className="px-2 pb-1 pt-2 text-aux text-subtle-foreground">
+                  {t("recentChats.status")}
+                </div>
+                {[
+                  { value: "all" as const, label: t("recentChats.statusAll") },
+                  { value: "active" as const, label: t("recentChats.statusActive") },
+                  { value: "archived" as const, label: t("recentChats.statusArchived") },
+                ].map(({ value, label }) => {
+                  const selected = statusFilter === value;
+                  return (
+                    <DropdownMenuItem
+                      key={value}
+                      onSelect={() => setStatusFilter(value)}
+                      className={
+                        selected ? "text-ui text-foreground" : "text-ui text-foreground/85"
+                      }
+                    >
+                      <span>{label}</span>
+                      {selected ? (
+                        <Check className="ml-auto h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
+                      ) : null}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-        ) : !hasPinned && regularSessions.length === 0 ? (
-          // Only reachable with nothing to show: a refetch that fails while the
-          // list already has rows keeps the rows rather than blanking them.
-          phase === "error" ? (
-            <div className="px-3 py-8 text-center" role="alert">
-              <p className="text-aux text-subtle-foreground">{t("recentChats.searchLoadError")}</p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={() => void loadSessions()}
-              >
-                {t("recentChats.searchRetry")}
-              </Button>
-            </div>
-          ) : (
-            <div className="px-3 py-8 text-center text-aux text-subtle-foreground">
-              {t("recentChats.empty")}
-            </div>
-          )
-        ) : groupMode === "project" ? (
-          projectGroups.length > 0 ? (
+        </div>
+        <div className="px-3 pt-2 pb-3">
+          {hasPinned ? (
             <section
-              aria-label={hasPinned ? undefined : t("recentChats.sectionProjects")}
-              aria-labelledby={hasPinned ? "recent-chats-projects-heading" : undefined}
+              aria-labelledby="recent-chats-pinned-heading"
+              className="mb-4"
+              data-pinned-section
             >
-              {hasPinned ? (
-                <h2
-                  id="recent-chats-projects-heading"
-                  className="px-2 pb-1 pt-3 text-aux text-subtle-foreground"
-                >
-                  {t("recentChats.sectionProjects")}
-                </h2>
-              ) : null}
-              <div className="space-y-1">
-                {projectGroups.map(({ key, label, items, projectPath }) =>
-                  renderProjectGroup({
-                    key,
-                    label,
-                    items,
-                    projectPath,
-                    pinned: false,
-                  }),
+              <button
+                type="button"
+                id="recent-chats-pinned-heading"
+                onClick={() => toggleGroup("section:pinned")}
+                aria-expanded={!pinnedCollapsed}
+                className="flex items-center gap-2 rounded-4 border border-transparent px-2 pb-1 pt-3 text-aux text-subtle-foreground transition outline-none hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
+              >
+                {t("recentChats.pinned")}
+                {pinnedCollapsed ? (
+                  <ChevronRightIcon className="h-3.5 w-3.5" aria-hidden />
+                ) : (
+                  <ChevronDownIcon className="h-3.5 w-3.5" aria-hidden />
                 )}
-              </div>
-            </section>
-          ) : null
-        ) : (
-          dateGroups.map(({ key, label, items }) => {
-            const collapsed = collapsedGroups.has(key);
-            return (
-              <section key={key} className="mb-4 last:mb-0">
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(key)}
-                  aria-expanded={!collapsed}
-                  className="flex items-center gap-2 rounded-4 border border-transparent px-2 pb-1 pt-3 text-aux text-subtle-foreground transition outline-none hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
-                >
-                  <span>{label}</span>
-                  {collapsed ? (
-                    <ChevronRightIcon className="h-3.5 w-3.5" aria-hidden />
-                  ) : (
-                    <ChevronDownIcon className="h-3.5 w-3.5" aria-hidden />
+              </button>
+              {pinnedCollapsed ? null : (
+                <div className="space-y-1">
+                  {pinnedChats.map((session) => renderChatRow(session))}
+                  {pinnedProjects.map(({ projectPath, name, items }) =>
+                    renderProjectGroup({
+                      key: `pinned-project:${projectPath}`,
+                      label: name,
+                      items,
+                      projectPath,
+                      pinned: true,
+                    }),
                   )}
-                </button>
-                {collapsed ? null : (
-                  <div className="space-y-1">{items.map((session) => renderChatRow(session))}</div>
-                )}
+                </div>
+              )}
+            </section>
+          ) : null}
+          {phase === "loading" ? (
+            <div className="space-y-1 px-2 py-2" aria-hidden>
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-4/5" />
+              <Skeleton className="h-8 w-3/5" />
+            </div>
+          ) : !hasPinned && regularSessions.length === 0 ? (
+            // Only reachable with nothing to show: a refetch that fails while the
+            // list already has rows keeps the rows rather than blanking them.
+            phase === "error" ? (
+              <div className="px-3 py-8 text-center" role="alert">
+                <p className="text-aux text-subtle-foreground">
+                  {t("recentChats.searchLoadError")}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => void loadSessions()}
+                >
+                  {t("recentChats.searchRetry")}
+                </Button>
+              </div>
+            ) : (
+              <div className="px-3 py-8 text-center text-aux text-subtle-foreground">
+                {t("recentChats.empty")}
+              </div>
+            )
+          ) : groupMode === "project" ? (
+            projectGroups.length > 0 ? (
+              <section
+                aria-label={hasPinned ? undefined : t("recentChats.sectionProjects")}
+                aria-labelledby={hasPinned ? "recent-chats-projects-heading" : undefined}
+              >
+                {hasPinned ? (
+                  <h2
+                    id="recent-chats-projects-heading"
+                    className="px-2 pb-1 pt-3 text-aux text-subtle-foreground"
+                  >
+                    {t("recentChats.sectionProjects")}
+                  </h2>
+                ) : null}
+                <div className="space-y-1">
+                  {projectGroups.map(({ key, label, items, projectPath }) =>
+                    renderProjectGroup({
+                      key,
+                      label,
+                      items,
+                      projectPath,
+                      pinned: false,
+                    }),
+                  )}
+                </div>
               </section>
-            );
-          })
-        )}
+            ) : null
+          ) : (
+            dateGroups.map(({ key, label, items }) => {
+              const collapsed = collapsedGroups.has(key);
+              return (
+                <section key={key} className="mb-4 last:mb-0">
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(key)}
+                    aria-expanded={!collapsed}
+                    className="flex items-center gap-2 rounded-4 border border-transparent px-2 pb-1 pt-3 text-aux text-subtle-foreground transition outline-none hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
+                  >
+                    <span>{label}</span>
+                    {collapsed ? (
+                      <ChevronRightIcon className="h-3.5 w-3.5" aria-hidden />
+                    ) : (
+                      <ChevronDownIcon className="h-3.5 w-3.5" aria-hidden />
+                    )}
+                  </button>
+                  {collapsed ? null : (
+                    <div className="space-y-1">
+                      {items.map((session) => renderChatRow(session))}
+                    </div>
+                  )}
+                </section>
+              );
+            })
+          )}
+        </div>
+        <RomeConfirmDialog
+          open={pendingDeleteId !== null}
+          destructive
+          title={t("recentChats.delete")}
+          description={t("recentChats.deleteConfirm")}
+          confirmLabel={t("recentChats.delete")}
+          onCancel={() => setPendingDeleteId(null)}
+          onConfirm={() => {
+            const id = pendingDeleteId;
+            setPendingDeleteId(null);
+            if (id) void handleDelete(id);
+          }}
+        />
       </div>
-      <RomeConfirmDialog
-        open={pendingDeleteId !== null}
-        destructive
-        title={t("recentChats.delete")}
-        description={t("recentChats.deleteConfirm")}
-        confirmLabel={t("recentChats.delete")}
-        onCancel={() => setPendingDeleteId(null)}
-        onConfirm={() => {
-          const id = pendingDeleteId;
-          setPendingDeleteId(null);
-          if (id) void handleDelete(id);
-        }}
-      />
-    </div>
+    </TooltipProvider>
   );
 }
