@@ -769,6 +769,7 @@ export class AnthropicProvider implements ModelProvider {
           }
           if (partialText) yield { type: "text", content: partialText, turnPhase: "final" };
           running = false;
+          lastCompletedTurnCheckpoint = activeTurnLastAssistantMessageId;
           yield { type: "result", content: partialText || pendingText || "" };
         }
       } catch (err) {
@@ -790,6 +791,7 @@ export class AnthropicProvider implements ModelProvider {
           await queryProcess.abort();
           if (running) {
             running = false;
+            lastCompletedTurnCheckpoint = activeTurnLastAssistantMessageId;
             yield { type: "result", content: partialText || pendingText || "" };
           }
           return;

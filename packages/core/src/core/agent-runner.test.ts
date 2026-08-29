@@ -58,6 +58,7 @@ import {
   createAgentSessionManager,
   type AgentSession,
   type AgentSessionManager,
+  type AgentTurnHandle,
 } from "./agent-session.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createTurnMiddlewareChain } from "./turn-middleware.js";
@@ -1502,7 +1503,7 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
-    it("reopens an aborted provider for the next turn without replaying cancelled input", async () => {
+    it("reopens an aborted provider through the conversational input lane", async () => {
       const opens: ModelSessionParams[] = [];
       const prompts: string[] = [];
       const cancels = vi.fn();
@@ -1565,15 +1566,32 @@ describe("AgentRunner", () => {
         agentName: "test-main",
         channelThreadKey: "webchat:abort-resume",
       });
-      const first = session.sendTurn({ prompt: "first" });
+      const submit = (inputId: string, prompt: string) => {
+        let resolveTurn!: (handle: AgentTurnHandle) => void;
+        const turn = new Promise<AgentTurnHandle>((resolve) => {
+          resolveTurn = resolve;
+        });
+        const receipt = session.submitInput!(
+          { inputId, prompt },
+          { onTurn: (handle) => resolveTurn(handle) },
+        );
+        return { receipt, turn };
+      };
+
+      const firstInput = submit("input-first", "first");
+      expect(firstInput.receipt.disposition).toBe("started");
+      const first = await firstInput.turn;
       const firstMessages = collectMessages(first.events);
       await vi.waitFor(() => expect(prompts).toEqual(["first"]));
-      const second = session.sendTurn({ prompt: "second" });
-      const secondMessages = collectMessages(second.events);
       await first.interrupt!("user-stop");
       expect(await firstMessages).toContainEqual(
         expect.objectContaining({ type: "turn_end", status: "interrupted" }),
       );
+
+      const secondInput = submit("input-second", "second");
+      expect(secondInput.receipt.disposition).toBe("started");
+      const second = await secondInput.turn;
+      const secondMessages = collectMessages(second.events);
       await vi.waitFor(() => expect(prompts).toEqual(["first", "second"]));
       await first.interrupt!("late-repeat");
       expect(cancels).toHaveBeenCalledTimes(1);

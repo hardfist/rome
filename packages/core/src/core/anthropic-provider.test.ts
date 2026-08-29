@@ -241,6 +241,7 @@ describe("AnthropicProvider", () => {
         if (phase === "completed-block") {
           yield {
             type: "assistant",
+            uuid: "assistant-before-stop",
             session_id: "persisted-thread",
             parent_tool_use_id: null,
             message: { content: [{ type: "text", text: "Saved work" }] },
@@ -252,6 +253,7 @@ describe("AnthropicProvider", () => {
             controller.signal.addEventListener("abort", () => resolve(), { once: true }),
           );
         }
+        if (phase === "completed-block") return;
         throw new AbortError("Cancelled");
       },
     };
@@ -275,7 +277,95 @@ describe("AnthropicProvider", () => {
     if (phase !== "startup") {
       expect(messages).toContainEqual({ type: "text", content: "Saved work", turnPhase: "final" });
     }
+    expect(session.lastCompletedTurnCheckpoint).toBe(
+      phase === "completed-block" ? "assistant-before-stop" : undefined,
+    );
     await expect(session.sendUserInput({ text: "next" })).rejects.toThrow("closed");
+    await session.close();
+  });
+
+  it.each([
+    { label: "the current assistant checkpoint", interruptedCheckpoint: "assistant-current" },
+    { label: "no checkpoint", interruptedCheckpoint: undefined },
+  ])("replaces a prior successful checkpoint with $label when interrupted", async ({
+    interruptedCheckpoint,
+  }) => {
+    let controller!: AbortController;
+    let beginInterruptibleTurn!: () => void;
+    const interruptibleTurnBegun = new Promise<void>((resolve) => {
+      beginInterruptibleTurn = resolve;
+    });
+    queryMock.mockImplementation(({ prompt, options }) => {
+      controller = options.abortController;
+      return {
+        async *[Symbol.asyncIterator]() {
+          const inputs = prompt[Symbol.asyncIterator]();
+          await inputs.next();
+          yield {
+            type: "assistant",
+            uuid: "assistant-previous",
+            session_id: "persisted-thread",
+            parent_tool_use_id: null,
+            message: { content: [{ type: "text", text: "Previous turn" }] },
+          };
+          yield {
+            type: "result",
+            subtype: "success",
+            result: "Previous turn",
+            num_turns: 1,
+            stop_reason: "end_turn",
+            total_cost_usd: 0,
+            duration_ms: 1,
+          };
+
+          await inputs.next();
+          if (interruptedCheckpoint) {
+            yield {
+              type: "assistant",
+              uuid: interruptedCheckpoint,
+              session_id: "persisted-thread",
+              parent_tool_use_id: null,
+              message: { content: [{ type: "text", text: "Current turn" }] },
+            };
+          }
+          beginInterruptibleTurn();
+          if (!controller.signal.aborted) {
+            await new Promise<void>((resolve) =>
+              controller.signal.addEventListener("abort", () => resolve(), { once: true }),
+            );
+          }
+          throw new AbortError("Cancelled");
+        },
+        close: vi.fn(),
+      };
+    });
+
+    const session = await new AnthropicProvider().openSession(buildParams());
+    const events = session.events[Symbol.asyncIterator]();
+    await session.sendUserInput({ text: "first" });
+    expect((await events.next()).value).toMatchObject({
+      type: "text",
+      content: "Previous turn",
+    });
+    expect((await events.next()).value).toMatchObject({ type: "result", content: "Previous turn" });
+    expect(session.lastCompletedTurnCheckpoint).toBe("assistant-previous");
+
+    await session.sendUserInput({ text: "second" });
+    const remaining = (async () => {
+      const messages: AgentMessage[] = [];
+      for (;;) {
+        const next = await events.next();
+        if (next.done) return messages;
+        messages.push(next.value);
+      }
+    })();
+    await interruptibleTurnBegun;
+    await session.interrupt("user-stop");
+    expect(await remaining).toContainEqual({
+      type: "result",
+      content: interruptedCheckpoint ? "Current turn" : "",
+    });
+    expect(session.lastCompletedTurnCheckpoint).toBe(interruptedCheckpoint);
     await session.close();
   });
 

@@ -2174,7 +2174,6 @@ class AgentSessionImpl implements AgentSession {
       });
     } finally {
       if (this.replacingModelSession === session || this.modelSession !== session) return;
-      this.inputs.close();
       const sink = this.currentSink;
       if (session.isClosed) {
         this.modelSessionAvailable = false;
@@ -2190,6 +2189,7 @@ class AgentSessionImpl implements AgentSession {
         }
         return;
       }
+      this.inputs.close();
       if (sink && !sink.done) {
         this.failTurn(sink, "session closed mid-turn");
       }
