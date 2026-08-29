@@ -7,7 +7,7 @@ description: Triage and answer automated code-review findings on a PR without gr
 
 Goal end-state: every finding on the PR has exactly one of four answers — a minimal fix with a test, a corrected claim in the PR description, a follow-up issue, or a written decline. The PR's diff grows as little as possible.
 
-The bots present real defects and noise in the same authoritative voice. The default response to a finding is to add code — for an input nothing produces, a caller that does not exist, or a scope the PR excluded on purpose. So classification precedes code. Never start implementing a finding before classifying it.
+The bots present real defects and noise in the same authoritative voice. Classification precedes code. Never start implementing a finding before classifying it.
 
 ## Phase 1 — Gather and dedupe
 
