@@ -114,6 +114,27 @@ There is no PR-time "did you add a changeset?" check. The merge commit is the so
 
 The publish step is the merge of the release PR, not your original PR — so contributors don't have to worry about "every small fix becomes its own release". Multiple commits ship together.
 
+### Every published package declares `repository`
+
+This repository is public and publishes through an npm Trusted Publisher, so npm
+attaches a provenance attestation to each upload on its own — `sdk-publish.yml`
+never passes `--provenance`. npm then compares the packed manifest against that
+attestation and rejects the upload with HTTP 422 when `repository.url` does not
+resolve to `https://github.com/rome-os/rome`:
+
+```
+[E422] 422 Unprocessable Entity - PUT https://registry.npmjs.org/@rome-os%2fui
+Error verifying sigstore provenance bundle: Failed to validate repository
+information: package.json: "repository.url" is "", expected to match
+"https://github.com/rome-os/rome" from provenance
+```
+
+So every entry in `release-please-config.json` also carries `repository` in its
+`package.json`, with `directory` set to its own workspace path. A new releasable
+package without it builds, packs, and then fails at the upload — after
+release-please has already cut the tag and the GitHub release, which is the
+expensive place to find out.
+
 ## Manual npm publish retry
 
 Use `.github/workflows/release.yml` as the single npm publish entrypoint, even

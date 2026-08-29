@@ -2,6 +2,11 @@
   "name": "@rome-os/app-runtime",
   "version": "0.6.1",
   "description": "Runtime SDK for Rome apps",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rome-os/rome.git",
+    "directory": "packages/app-runtime-sdk"
+  },
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

@@ -95,11 +95,12 @@ jobs:
       # OIDC: the `id-token: write` job permission lets npm exchange the
       # GitHub token for an npm publish credential via the Trusted
       # Publisher mapping (no NPM_TOKEN).
-      # `--provenance` is intentionally NOT set: npm rejects provenance
-      # attestations from private source repositories (HTTP 422
-      # "Unsupported GitHub Actions source repository visibility:
-      # private"), and rome-internal is private. Re-enable if/when the
-      # repo goes public.
+      # `--provenance` is not set because it does not need to be: this
+      # repository is public, so publishing through the Trusted Publisher
+      # attaches a provenance attestation on its own. npm then checks the
+      # packed manifest against it and rejects the upload with HTTP 422
+      # unless `repository.url` resolves to this repository, so every
+      # package here declares `repository` with its workspace `directory`.
       - name: Publish to npm
         working-directory: ${{ matrix.path }}
         run: pnpm publish --access public --no-git-checks${{ inputs.dry_run && ' --dry-run' || '' }}

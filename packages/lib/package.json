@@ -2,6 +2,11 @@
   "name": "@rome-os/libs",
   "version": "0.0.2",
   "description": "Shared runtime primitives used by Rome services",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rome-os/rome.git",
+    "directory": "packages/lib"
+  },
   "license": "MIT",
   "type": "module",
   "sideEffects": false,

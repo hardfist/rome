@@ -2,6 +2,11 @@
   "name": "@rome-os/app-web-sdk",
   "version": "0.3.0",
   "description": "Web runtime and CLI SDK for Rome apps",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rome-os/rome.git",
+    "directory": "packages/app-web-sdk"
+  },
   "license": "MIT",
   "type": "module",
   "bin": {
