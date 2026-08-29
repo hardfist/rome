@@ -46,11 +46,13 @@ jobs:
           if [ -n "${CALLER_PATHS:-}" ]; then
             echo "paths=$CALLER_PATHS" >> "$GITHUB_OUTPUT"
           elif [ "${PACKAGE:-}" = "all" ]; then
-            # Keep packages without an npm Trusted Publisher out of the default
-            # manual target. They remain explicitly selectable for dry runs,
-            # and automatic releases still receive exact paths from
+            # Every package in release-please-config.json, each with a
+            # configured npm Trusted Publisher. Keep the two lists in step: a
+            # package listed here without a publisher fails every `all`
+            # dispatch, and one missing from here is reachable only by name.
+            # Automatic releases ignore this and take exact paths from
             # release-please.
-            echo 'paths=["packages/app-runtime-sdk","packages/app-web-sdk","packages/ui"]' >> "$GITHUB_OUTPUT"
+            echo 'paths=["packages/app-runtime-sdk","packages/app-web-sdk","packages/ui","packages/lib","packages/web-content"]' >> "$GITHUB_OUTPUT"
           elif [ -n "${PACKAGE:-}" ]; then
             echo "paths=[\"$PACKAGE\"]" >> "$GITHUB_OUTPUT"
           else

@@ -29,9 +29,8 @@ on:
         required: true
         type: choice
         default: all
-        # Newly bootstrapped packages stay individually selectable for dry-run
-        # validation, but are not part of `all` until their npm Trusted
-        # Publishers exist. See docs/releases.md.
+        # `all` covers every package below. Each stays individually
+        # selectable for a dry run or a single-package retry.
         options:
           - all
           - packages/app-runtime-sdk

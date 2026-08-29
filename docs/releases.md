@@ -139,17 +139,21 @@ expensive place to find out.
 
 Use `.github/workflows/release.yml` as the single npm publish entrypoint, even
 for manual retries or hotfix publishes. In Actions, run `Release` manually and
-choose `all` or one package path. `all` currently expands to the three packages
-whose npm Trusted Publishers already exist: the two SDKs and `@rome-os/ui`.
-The two newly bootstrapped packages remain individually selectable for dry-run
-validation; add them to `all` after their publishers are configured. The manual
-path calls the same reusable `sdk-publish.yml` implementation as automatic
-release publishes, but keeps the OIDC caller identity anchored on `release.yml`.
+choose `all` or one package path. `all` expands to every package in
+`release-please-config.json`; each one also stays individually selectable, for a
+dry run or a single-package retry. The manual path calls the same reusable
+`sdk-publish.yml` implementation as automatic release publishes, but keeps the
+OIDC caller identity anchored on `release.yml`.
+
+The `all` list in `sdk-publish.yml` is maintained by hand, so it and
+`release-please-config.json` have to stay in step. A package in `all` without a
+Trusted Publisher fails every `all` dispatch, not just its own; a package left
+out of `all` is reachable only by selecting it by name.
 
 The npm Trusted Publisher for every published package must be configured to this
-repository's `.github/workflows/release.yml`. Configure publishers for
-`@rome-os/libs` and `@rome-os/rome-web-components` before merging their first
-generated release PR. npm only allows one trusted publisher per package, and
+repository's `.github/workflows/release.yml`. Configure a new package's
+publisher before merging its first generated release PR, and before adding it
+to `all`. npm only allows one trusted publisher per package, and
 reusable workflow calls are authorized against the caller workflow, so
 `sdk-publish.yml` is intentionally not directly dispatchable.
 
@@ -159,6 +163,7 @@ reusable workflow calls are authorized against the caller workflow, so
 - `.release-please-manifest.json` — Current version per package path. release-please updates this in the release PR; never edit by hand.
 - `.github/workflows/release.yml` — Single publish entrypoint: push events run `release-please` and automatic npm publish; manual dispatches retry/publish selected packages under the same npm Trusted Publisher identity.
 - `.github/workflows/sdk-publish.yml` — Reusable implementation called by `release.yml`; do not run it directly.
+- `scripts/check-publish-targets.test.mjs` (`pnpm test:release:targets`, part of `test:unit:rest`) — Holds the three package lists together: the `all` dispatch target, the dispatch menu, and `release-please-config.json`. It also asserts every released package declares `repository`.
 - The `lint` job in `.github/workflows/ci.yml` + `scripts/check-pr-title.sh` — PR-time gate on the Conventional Commit title that becomes the squash commit. It is the job's first step, ahead of the toolchain install, so a bad title reports in seconds. Read the note below before making it a required check.
 
 ### Before requiring any check on `main`
