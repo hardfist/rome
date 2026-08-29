@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import { useForm } from "@tanstack/react-form";
 import { useTranslation } from "react-i18next";
+import { MoreHorizontal } from "lucide-react";
 import {
   ASSIGNABLE_BOND_LEVELS,
   normalizeBondLevel,
@@ -9,6 +10,13 @@ import {
   type PersonResource,
 } from "@rome/api-types/people";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -256,7 +264,7 @@ function LinkForm({
  * The stream's row is dense: a placement decision runs on the evidence — which
  * channel, which number, what they last said — so all of it is on the row. The
  * directory carries none of that, so its row is the contacts line every other
- * row in that view is, and the buttons sit at the end of it.
+ * row in that view is, and the gestures sit behind a `⋯` menu at the end of it.
  */
 function entryRow(variant: PeopleView) {
   return variant === "directory" ? DirectoryRow : UnknownRow;
@@ -363,47 +371,76 @@ export function UnknownEntry({
   }
 
   const Row = entryRow(variant);
+  // The verbs wear the shape their view has room for. The stream is the triage
+  // surface, a handful of senders waiting on a decision, so its dense row
+  // carries the three as buttons. The directory's Unknown group is everyone
+  // Rome has not placed — a synced address book can put hundreds of rows in it
+  // — and three buttons per contact would out-shout the roster the view exists
+  // to read, so there they fold into one quiet row menu.
+  const triageButtons = (
+    <span className="flex items-center gap-1">
+      <Button type="button" size="sm" onClick={() => openAction("create")} disabled={acting}>
+        {t("actions.create")}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => openAction("link")}
+        disabled={acting}
+      >
+        {t("actions.link")}
+      </Button>
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        onClick={() => setConfirmingDismiss(true)}
+        disabled={acting}
+      >
+        <BusyLabel
+          idle={t("actions.markStranger")}
+          busy={t("actions.markingStranger")}
+          isBusy={acting}
+        />
+      </Button>
+    </span>
+  );
+  const rowMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        {/* A `Button` rather than `IconButton` for the `ghost` aria-expanded
+            paint, which marks the row whose menu is open. */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          disabled={acting}
+          aria-label={t("actions.rowMenu", { name })}
+        >
+          <MoreHorizontal aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => openAction("create")}>
+          {t("placeMenu.create")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => openAction("link")}>
+          {t("placeMenu.link")}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {/* Deliberately the same words as the confirm dialog's button: the item
+            that opens the confirm and the button that carries it out promise
+            the same thing. */}
+        <DropdownMenuItem variant="destructive" onSelect={() => setConfirmingDismiss(true)}>
+          {t("actions.markStranger")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
   return (
     <div>
-      <Row
-        row={row}
-        actions={
-          !action && (
-            <span className="flex items-center gap-1">
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => openAction("create")}
-                disabled={acting}
-              >
-                {t("actions.create")}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => openAction("link")}
-                disabled={acting}
-              >
-                {t("actions.link")}
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                onClick={() => setConfirmingDismiss(true)}
-                disabled={acting}
-              >
-                <BusyLabel
-                  idle={t("actions.markStranger")}
-                  busy={t("actions.markingStranger")}
-                  isBusy={acting}
-                />
-              </Button>
-            </span>
-          )
-        }
-      />
+      <Row row={row} actions={!action && (variant === "directory" ? rowMenu : triageButtons)} />
 
       {/* With no form open the failure belongs to the dismissal, whose button
           sits on the row above. */}

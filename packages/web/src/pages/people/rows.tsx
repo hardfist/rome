@@ -127,9 +127,9 @@ export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.R
  * stream. Clicking a person opens their dossier; an account has none to open
  * until it is placed on somebody.
  *
- * `actions` is whatever gesture the row's position admits: placing an account
- * nobody has decided about, or taking a dismissal back. The gestures themselves
- * are `people/triage.tsx`; the row only says where they go.
+ * `actions` is whatever gesture the row's position admits: a `⋯` menu placing
+ * an account nobody has decided about, or taking a dismissal back. The gestures
+ * themselves are `people/triage.tsx`; the row only says where they go.
  */
 export function DirectoryRow({
   row,

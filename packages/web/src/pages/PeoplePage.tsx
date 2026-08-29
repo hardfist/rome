@@ -142,7 +142,8 @@ export default function PeoplePage() {
   // on the row their view has. The stream renders them dense — a placement and
   // a restore both decide on what the sender actually sent, so the evidence is
   // on the row rather than a click away — and the directory renders them as the
-  // contacts line every other row is, with the buttons at the end of it.
+  // contacts line every other row is, with the gestures behind a `⋯` menu at
+  // the end of it.
   const unplaced = (row: PeopleRow, variant: PeopleView) =>
     row.level === "stranger" ? (
       <DismissedEntry key={row.id} row={row} variant={variant} />

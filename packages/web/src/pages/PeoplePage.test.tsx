@@ -614,20 +614,33 @@ describe("PeoplePage directory", () => {
     expect(screen.queryByText(/\d+ messages?/)).toBeNull();
   });
 
-  it("still offers the placement gestures on an account nobody has decided about", async () => {
+  it("folds the placement gestures into one row menu on an account nobody has decided about", async () => {
     const user = userEvent.setup();
-    mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER] });
+    const { calls } = mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER] });
     renderPage();
 
     await screen.findByText("Wei Chen");
     await showDirectory(user);
 
-    // The contacts row carries the same three verbs the stream's dense row does
-    // — the decision is available wherever the account is.
+    // The decision is available wherever the account is, but the roster is for
+    // reading: the row wears one quiet control, and the stream's three verbs
+    // sit behind it.
     await screen.findByText("Rachel Lim");
-    expect(screen.getByRole("button", { name: "Create" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Link" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Treat as stranger" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Create" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Treat as stranger" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Actions for Rachel Lim" }));
+    expect(await screen.findByRole("menuitem", { name: "Create profile…" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Link to person…" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Treat as stranger" })).toBeTruthy();
+
+    // The menu reaches the same verb the stream's button does: one request
+    // creating the person with the account already on it.
+    await user.click(screen.getByRole("menuitem", { name: "Create profile…" }));
+    await user.click(await screen.findByRole("button", { name: "Create profile" }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "POST" && c.url === "/api/people")).toBe(true),
+    );
   });
 
   it("pages the directory by name, resuming at the cursor the server named", async () => {

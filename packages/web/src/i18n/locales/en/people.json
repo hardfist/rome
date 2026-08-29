@@ -142,6 +142,10 @@
     "label": "Link to existing person",
     "selectPlaceholder": "Select a person…"
   },
+  "placeMenu": {
+    "create": "Create profile…",
+    "link": "Link to person…"
+  },
   "linkPicker": {
     "heldBy": "now {{owner}}'s"
   },
