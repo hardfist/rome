@@ -1,12 +1,12 @@
 ---
 name: loop-northstar
-description: Hold an interactive session to create or revise an ideal-state doc, or to slice it into approved milestones on the project board.
+description: Hold an interactive session to create or revise an ideal-state doc, or to slice it into approved repository milestones.
 disable-model-invocation: true
 ---
 
 # Loop: north star
 
-Goal end-state: the ideal state of the target area is written down and agreed — as a doc PR, and when the session slices it, as approved milestones on the board.
+Goal end-state: the ideal state of the target area is written down and agreed — as a doc PR, and when the session slices it, as approved repository milestones.
 
 This is the interactive half of the reconciliation loop. The autonomous half (`loop-reconcile`) computes the gap between these artifacts and the codebase and files work issues. This session files no work issues.
 
@@ -24,7 +24,7 @@ Admission rules for every statement:
 
 Content that never enters the doc:
 
-- Milestones. They go to the board and die there.
+- Milestones. They go to the repository's milestone list and die there.
 - Rationale. It goes to [an ADR](../../../docs/authoring/adrs.md).
 - Migration policy. It lives in `loop-reconcile`.
 
@@ -34,11 +34,12 @@ A milestone is an intermediate ideal state. Its description is a Statements list
 
 - Slice the end state into pillars or layers. Pillars are independent and build in any order. Layers stack and build bottom up.
 - A milestone must describe a state worth pausing at indefinitely. If pausing there leaves the codebase incoherent, the slice is wrong.
-- Milestones are born approved. Consensus happens in this session, and the record lands on the board. No proposed state exists.
+- Milestones are born approved. Consensus happens in this session, and the record lands as repository milestones. No proposed state exists.
+- A milestone that later contradicts a revised doc gets fixed here too: `loop-reconcile` reports the contradiction and stops, and the next session revises the milestone.
 
 ## Flow
 
-1. Orient. Read the existing doc if there is one, the board, and the code the doc covers.
+1. Orient. Read the existing doc if there is one, the repository's open milestones and `loop-reconcile` issues, and the code the doc covers.
 2. Discuss to consensus. Draft in chat and iterate with the user. Push back on any statement that fails an admission rule.
 3. Check consistency. Walk the full Statements list — new and existing statements together — and surface any two that cannot both hold. A revision session checks against the whole doc, not only the edited part.
 4. Land the artifacts, only after the user's go-ahead in chat:
