@@ -35,7 +35,8 @@ A milestone is an intermediate ideal state. Its description is a Statements list
 - Slice the end state into pillars or layers. Pillars are independent and build in any order. Layers stack and build bottom up.
 - A milestone must describe a state worth pausing at indefinitely. If pausing there leaves the codebase incoherent, the slice is wrong.
 - Milestones are born approved. Consensus happens in this session, and the record lands as repository milestones. No proposed state exists.
-- A milestone that later contradicts a revised doc gets fixed here too: `loop-reconcile` reports the contradiction and stops, and the next session revises the milestone.
+- A milestone that falls behind a revised doc gets fixed here too: `loop-reconcile` reports the drift and stops, and the next session revises the milestone.
+- A session that revises a doc also walks the open milestones and updates any statement the revision changed or removed, while the human is present to confirm.
 
 ## Flow
 

@@ -10,11 +10,11 @@ Goal end-state: the next deliverable chunk of the gap between the doc and the co
 
 This is the autonomous half of the reconciliation loop. When launched from a session, run it in a background agent. It runs headless: never ask the user a question mid-run. Every ambiguity resolves to "stop and file a report", never "do something plausible". Every report reads standalone on GitHub and never depends on chat context.
 
-All work state lives in the GitHub repository itself: issues, labels, and milestones. No project board. Every issue this skill files carries the label `loop-reconcile`, the mark that the loop owns it. Reports carry `loop-complete` or `loop-needs-discussion`. If a label is missing from the repository, create it.
+All work state lives in the GitHub repository itself: issues, labels, and milestones. No project board. Every issue this skill files carries two labels: `loop-reconcile`, the mark that the loop owns it, and a scope label `loop:<doc-stem>` naming its source doc — `loop:people` for `docs/northstars/people.md`. Reports also carry `loop-complete` or `loop-needs-discussion`. If a label is missing from the repository, create it.
 
 Args: an ideal-state doc under `docs/northstars/`, and optionally a repository milestone.
 
-- Given a milestone, reconcile against the milestone description. First check its statements against the doc: if one contradicts the doc, file a `loop-needs-discussion` report and stop. The doc wins on intent, and a milestone that fell behind it needs a session, not work.
+- Given a milestone, reconcile against the milestone description. First check that the doc still backs every milestone statement: if one contradicts the doc, or the doc no longer asks for it at all, file a `loop-needs-discussion` report and stop. The doc wins on intent, and a milestone that fell behind it needs a session, not work.
 - Given no milestone, reconcile against the doc's Statements section and file issues attached to no milestone.
 - Only the Statements list has authority. The rest of the doc is illustration.
 
@@ -32,13 +32,13 @@ Args: an ideal-state doc under `docs/northstars/`, and optionally a repository m
 
 ## Authority
 
-- Allowed: create issues, comment, and revise or withdraw issues that carry `loop-reconcile` and not `ready-for-agent`.
-- Never: apply `ready-for-agent`, create or advance milestones, close an issue labeled `ready-for-agent`, touch an issue without the `loop-reconcile` label, or edit the ideal-state doc.
+- Allowed: create issues, comment, and revise or withdraw issues that carry `loop-reconcile` plus this run's scope label and not `ready-for-agent`.
+- Never: apply `ready-for-agent`, create or advance milestones, close an issue labeled `ready-for-agent`, touch an issue outside this run's scope label, or edit the ideal-state doc.
 - Anything a human approved is frozen. Issues labeled `ready-for-agent` and milestones change only by human hand.
 
 ## Procedure
 
-1. Guard. Read the open `loop-reconcile` issues for the given scope.
+1. Guard. Read the open issues carrying `loop-reconcile` and this run's scope label.
    - If one is labeled `ready-for-agent` or is in progress, file nothing. Print a pointer to it and stop.
    - If none carries `ready-for-agent`, re-check each against the gap computed below. If they hold, stop. If they are stale, revise or withdraw them, then continue.
 2. Compute the gap. Walk the Statements list one claim at a time against the code. Record each as holds, with evidence, or fails, with the shortest path to make it hold.
