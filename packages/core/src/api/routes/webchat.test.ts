@@ -1912,7 +1912,7 @@ describe("Webchat API", () => {
       expect(sendMessageRun).toHaveBeenCalledWith(
         "send_message",
         expect.objectContaining({
-          parts: [{ type: "text", content: "It's sunny.", turnPhase: "final" }],
+          parts: [{ type: "text", content: "It's sunny.", turnPhase: "final", blockIx: 1 }],
         }),
         expect.anything(),
       );
@@ -1925,7 +1925,12 @@ describe("Webchat API", () => {
       );
       expect(commentary).toHaveLength(1);
       expect(JSON.parse(commentary[0].content)).toEqual([
-        { type: "text", content: "Let me check the weather.", turnPhase: "commentary" },
+        {
+          type: "text",
+          content: "Let me check the weather.",
+          turnPhase: "commentary",
+          blockIx: 0,
+        },
       ]);
     });
 
@@ -1938,7 +1943,7 @@ describe("Webchat API", () => {
       let releaseResult!: () => void;
       const resultGate = new Promise<void>((resolve) => (releaseResult = resolve));
       let released = false;
-      const { events } = await runScriptedStream(
+      const { events, sendMessageRun } = await runScriptedStream(
         () =>
           (async function* () {
             yield { type: "text", content: "Whole block" };
@@ -1953,6 +1958,48 @@ describe("Webchat API", () => {
         },
       );
       expect(assistantTexts(events)).toContainEqual({ blockIx: 0, text: "Whole block" });
+      expect(sendMessageRun).toHaveBeenCalledWith(
+        "send_message",
+        expect.objectContaining({
+          parts: [{ type: "text", content: "Whole block", turnPhase: "final", blockIx: 0 }],
+        }),
+        expect.anything(),
+      );
+    });
+
+    it("allocates a new final block after commentary even when the text is identical", async () => {
+      const { sendMessageRun } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "text", content: "Same text", turnPhase: "commentary" };
+            yield { type: "result", content: "Same text" };
+          })() as AsyncGenerator<never>,
+      );
+
+      expect(sendMessageRun).toHaveBeenCalledWith(
+        "send_message",
+        expect.objectContaining({
+          parts: [{ type: "text", content: "Same text", turnPhase: "final", blockIx: 1 }],
+        }),
+        expect.anything(),
+      );
+    });
+
+    it("assigns block zero when a provider returns only a final result", async () => {
+      const { sendMessageRun } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "result", content: "Result only" };
+          })() as AsyncGenerator<never>,
+      );
+
+      expect(sendMessageRun).toHaveBeenCalledWith(
+        "send_message",
+        expect.objectContaining({
+          parts: [{ type: "text", content: "Result only", turnPhase: "final", blockIx: 0 }],
+        }),
+        expect.anything(),
+      );
     });
 
     it("streams Plan-only summary updates and reconstructs the latest Plan after settlement", async () => {

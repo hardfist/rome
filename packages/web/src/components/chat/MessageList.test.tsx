@@ -231,6 +231,172 @@ describe("MessageList inline-card state across streaming→settled", () => {
   });
 });
 
+function commentary(text: string, id = "a-text", blockIx: number | null = 0): ChatMessage {
+  return {
+    id,
+    sessionId: "s-1",
+    turnId: "turn-1",
+    role: "assistant",
+    content: JSON.stringify([
+      {
+        type: "text",
+        content: text,
+        turnPhase: "commentary",
+        ...(blockIx !== null ? { blockIx } : {}),
+      },
+    ]),
+    createdAt: "2026-06-13T00:00:01.000Z",
+  };
+}
+
+function streamingList(messages: ChatMessage[], text: string, blockIx = 0, sourceText = text) {
+  const { live, actions } = renderList(true);
+  return (
+    <ThemeProvider>
+      <MessageList
+        rows={buildRows(messages, new Map([["s-1", IDENTITY]]), IDENTITY, {
+          runningTurnId: live.runningTurnId,
+          isStreaming: true,
+        })}
+        live={{ ...live, text, blockIx, sourceText }}
+        contentRef={() => {}}
+        onOpenLiveTrace={() => {}}
+        onOpenStoredTrace={() => {}}
+        actions={actions}
+      />
+    </ThemeProvider>
+  );
+}
+
+function expectBefore(earlier: HTMLElement, later: HTMLElement) {
+  expect(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+}
+
+describe("MessageList streaming input", () => {
+  it("does not repeat persisted commentary after a follow-up input", () => {
+    const original = commentary("I am checking the implementation.");
+    const followup = humanReply("Please include pseudocode.");
+    const { rerender } = render(streamingList([original], "I am checking the implementation."));
+
+    rerender(streamingList([original, followup], "I am checking the implementation."));
+
+    expect(screen.getAllByText("I am checking the implementation.")).toHaveLength(1);
+    expectBefore(screen.getByLabelText("Working"), screen.getByText("Please include pseudocode."));
+  });
+
+  it("keeps a live block in its row when follow-up inputs arrive", () => {
+    const original = commentary("The first step is complete.");
+    const followup = humanReply("Please include pseudocode.");
+    const another = humanReply("Use TypeScript.");
+    const { rerender } = render(streamingList([original], "Now checking", 1));
+    const liveText = screen.getByText("Now checking");
+
+    rerender(streamingList([original, followup, another], "Now checking the next step.", 1));
+
+    expect(screen.getByText("Now checking the next step.")).toBe(liveText);
+    expectBefore(liveText, screen.getByText("Please include pseudocode."));
+    expectBefore(liveText, screen.getByText("Use TypeScript."));
+  });
+
+  it("keeps the first unpersisted block before a follow-up input", () => {
+    const initial = humanReply("Explain the implementation.");
+    const followup = humanReply("Please include pseudocode.");
+    const { rerender } = render(streamingList([initial], "I am checking"));
+    const liveText = screen.getByText("I am checking");
+
+    rerender(streamingList([initial, followup], "I am checking the implementation."));
+
+    expect(screen.getByText("I am checking the implementation.")).toBe(liveText);
+    expectBefore(liveText, screen.getByText("Please include pseudocode."));
+  });
+
+  it("places the next block after the follow-up without replaying the previous block", () => {
+    const original = commentary("The first step is complete.");
+    const followup = humanReply("Please include pseudocode.");
+    const { rerender } = render(streamingList([original], "The first step is complete."));
+    rerender(streamingList([original, followup], "The first step is complete."));
+
+    rerender(streamingList([original, followup], "Here is the pseudocode.", 1));
+
+    expect(screen.getAllByText("The first step is complete.")).toHaveLength(1);
+    expectBefore(
+      screen.getByText("Please include pseudocode."),
+      screen.getByText("Here is the pseudocode."),
+    );
+  });
+
+  it("deduplicates a replayed block when the last row is a follow-up input", () => {
+    render(
+      streamingList(
+        [commentary("I am checking the implementation."), humanReply("Please include pseudocode.")],
+        "I am checking the implementation.",
+      ),
+    );
+
+    expect(screen.getAllByText("I am checking the implementation.")).toHaveLength(1);
+    expectBefore(screen.getByLabelText("Working"), screen.getByText("Please include pseudocode."));
+  });
+
+  it("uses the source text to suppress a persisted block while typing catches up", () => {
+    render(
+      streamingList(
+        [commentary("I am checking the implementation."), humanReply("Please include pseudocode.")],
+        "I am checking",
+        0,
+        "I am checking the implementation.",
+      ),
+    );
+
+    expect(screen.queryByText("I am checking", { exact: true })).toBeNull();
+    expect(screen.getAllByText("I am checking the implementation.")).toHaveLength(1);
+  });
+
+  it("does not mistake a new block with identical text for an old persisted block", () => {
+    const original = commentary("Checking the implementation.");
+    const followup = humanReply("Check once more.");
+    const { rerender } = render(
+      streamingList([original, followup], "Checking the implementation.", 0),
+    );
+
+    rerender(streamingList([original, followup], "Checking the implementation.", 1));
+
+    const copies = screen.getAllByText("Checking the implementation.");
+    expect(copies).toHaveLength(2);
+    expectBefore(screen.getByText("Check once more."), copies[1]);
+  });
+
+  it("renders legacy commentary without blockIx without matching it to a live block", () => {
+    render(
+      streamingList(
+        [commentary("Historical commentary.", "legacy", null), humanReply("Continue from here.")],
+        "Current live block.",
+        0,
+      ),
+    );
+
+    expect(screen.getByText("Historical commentary.")).toBeTruthy();
+    expect(screen.getByText("Current live block.")).toBeTruthy();
+  });
+
+  it("does not move the previous typewriter frame below the follow-up at a block boundary", () => {
+    const original = commentary("The first step is complete.");
+    const followup = humanReply("Please include pseudocode.");
+    const { rerender } = render(streamingList([original], "The first step is complete."));
+
+    rerender(
+      streamingList(
+        [original, followup],
+        "The first step is complete.",
+        1,
+        "Here is the pseudocode.",
+      ),
+    );
+
+    expect(screen.getAllByText("The first step is complete.")).toHaveLength(1);
+    expectBefore(screen.getByText("Please include pseudocode."), screen.getByLabelText("Working"));
+  });
+});
+
 describe("MessageList Plan placement", () => {
   it("groups a collapsed completed Plan and collapsed Recap after turn text", () => {
     const messages: ChatMessage[] = [

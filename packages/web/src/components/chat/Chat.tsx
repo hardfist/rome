@@ -1618,6 +1618,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 runningTurnId,
                 snapshot: currentSnapshot,
                 text: liveAssistantText,
+                blockIx: floorSessionStream?.assistantBlockIx,
+                sourceText: floorSessionStream?.assistantText,
                 identity: floorIdentity,
               }}
               selection={

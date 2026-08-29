@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from "react";
+import { memo, type ReactNode, useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
@@ -42,6 +42,9 @@ export interface LivePreview {
   runningTurnId: string | null;
   snapshot: TraceSnapshot | null;
   text: string;
+  blockIx?: number;
+  /** The full SSE text, which may be ahead of the typewriter preview. */
+  sourceText?: string;
   identity: AgentIdentity;
 }
 
@@ -167,19 +170,22 @@ function renderSubagents(
   );
 }
 
-// True if the live tail's text already exists as a persisted commentary block in
-// this turn — the persisted copy landed just ahead of the tail, so the tail copy
-// is a duplicate to hide. Only commentary counts: the final answer is persisted
-// into the row too (via send_message) and, if textually identical to an earlier
-// commentary block, must NOT suppress the live tail before stream close.
-function hasPersistedCommentary(messages: ChatMessage[], liveText: string): boolean {
-  for (const m of messages) {
-    for (const part of parseMessageBlocks(m)) {
-      if (part.type === "text" && part.turnPhase === "commentary" && part.content === liveText)
-        return true;
+// Persisted WebChat text blocks retain the same identity as their live SSE
+// preview. Build the lookup once per transcript change; token frames then use
+// a direct `(turnId, blockIx)` lookup instead of reconstructing block order.
+function indexPersistedTextRows(rows: ChatRow[]): Map<string, ChatRow> {
+  const index = new Map<string, ChatRow>();
+  for (const row of rows) {
+    if (row.kind !== "agent") continue;
+    for (const message of row.messages) {
+      if (!message.turnId) continue;
+      for (const part of parseMessageBlocks(message)) {
+        if (part.type !== "text" || part.blockIx === undefined) continue;
+        index.set(`${message.turnId}:${part.blockIx}`, row);
+      }
     }
   }
-  return false;
+  return index;
 }
 
 // The raw text a copy button puts on the clipboard for an agent turn: every
@@ -209,13 +215,8 @@ function LiveActivityDot() {
   );
 }
 
-// One transcript row. Memoized so a streaming turn re-renders ONLY its running
-// row — every settled row bails on its stable props, so renderFlatBlocks never
-// re-runs for the history. `live` is non-null for exactly the running turn's row
-// and carries the live trace + streaming-text tail INTO that row. Crucially the
-// running row stays at its final transcript position the whole turn: when the
-// turn finalizes, `live` flips to null and the row re-renders in place (NOT a
-// remount), so an inline card's local input state — typed mid-stream — survives.
+// Stable row keys preserve inline-card drafts when the live block moves on or
+// the turn ends. Memoization keeps token updates out of the historical rows.
 const RowView = memo(function RowView({
   row,
   live,
@@ -272,7 +273,6 @@ const RowView = memo(function RowView({
   ) : row.trace ? (
     renderTrace(row.trace, onOpenStoredTrace)
   ) : undefined;
-  const suppressText = !!live?.text && hasPersistedCommentary(row.messages, live.text);
   // Copy appears once the turn settles (`live` gone) and only when it produced
   // text — a card-only turn has nothing raw to copy.
   const copyText = live ? "" : turnCopyText(row.messages);
@@ -334,7 +334,7 @@ const RowView = memo(function RowView({
           </div>
         );
       })}
-      {live?.text && !suppressText ? (
+      {live?.text ? (
         // rome-live-caret appends the pulsing live dot after the last rendered
         // character (see globals.css).
         <div className="rome-live-caret">
@@ -379,12 +379,8 @@ const RowView = memo(function RowView({
   );
 });
 
-// The live tail for a running turn that has not persisted ANY message yet —
-// there's no row to attach to, so it stands alone (avatar + live trace +
-// streaming text). The moment its first message persists, a running agent row
-// appears in `rows` and owns the tail instead (RowView). No inline card can
-// exist before that first persist — cards come from persisted blocks, never the
-// raw text tail — so nothing with local state remounts when the tail moves in.
+// A block without an agent row at its transcript position carries its own header.
+// Persisted cards stay in RowView so their local state survives the handoff.
 function StandaloneLiveTail({
   live,
   actions,
@@ -499,32 +495,55 @@ export function MessageList({
   actions,
   feedback,
 }: MessageListProps) {
-  // The running turn's row is NOT pulled out of the transcript — it renders in
-  // its final position and receives `live` so it carries the trace + text tail
-  // in place (RowView). This keeps the row (and any inline card in it) mounted
-  // across the streaming→settled transition; only it re-renders per token, every
-  // settled row bails on memo. A turn with nothing persisted yet has no row, so
-  // the tail stands alone until its first message lands.
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
-  const lastRow = rows.at(-1);
+  const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;
+  const sourceText = live.sourceText ?? live.text;
+  const persistedTextRows = useMemo(() => indexPersistedTextRows(rows), [rows]);
+  const persistedRow = blockKey ? persistedTextRows.get(blockKey) : undefined;
+  const nextAnchor = { blockKey, afterRowKey: persistedRow?.key ?? rows.at(-1)?.key ?? null };
+  const [anchor, setAnchor] = useState(nextAnchor);
+  // A user input cannot relocate an output block already on screen. Only a
+  // new block picks a new position. A persisted copy takes over the live text.
+  let currentAnchor = anchor;
+  if (anchor.blockKey !== blockKey) {
+    currentAnchor = nextAnchor;
+    setAnchor(nextAnchor);
+  }
+  const anchorRow = rows.find(
+    (row) => row.key === (persistedRow?.key ?? currentAnchor.afterRowKey),
+  );
   const runningRow =
     runningTurnId &&
-    lastRow?.kind === "agent" &&
-    lastRow.messages.some((m) => m.turnId === runningTurnId)
-      ? lastRow
+    anchorRow?.kind === "agent" &&
+    anchorRow.messages.some((m) => m.turnId === runningTurnId)
+      ? anchorRow
       : undefined;
-  const hasRunningRow = !!runningRow;
+  // useSmoothText resets after render. Do not place the old block's last frame
+  // at the new block's position while that effect catches up.
+  const preview = !persistedRow && sourceText.startsWith(live.text) ? live : { ...live, text: "" };
+  const standalone =
+    live.isStreaming && !runningRow ? (
+      <StandaloneLiveTail
+        key={`live:${blockKey}`}
+        live={preview}
+        actions={actions}
+        onOpenLiveTrace={onOpenLiveTrace}
+        onOpenSubagentTrace={onOpenSubagentTrace}
+        activeTraceTarget={activeTraceTarget}
+        subagentIconByName={subagentIconByName}
+      />
+    ) : null;
 
   return (
     <div className="flex-1">
       <div ref={contentRef} className="mx-auto max-w-5xl px-4 pt-4 md:px-6">
-        {rows.map((row) => {
+        {rows.flatMap((row) => {
           const isRunning = row === runningRow;
           const view = (
             <RowView
               key={row.key}
               row={row}
-              live={isRunning ? live : null}
+              live={isRunning ? preview : null}
               actions={actions}
               onOpenLiveTrace={onOpenLiveTrace}
               onOpenStoredTrace={onOpenStoredTrace}
@@ -534,18 +553,20 @@ export function MessageList({
               feedback={feedback}
             />
           );
-          if (!selection?.active) return view;
+          const tail = row === anchorRow ? standalone : null;
+          if (!selection?.active) return [view, tail];
           const { turnId, sessionId } = rowTurnRef(row);
           if (!turnId || sessionId !== selection.selectableSessionId) {
             // Not selectable (child-session row, or no turn): still dim it so the
             // selection state reads clearly across the whole transcript.
-            return (
+            return [
               <div key={row.key} className="pl-9 opacity-60">
                 {view}
-              </div>
-            );
+              </div>,
+              tail,
+            ];
           }
-          return (
+          return [
             <SelectableRow
               key={row.key}
               selected={selection.selectedTurns.has(turnId)}
@@ -553,19 +574,11 @@ export function MessageList({
               label={selection.selectedTurns.has(turnId) ? "Deselect message" : "Select message"}
             >
               {view}
-            </SelectableRow>
-          );
+            </SelectableRow>,
+            tail,
+          ];
         })}
-        {live.isStreaming && !hasRunningRow ? (
-          <StandaloneLiveTail
-            live={live}
-            actions={actions}
-            onOpenLiveTrace={onOpenLiveTrace}
-            onOpenSubagentTrace={onOpenSubagentTrace}
-            activeTraceTarget={activeTraceTarget}
-            subagentIconByName={subagentIconByName}
-          />
-        ) : null}
+        {!anchorRow ? standalone : null}
       </div>
     </div>
   );

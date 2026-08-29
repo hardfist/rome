@@ -154,6 +154,34 @@ describe("send_message email union", () => {
 });
 
 describe("send_message chat recipient aliases", () => {
+  it("forwards WebChat text-block identity unchanged", async () => {
+    const adapter = makeAdapter("webchat");
+    const parts = [
+      {
+        type: "text" as const,
+        content: "Final answer",
+        turnPhase: "final" as const,
+        blockIx: 2,
+      },
+    ];
+
+    await executeSendMessage(adapter, {
+      channel: "webchat",
+      threadId: "session-1",
+      text: "Final answer",
+      parts,
+      turnId: "turn-1",
+    });
+
+    expect(adapter.send).toHaveBeenCalledWith("test:webchat", "session-1", {
+      text: "Final answer",
+      parts,
+      attachments: undefined,
+      replyToMessageId: undefined,
+      turnId: "turn-1",
+    });
+  });
+
   it("resolves WhatsApp to: guardian through the guardian channel mapping", async () => {
     const adapter = makeAdapter("whatsapp");
     const personMappingRepo = {

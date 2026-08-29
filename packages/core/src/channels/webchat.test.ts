@@ -168,4 +168,37 @@ describe("WebChatAdapter", () => {
 
     await expect(adapter.fetchHistory("sess-1", Number.NaN)).resolves.toHaveLength(1);
   });
+
+  it("persists the WebChat text-block identity in transcript content", async () => {
+    await repo.createSession("sess-block", "Block identity");
+
+    await adapter.sendMessage("guardian", "sess-block", {
+      text: "Final answer",
+      parts: [
+        {
+          type: "text",
+          content: "Final answer",
+          turnPhase: "final",
+          blockIx: 2,
+        },
+      ],
+      turnId: "turn-block",
+    });
+
+    const messages = await repo.getMessages("sess-block");
+    expect(messages).toEqual([
+      expect.objectContaining({
+        turnId: "turn-block",
+        role: "assistant",
+        content: JSON.stringify([
+          {
+            type: "text",
+            content: "Final answer",
+            turnPhase: "final",
+            blockIx: 2,
+          },
+        ]),
+      }),
+    ]);
+  });
 });

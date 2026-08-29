@@ -122,6 +122,8 @@ export interface StreamBlock {
    *  `commentary` = in-turn narration (rendered muted), `final`/absent = the
    *  turn's answer. */
   turnPhase?: "commentary" | "final";
+  /** Zero-based WebChat assistant text-block identity within the agent turn. */
+  blockIx?: number;
   error?: string | { message: string; code?: string };
   code?: ChatErrorCode;
   provider?: ChatErrorProvider;

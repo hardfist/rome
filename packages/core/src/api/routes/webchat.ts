@@ -3100,6 +3100,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         runOnStream(stream, "webchat send", async () => {
           try {
             let resultContent = "";
+            let lastCompletedText:
+              | {
+                  blockIx: number;
+                  content: string;
+                  turnPhase?: "commentary" | "final";
+                }
+              | undefined;
+            let finalTextBlockIx: number | undefined;
             let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
@@ -3126,8 +3134,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // fresh index; the client keeps showing this block until that
               // block's first delta arrives (delayed fold).
               if (msg.type === "text") {
-                // Keeps the live tail's text exactly matching the row the
-                // client dedups against (below).
+                const blockIx = stream.assistantBlockIx;
+                // Keeps the live preview and its persisted replacement on the
+                // same complete block content during their handoff.
                 if (stream.assistantText !== msg.content) {
                   stream.assistantText = msg.content;
                   emitToStream(
@@ -3139,15 +3148,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 }
                 // Model M: a completed in-turn narration block becomes its own
                 // live message, pushed so it appears in the transcript (time-
-                // ordered with any cards) as the turn streams. The client hides
-                // the matching live-tail copy by content. The final answer is not
-                // persisted here — it goes out once at turn end via send_message.
+                // ordered with any cards) as the turn streams. The final answer
+                // goes out once at turn end via send_message.
                 const isCommentary =
                   msg.turnPhase === "commentary" && msg.content.trim().length > 0;
                 if (isCommentary) {
                   try {
                     await deps.webchatRepo.addBackendMessage(sessionId, turnId, [
-                      { type: "text", content: msg.content, turnPhase: "commentary" },
+                      {
+                        type: "text",
+                        content: msg.content,
+                        turnPhase: "commentary",
+                        blockIx,
+                      },
                     ]);
                   } catch (err) {
                     log.warn("failed to persist commentary message", {
@@ -3157,6 +3170,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                     });
                   }
                 }
+                lastCompletedText = {
+                  blockIx,
+                  content: msg.content,
+                  turnPhase: msg.turnPhase,
+                };
+                if (msg.turnPhase === "final") finalTextBlockIx = blockIx;
                 stream.assistantBlockIx += 1;
                 stream.assistantText = "";
               }
@@ -3366,6 +3385,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // message; this is the final answer only. `text` is the final answer
             // for non-webchat consumers; webchat persists the tagged part.
             if (resultContent && !stream.stopRequested) {
+              const reusableResultBlockIx =
+                lastCompletedText?.turnPhase === undefined &&
+                lastCompletedText?.content === resultContent
+                  ? lastCompletedText.blockIx
+                  : undefined;
+              const resultBlockIx =
+                finalTextBlockIx ?? reusableResultBlockIx ?? stream.assistantBlockIx;
               await deps.actionEngine.run(
                 "send_message",
                 {
@@ -3373,7 +3399,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   threadId: sessionId,
                   text: resultContent,
                   parts: [
-                    { type: "text" as const, content: resultContent, turnPhase: "final" as const },
+                    {
+                      type: "text" as const,
+                      content: resultContent,
+                      turnPhase: "final" as const,
+                      blockIx: resultBlockIx,
+                    },
                   ],
                   channelUserId,
                   displayName,
