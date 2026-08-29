@@ -193,7 +193,7 @@ const STREAM: PeopleRow[] = [
   }),
 ];
 
-/** One row per identity, newest first, carrying only what routing needs. */
+/** One row per account, newest first, carrying only what routing needs. */
 export function StreamDemo() {
   return (
     <Frame label="Latest">
@@ -393,7 +393,7 @@ export function ViewSwitcherDemo() {
 
 /* ------------------------------------------------------------ person page */
 
-/** The dossier: identity card with bond select and linked-account pills, the
+/** The dossier: the person card with bond select and linked-account pills, the
  *  merged timeline grouped by day, a sticky composer. */
 export function PersonPageDemo() {
   const { t } = useTranslation("people");

@@ -771,7 +771,7 @@ describe("PeoplePage placement", () => {
     await waitFor(() => expect(screen.queryByText("Rachel Lim")).toBeNull());
     expect(within(chip(/^Unknown/)).queryByText(/^\d+$/)).toBeNull();
     const dismiss = calls.find((c) => c.url.includes("/dismiss"))!;
-    // Named by the pair the contract says is the account's identity, so every
+    // Named by the pair the contract names the account with, so every
     // address it answers to travels with it.
     expect(dismiss.url).toBe("/api/accounts/whatsapp/6591234472%40s.whatsapp.net/dismiss");
   });

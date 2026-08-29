@@ -58,9 +58,9 @@ async function readHistory(rows: LinkedInHistoryMessage[]): Promise<InboundMessa
 /**
  * The promotion bridge: a mirrored participant that a guardian turned into a
  * person is recognised on their next message with nothing else wired up. That
- * only holds if both sides name the identity the same way — the bare member id.
+ * only holds if both sides name the account the same way — the bare member id.
  */
-describe("LinkedIn message identity", () => {
+describe("LinkedIn message addressing", () => {
   let testDb: TestDb;
   let people: PersonMappingRepository;
 

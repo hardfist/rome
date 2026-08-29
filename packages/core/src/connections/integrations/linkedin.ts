@@ -264,7 +264,7 @@ interface LinkedInTalker extends Talker {
 /**
  * The `channel_mappings.channel_user_id` a LinkedIn message resolves through.
  *
- * The bare member id is the identity the mirror keys on — `linkedin_participants`
+ * The bare member id is the address the mirror keys on — `linkedin_participants`
  * is primary-keyed by it and promotion writes it into the mapping — so a promoted
  * participant is recognised on their next message with nothing else wired up.
  *

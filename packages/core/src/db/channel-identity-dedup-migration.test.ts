@@ -66,9 +66,9 @@ function databaseWithDuplicates(): Database.Database {
   // Two dismissals of one sender.
   mapping.run("m5", STRANGER_PERSON_ID, "telegram", "tg-dismissed");
   mapping.run("m6", STRANGER_PERSON_ID, "telegram", "tg-dismissed");
-  // The same identifier on another channel is a different identity.
+  // The same identifier on another channel is a different account.
   mapping.run("m7", "alice", "email", "tg-contested");
-  // An identity nobody contests.
+  // An account nobody contests.
   mapping.run("m8", "bob", "telegram", "tg-sole");
 
   return sqlite;
@@ -81,8 +81,8 @@ function survivors(sqlite: Database.Database): string[] {
     .map((row) => (row as { id: string }).id);
 }
 
-describe("channel identity dedup migration", () => {
-  it("keeps one row per identity, preferring a placement over a dismissal", () => {
+describe("channel mapping dedup migration", () => {
+  it("keeps one row per account, preferring a placement over a dismissal", () => {
     const sqlite = databaseWithDuplicates();
     try {
       applyMigration(sqlite, identityIndexMigration());

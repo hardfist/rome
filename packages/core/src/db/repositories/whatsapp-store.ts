@@ -25,7 +25,7 @@ function chunked<T>(items: T[], size: number): T[][] {
 /**
  * Group key folding a single person's two WhatsApp addresses — their
  * phone-number JID (`<pn>@s.whatsapp.net`) and their privacy LID (`<lid>@lid`) —
- * onto one identity. WhatsApp delivers a contact's conversation under the LID
+ * onto one account. WhatsApp delivers a contact's conversation under the LID
  * (which Baileys annotates with the resolved phone number) while the address-book
  * name lives on the `@s.whatsapp.net` row, so one person otherwise shows up as
  * two cards: a named-but-silent one and a talking-but-nameless one. Both rows
@@ -33,7 +33,7 @@ function chunked<T>(items: T[], size: number): T[][] {
  * (`@g.us`) never share a phone number and key on their own JID, so they never
  * merge.
  */
-function identityKey(r: WhatsAppContactAliasRow): string {
+function accountKey(r: WhatsAppContactAliasRow): string {
   if (!r.isGroup && r.phoneNumber) {
     const digits = r.phoneNumber.replace(/\D/g, "");
     if (digits) return `pn:${digits}`;
@@ -57,16 +57,16 @@ function coalesceField<K extends keyof WhatsAppContactAliasRow>(
  * Collapse the LID and phone-number threads of one person into a single card.
  * `rows` arrives in display order (conversations first, then alphabetical), so
  * each group's first row is its best representative — we keep its JID as the
- * card's identity (the conversation-bearing one when a chat exists, so opening
+ * card's own address (the conversation-bearing one when a chat exists, so opening
  * the chat still resolves its messages) and fold the missing pieces in from its
  * siblings: the address-book name, a person link, and the richer message history.
  * Every JID that went into the group is kept in `aliases`, sorted, so a caller
  * that needs the whole address set does not have to re-derive the grouping.
  */
-function consolidateByIdentity(rows: WhatsAppContactAliasRow[]): WhatsAppContactRow[] {
+function consolidateByAccount(rows: WhatsAppContactAliasRow[]): WhatsAppContactRow[] {
   const groups = new Map<string, WhatsAppContactAliasRow[]>();
   for (const r of rows) {
-    const k = identityKey(r);
+    const k = accountKey(r);
     const g = groups.get(k);
     if (g) g.push(r);
     else groups.set(k, [r]);
@@ -332,7 +332,7 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
       messageCount: Number(r.messageCount ?? 0),
     }));
 
-    return consolidateByIdentity(mapped);
+    return consolidateByAccount(mapped);
   }
 
   /** Recent messages for one chat, oldest→newest (newest at the bottom). */

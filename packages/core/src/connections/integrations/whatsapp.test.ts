@@ -298,7 +298,7 @@ describe("whatsapp descriptor over a real registry", () => {
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     // WhatsAppAdapter.sendMessage addresses by threadId (the chat JID);
-    // channelUserId is the sender identity round-tripped from the inbound message.
+    // channelUserId is the sender's address round-tripped from the inbound message.
     await conn.talk!.send("120@g.us" as ConversationId, { text: "hi" });
     expect(fake.sent).toEqual([
       { channelUserId: "120@g.us", threadId: "120@g.us", msg: { text: "hi" } },

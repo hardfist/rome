@@ -18,7 +18,7 @@ describe("PersonMappingRepository", () => {
     testDb.close();
   });
 
-  /** What marking a sender as a stranger does: file the identity under the
+  /** What marking a sender as a stranger does: file the account under the
    *  sentinel rather than deleting it. */
   async function dismiss(channel: string, channelUserId: string, displayName?: string) {
     if (!(await repo.findById(STRANGER_PERSON_ID))) {
@@ -30,9 +30,9 @@ describe("PersonMappingRepository", () => {
     await repo.addChannelMapping(STRANGER_PERSON_ID, channel, channelUserId, displayName);
   }
 
-  it("findAllWithMappings() reads every person and their identities at once", async () => {
-    // One statement, so an identity moving between two people mid-read cannot
-    // land under both of them — which is the identity union's whole premise.
+  it("findAllWithMappings() reads every person and their accounts at once", async () => {
+    // One statement, so an account moving between two people mid-read cannot
+    // land under both of them — which is what one account, one person means.
     const alice = await repo.create({
       displayName: "Alice",
       bondLevel: "inner-circle",
@@ -53,7 +53,7 @@ describe("PersonMappingRepository", () => {
         .channelMappings.map((m) => `${m.channel}:${m.channelUserId}`)
         .sort(),
     ).toEqual(["telegram:tg-alice", "whatsapp:wa-alice"]);
-    // A person holding no identity is still a person, and the left join has to
+    // A person holding no account is still a person, and the left join has to
     // answer them with an empty list rather than dropping them.
     expect(byId.get(bob)!.channelMappings).toEqual([]);
   });
@@ -107,7 +107,7 @@ describe("PersonMappingRepository", () => {
     const boom = new Error("mapping write failed");
     // The seam the person insert must be enlisted with: forcing the mapping
     // write to throw is the only way to observe the rollback, since the claim
-    // check refuses a held identity before the transaction opens.
+    // check refuses a held account before the transaction opens.
     (repo as unknown as { writeClaim: () => never }).writeClaim = () => {
       throw boom;
     };
@@ -233,7 +233,7 @@ describe("PersonMappingRepository", () => {
     expect(channels).toEqual(["slack", "telegram"]);
   });
 
-  it("updateChannelUserId() re-points one identity and leaves the person's others", async () => {
+  it("updateChannelUserId() re-points one account and leaves the person's others", async () => {
     const personId = await repo.create({
       displayName: "Erin",
       bondLevel: "inner-circle",
@@ -258,7 +258,7 @@ describe("PersonMappingRepository", () => {
     ]);
   });
 
-  it("updateChannelUserId() keeps both when the person already holds the incoming identity", async () => {
+  it("updateChannelUserId() keeps both when the person already holds the incoming account", async () => {
     const personId = await repo.create({
       displayName: "Erin",
       bondLevel: "inner-circle",
@@ -284,7 +284,7 @@ describe("PersonMappingRepository", () => {
     ]);
   });
 
-  it("updateChannelUserId() takes the incoming identity from a rival holder", async () => {
+  it("updateChannelUserId() takes the incoming account from a rival holder", async () => {
     const erin = await repo.create({
       displayName: "Erin",
       bondLevel: "inner-circle",
@@ -303,7 +303,7 @@ describe("PersonMappingRepository", () => {
     expect((await repo.findById(rival))!.channelMappings).toEqual([]);
   });
 
-  it("updateChannelUserId() leaves a rival holder alone when the person's identity is gone", async () => {
+  it("updateChannelUserId() leaves a rival holder alone when the person's account is gone", async () => {
     const erin = await repo.create({ displayName: "Erin", bondLevel: "inner-circle" });
     const rival = await repo.create({
       displayName: "Rival",
@@ -317,7 +317,7 @@ describe("PersonMappingRepository", () => {
     expect((await repo.findByChannelUser("telegram", "tg-erin-new"))!.id).toBe(rival);
   });
 
-  it("updateChannelUserId() reports an identity the person does not hold", async () => {
+  it("updateChannelUserId() reports an account the person does not hold", async () => {
     const personId = await repo.create({
       displayName: "Frank",
       bondLevel: "inner-circle",
@@ -374,8 +374,8 @@ describe("PersonMappingRepository", () => {
     expect(levels).toEqual(["acquaintance", "inner-circle"]);
   });
 
-  describe("channel identity ownership", () => {
-    it("re-points a mapped identity onto its new person rather than adding a second", async () => {
+  describe("account ownership", () => {
+    it("re-points a mapped account onto its new person rather than adding a second", async () => {
       const first = await repo.create({
         displayName: "First",
         bondLevel: "other",
@@ -585,8 +585,8 @@ describe("PersonMappingRepository", () => {
     });
   });
 
-  describe("create() claiming channel identities", () => {
-    it("reclaims an identity that was only dismissed onto the stranger sentinel", async () => {
+  describe("create() claiming accounts", () => {
+    it("reclaims an account that was only dismissed onto the stranger sentinel", async () => {
       await dismiss("whatsapp", "+15551234", "Bob");
 
       const bob = await repo.create({
@@ -600,7 +600,7 @@ describe("PersonMappingRepository", () => {
       expect(stranger!.channelMappings).toHaveLength(0);
     });
 
-    it("carries the dismissed row's channel-side name onto the reclaimed identity", async () => {
+    it("carries the dismissed row's channel-side name onto the reclaimed account", async () => {
       await dismiss("whatsapp", "+15559999", "Bob from work");
 
       const bob = await repo.create({
@@ -616,7 +616,7 @@ describe("PersonMappingRepository", () => {
       expect(rows[0].displayName).toBe("Bob from work");
     });
 
-    it("refuses an identity a real person holds instead of stealing it", async () => {
+    it("refuses an account a real person holds instead of stealing it", async () => {
       const alice = await repo.create({
         displayName: "Alice",
         bondLevel: "inner-circle",
@@ -634,7 +634,7 @@ describe("PersonMappingRepository", () => {
       expect((await repo.findByChannelUser("whatsapp", "+15551234"))?.id).toBe(alice);
     });
 
-    it("names the person holding the identity it refused", async () => {
+    it("names the person holding the account it refused", async () => {
       const alice = await repo.create({
         displayName: "Alice Marsh",
         bondLevel: "inner-circle",
@@ -662,7 +662,7 @@ describe("PersonMappingRepository", () => {
         personId: alice,
         personName: "Alice Marsh",
       });
-      // The unheld identity in the same request is still unheld.
+      // The unheld account in the same request is still unheld.
       expect(await repo.findByChannelUser("telegram", "tg-bob")).toBeNull();
     });
 
@@ -692,7 +692,7 @@ describe("PersonMappingRepository", () => {
       expect((await repo.findById(retried))!.displayName).toBe("Bob");
     });
 
-    it("refuses a held identity from the dashboard path too, leaving no person", async () => {
+    it("refuses a held account from the dashboard path too, leaving no person", async () => {
       const alice = await repo.create({
         displayName: "Alice",
         bondLevel: "inner-circle",
@@ -713,7 +713,7 @@ describe("PersonMappingRepository", () => {
       expect(await repo.findById("bob")).toBeNull();
     });
 
-    it("reclaims a dismissed identity from the dashboard path", async () => {
+    it("reclaims a dismissed account from the dashboard path", async () => {
       await dismiss("whatsapp", "+15558888", "Carol");
 
       await repo.create({

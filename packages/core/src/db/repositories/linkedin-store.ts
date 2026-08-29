@@ -18,7 +18,7 @@ import type {
 } from "../../channels/linkedin-sync.js";
 
 // The member-id form lives with the poller/store contract, not here: it is the
-// identity both sides of the mirror agree on. Re-exported so callers reading
+// address both sides of the mirror agree on. Re-exported so callers reading
 // participant rows reach it from the same module those rows come from.
 export { linkedInMemberIdFromProfileUrl };
 
@@ -27,9 +27,9 @@ const HISTORY_READ_LIMIT = 1000;
 const PARTICIPANTS_READ_LIMIT = 10000;
 
 /**
- * One mirrored LinkedIn identity, annotated with whether it has been promoted
+ * One mirrored LinkedIn account, annotated with whether it has been promoted
  * to a curated `persons` entry. `isSelf` rides along rather than being filtered
- * out here: which identities a caller offers for promotion is its own policy,
+ * out here: which accounts a caller offers for promotion is its own policy,
  * and the guardian's own row is still a real member of the threads it appears
  * in.
  */
@@ -40,19 +40,19 @@ export interface LinkedInParticipantContactRow {
   headline: string | null;
   type: string | null;
   isSelf: boolean;
-  /** How many mirrored threads this identity belongs to. */
+  /** How many mirrored threads this account belongs to. */
   threadCount: number;
-  /** The person this identity was promoted into, or null when unpromoted. */
+  /** The person this account was promoted into, or null when unpromoted. */
   linkedPersonId: string | null;
   linkedPersonName: string | null;
   /**
-   * Unix seconds of the newest message on this identity's direct threads, or
+   * Unix seconds of the newest message on this account's direct threads, or
    * null when the mirror holds none. See {@link DIRECT_THREADS} for why a group
    * thread contributes nothing.
    */
   lastMessageAt: number | null;
   lastMessagePreview: string | null;
-  /** Mirrored messages on this identity's direct threads, both directions. */
+  /** Mirrored messages on this account's direct threads, both directions. */
   messageCount: number;
 }
 
@@ -67,7 +67,7 @@ export interface LinkedInThreadParticipantSet {
 export interface LinkedInParticipantBackfillResult {
   /** Threads seeded — threads already read authoritatively are skipped. */
   threads: number;
-  /** Distinct identities the seed proved. */
+  /** Distinct accounts the seed proved. */
   participants: number;
 }
 
@@ -79,7 +79,7 @@ export interface LinkedInParticipantBackfillResult {
  * unambiguously *this* person's history: a timeline entry names no sender, so
  * folding a ten-person thread into one member's dossier would put nine other
  * people's words in their mouth. The People page already holds group chats out
- * of the identity union for the same reason — a group cannot hold a bond.
+ * of the People surface for the same reason — a group cannot hold a bond.
  *
  * Membership decides it, not LinkedIn's `is_group` flag alone: that flag is
  * null until a thread snapshot reports one, and a thread seeded from stored
@@ -119,11 +119,11 @@ function chunked<T>(items: T[], size: number): T[][] {
  * Durable store for the LinkedIn inbox mirror (threads + recent message
  * history). Writes are fed by the inbox poller as a {@link LinkedInSyncSink};
  * reads serve the poller's watermarks, the address book's fold over mirrored
- * identities, and the history talk feature.
+ * accounts, and the history talk feature.
  *
  * Nothing here hands a thread or its messages to a reader as a thread. The
  * dashboard reads LinkedIn through the person contract like every other
- * channel, so every read out of this mirror is addressed by identity —
+ * channel, so every read out of this mirror is addressed by account —
  * {@link LinkedInStoreRepository.listParticipants}, scoped by
  * {@link DIRECT_THREADS}. A thread-shaped read here would have no caller but a
  * thread-shaped surface, and there is none.
@@ -176,7 +176,7 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
     for (const chunk of chunked(messages, UPSERT_CHUNK)) {
       // Unlike WhatsApp's immutable frames, LinkedIn messages can be edited
       // and reactions accrue after delivery, so a re-snapshot refreshes the
-      // mutable fields in place. Identity fields keep their first-seen value.
+      // mutable fields in place. The naming fields keep their first-seen value.
       await this.db
         .insert(linkedinMessages)
         .values(
@@ -250,7 +250,7 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
   }
 
   /**
-   * Replace a thread's participant set with exactly `participants`: identities
+   * Replace a thread's participant set with exactly `participants`: accounts
    * are upserted into `linkedin_participants`, membership rows are added for
    * everyone in the set, and members no longer in it are dropped. An empty
    * array therefore empties the thread — callers must not pass one for a
@@ -260,7 +260,7 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
    * failure part-way through would otherwise leave the thread over-inclusive:
    * the new members added, the departed ones never deleted.
    *
-   * Identity rows outlive membership: a person dropped from one thread keeps
+   * Account rows outlive membership: a person dropped from one thread keeps
    * their row for the other threads they are in.
    *
    * The same transaction stamps the thread's `participants_last_read_at`. Every
@@ -395,13 +395,13 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
       ORDER BY coalesce(m.sent_at, m.created_at) ASC, m.rowid ASC
     `)) as Array<Record<string, unknown>>;
 
-    const identities = new Map<string, LinkedInParticipantInput>();
+    const accounts = new Map<string, LinkedInParticipantInput>();
     const memberships = new Map<string, { threadId: string; participantId: string }>();
     for (const row of rows) {
       const participantId = linkedInMemberIdFromProfileUrl(row.senderProfileUrl as string | null);
       if (!participantId) continue;
       const threadId = String(row.threadId);
-      identities.set(participantId, {
+      accounts.set(participantId, {
         participantId,
         name: (row.senderName as string | null) ?? null,
         headline: (row.senderHeadline as string | null) ?? null,
@@ -413,7 +413,7 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
     if (memberships.size === 0) return { threads: 0, participants: 0 };
 
     await this.db.transaction((tx) => {
-      for (const chunk of chunked([...identities.values()], UPSERT_CHUNK)) {
+      for (const chunk of chunked([...accounts.values()], UPSERT_CHUNK)) {
         tx.insert(linkedinParticipants)
           .values(
             chunk.map((p) => ({
@@ -443,19 +443,19 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
 
     return {
       threads: new Set([...memberships.values()].map((m) => m.threadId)).size,
-      participants: identities.size,
+      participants: accounts.size,
     };
   }
 
   /**
-   * Every stored LinkedIn identity, each row saying whether it has already been
+   * Every stored LinkedIn account, each row saying whether it has already been
    * promoted to a person and what its direct threads last carried. The join is
    * on the member id itself — no translation step — because
    * `linkedin_participants.participant_id` and a `linkedin`
    * `channel_mappings.channel_user_id` are the same identifier by construction.
    *
    * Promotion is a guardian action against these rows, not something this
-   * repository performs: a LinkedIn inbox holds many identities that should
+   * repository performs: a LinkedIn inbox holds many accounts that should
    * never enter the curated person graph, so nothing here writes `persons`.
    *
    * `limit` defaults to a generous cap that suits a single-payload endpoint.

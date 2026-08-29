@@ -45,7 +45,7 @@ describe("WhatsAppStoreRepository", () => {
     expect(await repo.listContacts()).toHaveLength(3);
   });
 
-  it("hides nameless LID-only contacts but keeps LIDs with a phone identity", async () => {
+  it("hides nameless LID-only contacts but keeps LIDs with a phone number", async () => {
     await repo.upsertContacts([
       { jid: "raw-lid@lid" },
       { jid: "phone-backed@lid", phoneNumber: "15551234567" },
@@ -89,7 +89,7 @@ describe("WhatsAppStoreRepository", () => {
     expect(may[0].messageCount).toBe(1);
   });
 
-  it("carries a person link across the merged identity", async () => {
+  it("carries a person link across the merged account", async () => {
     const persons = new PersonMappingRepository(db);
     await persons.create({
       displayName: "May",

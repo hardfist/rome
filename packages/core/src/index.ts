@@ -951,7 +951,7 @@ async function main() {
       maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
     },
     listAgents: () => Array.from(agentLoader.getAll().keys()),
-    // Auto-map the guardian onto their own WhatsApp identity on connect.
+    // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
       mapGuardianToChannel(personMappingRepo, "whatsapp", selfJid).catch((err) => {
         log.error("failed to auto-map guardian on WhatsApp connect", {

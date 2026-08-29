@@ -249,7 +249,7 @@ export const linkedinMessages = sqliteTable(
   ],
 );
 
-// One row per LinkedIn identity seen in a thread's participant list. Person-level
+// One row per LinkedIn account seen in a thread's participant list. Person-level
 // facts live here rather than on the membership row so a name or headline is
 // stored once, not once per thread the person appears in.
 export const linkedinParticipants = sqliteTable("linkedin_participants", {
@@ -268,7 +268,7 @@ export const linkedinParticipants = sqliteTable("linkedin_participants", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
-// Thread membership: which identities belong to which thread. Rows carry no
+// Thread membership: which accounts belong to which thread. Rows carry no
 // person-level facts — those live once on `linkedin_participants`.
 export const linkedinThreadParticipants = sqliteTable(
   "linkedin_thread_participants",

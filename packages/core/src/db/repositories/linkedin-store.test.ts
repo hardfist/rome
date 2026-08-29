@@ -256,7 +256,7 @@ describe("LinkedInStoreRepository", () => {
         ada.participantId,
         self.participantId,
       ]);
-      // Membership went away; the person identity is kept for other threads.
+      // Membership went away; the person's account is kept for other threads.
       const personRows = testDb.db.all(sql`
         SELECT COUNT(*) AS c FROM linkedin_participants WHERE participant_id = ${grace.participantId}
       `) as Array<{ c: number }>;
@@ -335,10 +335,10 @@ describe("LinkedInStoreRepository", () => {
       expect((await repo.getThreadParticipants("t1")).map((p) => p.participantId)).toEqual([
         grace.participantId,
       ]);
-      const identities = testDb.db.all(sql`
+      const accounts = testDb.db.all(sql`
         SELECT COUNT(*) AS c FROM linkedin_participants
       `) as Array<{ c: number }>;
-      expect(Number(identities[0].c)).toBe(1);
+      expect(Number(accounts[0].c)).toBe(1);
     });
 
     it("is_self survives a re-snapshot and follows the viewer's answer", async () => {
@@ -449,7 +449,7 @@ describe("LinkedInStoreRepository", () => {
 
     // A mirrored participant becomes a Rome person through the existing person
     // create/link flow — there is no second write path here. The bare member id
-    // is the channel identity on both sides, so promotion needs no translation
+    // is the account's address on both sides, so promotion needs no translation
     // step and nothing in this repository ever writes `persons`.
     describe("promotion to a person", () => {
       let people: PersonMappingRepository;
@@ -465,7 +465,7 @@ describe("LinkedInStoreRepository", () => {
         await repo.upsertThreadParticipants("t1", [ada, self]);
       });
 
-      it("lists a mirrored identity as unpromoted until a person claims it", async () => {
+      it("lists a mirrored account as unpromoted until a person claims it", async () => {
         const rows = await repo.listParticipants();
 
         expect(rows.map((r) => r.participantId)).toEqual([ada.participantId, self.participantId]);
@@ -507,7 +507,7 @@ describe("LinkedInStoreRepository", () => {
         // The headline stays on the mirror row: `channel_mappings` has nowhere
         // to put it, and it belongs in the person's memory profile.
         expect(promoted?.headline).toBe("Engineer");
-        // Promoting one identity says nothing about the rest of the inbox.
+        // Promoting one account says nothing about the rest of the inbox.
         expect(rows.find((r) => r.participantId === self.participantId)?.linkedPersonId).toBeNull();
       });
 
@@ -520,7 +520,7 @@ describe("LinkedInStoreRepository", () => {
         });
 
         // The second promotion slugs to a free id (`ada-lovelace-2`), so the
-        // refusal is the held identity's rather than a colliding person id's.
+        // refusal is the held account's rather than a colliding person id's.
         await expect(
           people.create({
             displayName: "Ada Lovelace",
@@ -636,7 +636,7 @@ describe("LinkedInStoreRepository", () => {
         ]);
       });
 
-      it("is idempotent and never duplicates an identity across threads", async () => {
+      it("is idempotent and never duplicates an account across threads", async () => {
         await repo.upsertThreads([
           thread("t1", new Date("2026-08-19T20:00:00Z")),
           thread("t2", new Date("2026-08-18T20:00:00Z")),
@@ -646,10 +646,10 @@ describe("LinkedInStoreRepository", () => {
         await repo.backfillParticipantsFromMessages();
         await repo.backfillParticipantsFromMessages();
 
-        const identities = testDb.db.all(
+        const accounts = testDb.db.all(
           sql`SELECT participant_id FROM linkedin_participants`,
         ) as Array<{ participant_id: string }>;
-        expect(identities.map((r) => r.participant_id)).toEqual(["ACoAAAda0001"]);
+        expect(accounts.map((r) => r.participant_id)).toEqual(["ACoAAAda0001"]);
         expect(await repo.getParticipantThreadIds("ACoAAAda0001")).toEqual(["t1", "t2"]);
       });
 
@@ -688,7 +688,7 @@ describe("LinkedInStoreRepository", () => {
     });
   });
 
-  // The identity union reads a participant as a person-shaped row: who they
+  // The People surface reads a participant as a person-shaped row: who they
   // are, what was last said, and how much of it there is. "What was said" is
   // the direct threads only — a timeline entry names no sender, so a group
   // thread's messages cannot be attributed to one of its members.

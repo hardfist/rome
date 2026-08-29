@@ -15,7 +15,7 @@ import {
 import i18n from "@/i18n";
 import PersonDetailPage from "./PersonDetailPage";
 
-// The person page: identity on top, the merged timeline below. What is under
+// The person page: who they are on top, the merged timeline below. What is under
 // test is that the page reads the two routes that own it — `GET /api/people/:id`
 // and `GET /api/people/:id/messages` — and that the timeline it renders is
 // channel-blind: a Telegram entry renders the way a WhatsApp one does, grouped
@@ -474,7 +474,7 @@ describe("PersonDetailPage management", () => {
     });
     expect(link.method).toBe("POST");
     // One call, and it names the account by the pair the contract says is its
-    // identity — every address it answers to travels with it.
+    // account — every address it answers to travels with it.
     expect(link.body).toEqual({
       channel: "whatsapp",
       channelUserId: "6591234472@s.whatsapp.net",
