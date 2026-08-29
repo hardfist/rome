@@ -27,6 +27,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { usePeople } from "@/hooks/use-people";
 import { ChannelPill } from "./channel-meta";
 import { MutationError } from "./triage";
@@ -173,7 +181,9 @@ function LinkAccountPicker({ person, onClose }: { person: PersonResource; onClos
 
   return (
     <>
-      <Dialog open onClose={onClose} size="md" ariaLabel={t("detail.linkAccount")}>
+      {/* Wider than the merge picker: four columns of account identity, and a
+          handle is as long as the channel makes it. */}
+      <Dialog open onClose={onClose} size="lg" ariaLabel={t("detail.linkAccount")}>
         <DialogHeader onClose={onClose} closeLabel={t("actions.close")}>
           <DialogTitle>{t("detail.linkAccount")}</DialogTitle>
           <DialogDescription>{t("detail.linkDescription")}</DialogDescription>
@@ -191,32 +201,55 @@ function LinkAccountPicker({ person, onClose }: { person: PersonResource; onClos
               {directory.isPending ? t("page.loading") : t("page.emptyForSearch")}
             </p>
           ) : (
-            <ul className="max-h-72 overflow-y-auto">
-              {candidates.map((account) => (
-                <li key={accountRef(account)}>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void link(account)}
-                    className="flex w-full items-center gap-3 border-b border-border-subtle px-2 py-2 text-left last:border-b-0 hover:bg-surface"
-                  >
-                    <ChannelPill channel={account.channel} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-ui text-foreground">
-                        {account.displayName}
-                      </span>
-                      <span className="block truncate text-aux text-muted-foreground">
-                        <span className="font-mono tabular-nums">{handleOf(account)}</span>
-                        {/* Whose it is right now, so picking one already held is
-                            a decision rather than a surprise. */}
-                        {account.personName &&
-                          ` · ${t("linkPicker.heldBy", { owner: account.personName })}`}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <div className="max-h-72 overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>{t("linkPicker.columns.channel")}</TableHead>
+                    <TableHead>{t("linkPicker.columns.name")}</TableHead>
+                    <TableHead>{t("linkPicker.columns.handle")}</TableHead>
+                    {/* Whose it is right now, so picking one already held is a
+                        decision rather than a surprise. */}
+                    <TableHead>{t("linkPicker.columns.heldBy")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {candidates.map((account) => (
+                    <TableRow
+                      key={accountRef(account)}
+                      className="cursor-pointer"
+                      onClick={() => void link(account)}
+                    >
+                      <TableCell>
+                        <ChannelPill channel={account.channel} />
+                      </TableCell>
+                      <TableCell className="w-full max-w-0 text-foreground">
+                        {/* The row is the hit area, and this is the same gesture
+                            for the keyboard — so one press must not arrive as
+                            two writes. */}
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void link(account);
+                          }}
+                          className="block max-w-full truncate text-left outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        >
+                          {account.displayName}
+                        </button>
+                      </TableCell>
+                      <TableCell className="max-w-64 truncate font-mono tabular-nums text-aux text-muted-foreground">
+                        {handleOf(account)}
+                      </TableCell>
+                      <TableCell className="max-w-40 truncate text-aux text-muted-foreground">
+                        {account.personName}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
           <MutationError message={error} />
         </DialogBody>

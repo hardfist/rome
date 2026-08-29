@@ -143,7 +143,12 @@
     "selectPlaceholder": "选择一位人物…"
   },
   "linkPicker": {
-    "heldBy": "当前属于 {{owner}}"
+    "columns": {
+      "channel": "渠道",
+      "name": "名称",
+      "handle": "账号",
+      "heldBy": "当前归属"
+    }
   },
   "strangerConfirm": {
     "title": "将 {{name}} 视为陌生人？",

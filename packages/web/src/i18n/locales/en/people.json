@@ -143,7 +143,12 @@
     "selectPlaceholder": "Select a person…"
   },
   "linkPicker": {
-    "heldBy": "now {{owner}}'s"
+    "columns": {
+      "channel": "Channel",
+      "name": "Name",
+      "handle": "Handle",
+      "heldBy": "Held by"
+    }
   },
   "strangerConfirm": {
     "title": "Treat {{name}} as a stranger?",
