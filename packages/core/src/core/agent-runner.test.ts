@@ -1608,6 +1608,127 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("reopens an aborted provider before forking its current checkpoint", async () => {
+      const opens: ModelSessionParams[] = [];
+      let releaseInterrupted!: () => void;
+      const interruptedGate = new Promise<void>((resolve) => {
+        releaseInterrupted = resolve;
+      });
+      let beginInterrupted!: () => void;
+      const interruptedBegun = new Promise<void>((resolve) => {
+        beginInterrupted = resolve;
+      });
+      let providerFork: ModelSessionForkParams | undefined;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "Claude",
+        builtinTools: new Set(),
+        async openSession(params) {
+          opens.push(params);
+          const first = opens.length === 1;
+          let disposed = false;
+          const model = createSessionFromRun(
+            "anthropic",
+            async function* () {
+              if (!first) return;
+              beginInterrupted();
+              await interruptedGate;
+              yield { type: "result", content: "Work before cancellation" };
+              await model.close();
+            },
+            params,
+          );
+          return {
+            ...model,
+            providerThreadId: "persisted-claude-thread",
+            get isClosed() {
+              return disposed;
+            },
+            get lastCompletedTurnCheckpoint() {
+              return first ? "assistant-current" : undefined;
+            },
+            async interrupt() {
+              if (!first || disposed) return;
+              disposed = true;
+              releaseInterrupted();
+            },
+            async fork(forkParams) {
+              if (disposed) throw new Error("Cannot fork a closed ModelSession");
+              providerFork = forkParams;
+              return {
+                providerId: "anthropic" as const,
+                sessionId: forkParams.sessionId,
+                sourceSessionId: params.sessionId,
+                sourceProviderThreadId: "persisted-claude-thread",
+                mode: forkParams.mode ?? "ephemeral",
+                providerThreadId: forkParams.sessionId,
+                open: async () =>
+                  forkSessionStub({
+                    providerId: "anthropic",
+                    model: "claude-fork",
+                    events: (async function* (): AsyncIterable<AgentMessage> {
+                      yield { type: "result", content: "Fork complete" };
+                    })(),
+                  }),
+              };
+            },
+            async close() {
+              disposed = true;
+              await model.close();
+            },
+          };
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const runner = new AgentRunner(manager);
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:abort-fork",
+      });
+      const interrupted = session.sendTurn({ prompt: "first" });
+      const interruptedMessages = collectMessages(interrupted.events);
+      await interruptedBegun;
+      await interrupted.interrupt!("user-stop");
+      expect(await interruptedMessages).toContainEqual(
+        expect.objectContaining({ type: "turn_end", status: "interrupted" }),
+      );
+
+      const forkMessages = await collectMessages(
+        runner.runForked({
+          agentName: "test-main",
+          sourceSessionId: session.sessionId,
+          channelThreadKey: "webchat:abort-fork",
+          prompt: "fork it",
+          mode: "exact",
+          sourceCheckpoint: {
+            providerId: "anthropic",
+            providerThreadId: "persisted-claude-thread",
+            checkpointId: "assistant-current",
+          },
+        }),
+      );
+
+      expect(forkMessages.map((message) => message.type)).toEqual([
+        "turn_start",
+        "result",
+        "turn_end",
+      ]);
+      expect(forkMessages[1]).toMatchObject({ type: "result", content: "Fork complete" });
+      expect(opens).toHaveLength(2);
+      expect(opens[1]).toMatchObject({
+        isNewSession: false,
+        providerThreadId: "persisted-claude-thread",
+      });
+      expect(providerFork).toMatchObject({
+        configurationMode: "exact",
+        sourceCheckpoint: "assistant-current",
+      });
+      await manager.shutdown();
+    });
+
     it("resumes an explicit sessionId without a caller-provided channelThreadKey", async () => {
       const sendTurn: AgentSession["sendTurn"] = vi.fn(() => ({
         turnId: "turn-1",

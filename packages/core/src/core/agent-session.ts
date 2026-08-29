@@ -2655,45 +2655,58 @@ class AgentSessionImpl implements AgentSession {
         agent: this.key.agentName,
       };
       try {
-        if (input.sourceCheckpoint) {
-          if (input.sourceCheckpoint.providerId !== this.modelSession.providerId) {
-            throw new Error(
-              `Fork checkpoint provider ${input.sourceCheckpoint.providerId} does not match live provider ${this.modelSession.providerId}`,
-            );
+        // An interrupt may close the provider query while leaving the Rome
+        // session reusable. Ordinary turns reopen that provider at their mutex
+        // boundary; forks need the same gate before touching the source. Keep
+        // the lock only through descriptor creation so the independent fork
+        // does not block later source turns.
+        const { fork, forkOpen, outbound } = await this.turnMutex.runExclusive(async () => {
+          if (this.status === "closed") {
+            throw new Error(`AgentSession ${this.sessionId} is closed`);
           }
-          const liveProviderThreadId = this.modelSession.providerThreadId;
-          if (
-            liveProviderThreadId &&
-            input.sourceCheckpoint.providerThreadId !== liveProviderThreadId
-          ) {
-            throw new Error("Fork checkpoint belongs to a different provider thread");
+          await this.ensureModelSessionForTurn();
+          const sourceModelSession = this.modelSession;
+          if (input.sourceCheckpoint) {
+            if (input.sourceCheckpoint.providerId !== sourceModelSession.providerId) {
+              throw new Error(
+                `Fork checkpoint provider ${input.sourceCheckpoint.providerId} does not match live provider ${sourceModelSession.providerId}`,
+              );
+            }
+            const liveProviderThreadId = sourceModelSession.providerThreadId;
+            if (
+              liveProviderThreadId &&
+              input.sourceCheckpoint.providerThreadId !== liveProviderThreadId
+            ) {
+              throw new Error("Fork checkpoint belongs to a different provider thread");
+            }
           }
-        }
-        const forkModel = input.tier
-          ? await this.deps.modelResolver.getModelProvider({
-              tier: input.tier,
-              providerId: this.modelSession.providerId,
-            })
-          : undefined;
-        const fork = await this.modelSession.fork({
-          sessionId: forkSessionId,
-          mode: "ephemeral",
-          configurationMode: mode,
-          sourceCheckpoint: input.sourceCheckpoint?.checkpointId,
-        });
-        // One serialized outbound stream for the whole forked turn: the
-        // provider-event pump below and out-of-band emitters (exact-mode
-        // subagent relays, structured_output) push concurrently; the drain
-        // loop yields in arrival order. A provider stream failure becomes the
-        // turn's terminal error block, preserving the bracketing invariant.
-        const outbound = new ForkStreamQueue();
-        const forkOpen = this.buildForkOpenParams({
-          mode,
-          forkSessionId,
-          forkTurnId: turnId,
-          model: forkModel?.model ?? this.modelSession.model,
-          threadContext: input.threadContext,
-          emit: (msg) => outbound.push(msg),
+          const forkModel = input.tier
+            ? await this.deps.modelResolver.getModelProvider({
+                tier: input.tier,
+                providerId: sourceModelSession.providerId,
+              })
+            : undefined;
+          const fork = await sourceModelSession.fork({
+            sessionId: forkSessionId,
+            mode: "ephemeral",
+            configurationMode: mode,
+            sourceCheckpoint: input.sourceCheckpoint?.checkpointId,
+          });
+          // One serialized outbound stream for the whole forked turn: the
+          // provider-event pump below and out-of-band emitters (exact-mode
+          // subagent relays, structured_output) push concurrently; the drain
+          // loop yields in arrival order. A provider stream failure becomes the
+          // turn's terminal error block, preserving the bracketing invariant.
+          const outbound = new ForkStreamQueue();
+          const forkOpen = this.buildForkOpenParams({
+            mode,
+            forkSessionId,
+            forkTurnId: turnId,
+            model: forkModel?.model ?? sourceModelSession.model,
+            threadContext: input.threadContext,
+            emit: (msg) => outbound.push(msg),
+          });
+          return { fork, forkOpen, outbound };
         });
         disposeForkResources = forkOpen.dispose;
         forkSession = await fork.open(forkOpen.params);
