@@ -74,17 +74,4 @@ Declining:
 
 Routing: link the follow-up issue in the reply, with one line on why it is separate work.
 
-## Signals
-
-| Signal in the finding | Verdict |
-|---|---|
-| Contradicts a claim the PR description makes | Real — run Test 5 |
-| Names an existing consumer of changed code (shared component, pooled worker) | Real — fix |
-| Comes with a concrete failure sequence you can script | Real — fix |
-| Presented by the bot as optional or non-blocking | Decline |
-| Restates a "Not in this PR" item or documented tradeoff | Decline |
-| Needs a caller, input, or implementation that does not exist | Decline |
-| Defect also present on `main` without this diff | Follow-up issue |
-| "Also fix these other places" | Follow-up issue |
-
 A "Not in this PR" line or a stated tradeoff in the PR description turns a finding into a one-sentence decline. Write those sections before requesting review.
