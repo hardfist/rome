@@ -21,7 +21,7 @@ Run each finding through these tests in order. The first test that matches decid
 
 ### Test 1 — the bot hedged
 
-If the finding contains "no action required", "flagging for the record", "consider", "worth noting", "latent today", "optional", "acceptable", or "retained deliberately": **decline**, with a one-line acknowledgment.
+If the bot itself presents the finding as optional or non-blocking — "no action required", "consider", "worth noting": **decline**, with a one-line acknowledgment.
 
 ### Test 2 — the PR already disclosed it
 
