@@ -43,18 +43,17 @@ A real finding names a defect reachable today: on `main` plus this diff, with th
 
 If the defect exists on `main` without this diff — "other entrypoints have the same problem", "the release process must also move" — it is adjacent work, not review response. Bucket: **follow-up issue**, linked from the reply.
 
-One exception: if the PR's own contract makes the old defect load-bearing, fix it in this PR. In #107, the PR claimed parity with old code, so an old bug became a liability on both sides of the migration.
+One exception: if the PR's own contract makes the old defect load-bearing — for example, the PR claims parity with the code that carries it — fix it in this PR.
 
 ### Test 5 — code or claim
 
-The finding is real, reachable, and introduced here. The bots audit the PR description's own claims well. When a finding attacks a claim, two fixes exist — change the code to honor the claim, or shrink the claim — and the choice is not free.
+The finding is real, reachable, and introduced here. If it does not contradict a claim in the PR description, **fix the code**. If it does, trace the claim to the issue the PR closes:
 
-**Trace the claim to the issue the PR closes.**
+- The issue demands the claim: **fix the code**.
+- The claim is author-added, or there is no linked issue: fix the code or shrink the claim, whichever leaves the smaller diff.
+- The issue demands the claim and the requirement is wrong: change the issue first, then shrink the claim.
 
-- The issue demands the claim, in its acceptance criteria or as its reason to exist: the claim is a requirement. **Fix the code.** A shrunken claim means the PR no longer closes the issue. In #114, "the directory reads no message store" was the point of issue #113, so the only valid answer to a leftover read was code.
-- The claim is author-added, a promise on top of what the issue asked for: fix or shrink, **whichever leaves the smaller diff**. Shrinking means editing the PR description and saying so in the reply, never quietly. In #91, instant key propagation to warm workers was a self-imposed promise. Shrinking it to "on next worker recycle" was a legitimate option.
-- No linked issue: every claim is author-owned and may shrink, but only to be honest, never to dodge. If the shrunken claim makes the PR pointless, the finding is real and demands code.
-- The claim is in the issue, but the issue is yours and the requirement was arbitrary: change the issue first, in the open, then shrink.
+Shrinking a claim means editing the PR description and stating the change in the reply.
 
 ## Phase 3 — Fix what earned a fix
 
@@ -69,7 +68,7 @@ For each finding in the **fix** bucket:
 
 No finding is skipped silently. The written decline is what stops the same finding from recurring on the next PR.
 
-Accepting — match the tone of the replies on #86 and #107:
+Accepting:
 
 - Confirm it plainly: "Confirmed and fixed in `<commit>` — this was real."
 - State the reproduction: what the failing test asserts and how it failed before the fix.
