@@ -11,15 +11,7 @@ Classification precedes code. Never start implementing a finding before classify
 
 ## Phase 1 — Gather and dedupe
 
-Pull every review body and inline comment on the PR:
-
-```bash
-REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
-gh pr view <PR> -R "$REPO" --json reviews --jq '.reviews[] | "[\(.author.login) / \(.state)]\n\(.body)"'
-gh api "repos/$REPO/pulls/<PR>/comments" --paginate --jq '.[] | "[\(.user.login) on \(.path):\(.line // .original_line)]\n\(.body)"'
-```
-
-1. Drop reviews marked "This review has been superseded."
+1. Pull every review body and inline comment on the PR. Drop reviews marked "This review has been superseded."
 2. Merge duplicate findings — same file, same defect — into one item. Post the answer once and cross-link it from the other thread.
 3. Discard the bots' severity labels and verdicts. Phase 2 re-derives priority.
 
