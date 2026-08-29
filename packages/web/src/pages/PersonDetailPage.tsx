@@ -52,12 +52,17 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
   const location = useLocation();
 
   // Where the dossier was opened from, carried on the navigation that opened
-  // it. An address rather than a step through history: a merge ends with this
-  // person deleted and the survivor's dossier open, so counting entries
-  // backwards walks onto a person who no longer exists. A dossier reached by
-  // pasted link carries no origin and falls back to the view `/people` is.
+  // it. An origin says a view sits behind this dossier, so the arrow spends the
+  // dossier's own history entry rather than stacking a third — otherwise the
+  // browser's Back undoes the click that was meant to leave.
+  //
+  // A merge is why the origin is carried rather than inferred: it deletes this
+  // person and puts the survivor in their entry, so the address is what keeps
+  // the arrow honest about which view it owes. A dossier reached by pasted link
+  // has no view behind it and replaces itself with the one `/people` is.
   const origin = (location.state as { from?: string } | null)?.from;
-  const back = () => navigate(origin ?? PEOPLE_VIEW_PATH.latest);
+  const back = () =>
+    origin ? navigate(-1) : navigate(PEOPLE_VIEW_PATH.latest, { replace: true });
 
   const personQuery = usePerson(personId);
   const timeline = usePersonTimeline(personId);

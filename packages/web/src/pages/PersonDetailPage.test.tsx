@@ -2,7 +2,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { TimelineEntry } from "@rome/api-types/people";
 import {
@@ -226,6 +226,7 @@ function renderPage(id = "wei-chen", before?: string) {
           <Route path="/people/:personId" element={<PersonLegacyRedirect />} />
         </Routes>
         <Address />
+        <BrowserBack />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -236,6 +237,17 @@ function renderPage(id = "wei-chen", before?: string) {
 function Address() {
   const location = useLocation();
   return <div data-testid="address">{`${location.pathname}${location.search}`}</div>;
+}
+
+/** The browser's Back button. What it reaches after the back link is what says
+ *  whether that link consumed the dossier's history entry or stacked another. */
+function BrowserBack() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" data-testid="browser-back" onClick={() => navigate(-1)}>
+      browser back
+    </button>
+  );
 }
 
 describe("PersonDetailPage", () => {
@@ -620,5 +632,39 @@ describe("PersonDetailPage back link survives a merge", () => {
 
     expect(await screen.findByText("the directory")).toBeTruthy();
     expect(screen.getByTestId("address").textContent).toBe("/people/directory?level=inner-circle");
+  });
+});
+
+// The back link is an arrow, and an arrow that stacks a third entry lets the
+// browser's own Back undo the click that was meant to leave.
+describe("PersonDetailPage back link consumes the dossier's history entry", () => {
+  it("does not leave the dossier reachable by pressing Back after it", async () => {
+    const user = userEvent.setup();
+    mockApi();
+    renderPage("wei-chen", "/people/directory?level=inner-circle");
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("button", { name: "People" }));
+    expect(await screen.findByText("the directory")).toBeTruthy();
+
+    await user.click(screen.getByTestId("browser-back"));
+
+    expect(screen.queryByRole("heading", { name: "Wei Chen" })).toBeNull();
+    expect(screen.getByTestId("address").textContent).toBe("/people/directory?level=inner-circle");
+  });
+
+  it("does not leave a pasted dossier reachable by pressing Back after it", async () => {
+    const user = userEvent.setup();
+    mockApi();
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("button", { name: "People" }));
+    expect(await screen.findByText("the stream")).toBeTruthy();
+
+    await user.click(screen.getByTestId("browser-back"));
+
+    expect(screen.queryByRole("heading", { name: "Wei Chen" })).toBeNull();
+    expect(screen.getByTestId("address").textContent).toBe("/people/latest");
   });
 });
