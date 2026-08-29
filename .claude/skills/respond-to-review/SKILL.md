@@ -51,7 +51,7 @@ The finding is real, reachable, and introduced here. If it does not contradict a
 
 - The issue demands the claim: **fix the code**.
 - The claim is author-added, or there is no linked issue: fix the code or shrink the claim, whichever leaves the smaller diff.
-- The issue demands the claim and the requirement is wrong: change the issue first, then shrink the claim.
+- The issue demands the claim and the requirement looks wrong: stop and ask the user. Never edit the issue.
 
 Shrinking a claim means editing the PR description and stating the change in the reply.
 
