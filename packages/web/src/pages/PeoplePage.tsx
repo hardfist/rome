@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMemo } from "react";
+import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { CircleAlert, RefreshCw } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -13,7 +13,12 @@ import { DismissedEntry, UnknownEntry } from "./people/triage";
 import {
   directoryGroups,
   FILTER_ORDER,
+  FILTER_PARAM,
   levelCounts,
+  parsePeopleFilter,
+  PEOPLE_VIEW_PATH,
+  peoplePath,
+  SEARCH_PARAM,
   streamRows,
   type LevelCounts,
   type PeopleFilter,
@@ -47,6 +52,12 @@ import { usePeopleRoster } from "./people/use-roster";
  * opened by the same gestures. A channel added after this page was written
  * lands here the same way, without a section.
  *
+ * Both views are routes — `/people/latest` and `/people/directory` — and the
+ * chip and the search term ride the query beside them. The page holds no
+ * control state of its own: what is on screen is what the address says, so a
+ * view is linkable, a reload returns to it, and back steps through the choices
+ * that got there.
+ *
  * Every number on screen is the server's. The directory pages, so a count taken
  * over the rows that happened to arrive would report no waiting senders as soon
  * as placed people filled page one — and it is why a write settles by
@@ -67,14 +78,44 @@ const LEVEL_HINT_KEY: Partial<Record<RowLevel, string>> = {
   stranger: "levelHints.stranger",
 };
 
-export default function PeoplePage() {
+/**
+ * `/people` is the root the two views share and renders neither: it forwards to
+ * the stream, carrying whatever chip and term the link arrived with, so an
+ * address written before the views had their own still lands somewhere.
+ */
+export function PeopleIndexRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: PEOPLE_VIEW_PATH.latest, search }} replace />;
+}
+
+export default function PeoplePage({ view }: { view: PeopleView }) {
   const { t } = useTranslation("people");
   const { t: tCommon } = useTranslation("common");
   const navigate = useNavigate();
 
-  const [view, setView] = useState<PeopleView>("latest");
-  const [filter, setFilter] = useState<PeopleFilter>("all");
-  const [search, setSearch] = useState("");
+  // Every control on this page is in the address: the view in the path, the
+  // chip and the term in the query. So each of the three moves by navigating,
+  // and each reads back out of the URL rather than out of a second copy that
+  // could disagree with it.
+  const [params] = useSearchParams();
+  const filter = parsePeopleFilter(params.get(FILTER_PARAM));
+  const search = params.get(SEARCH_PARAM) ?? "";
+
+  // A view or a chip is one deliberate choice and gets a history entry, so back
+  // undoes it. Typing does not: a term reached by keystroke would otherwise
+  // leave one entry per letter between the guardian and the page they came
+  // from.
+  const go = (
+    next: { view?: PeopleView; filter?: PeopleFilter; search?: string },
+    options?: { replace?: boolean },
+  ) =>
+    navigate(
+      peoplePath(next.view ?? view, {
+        filter: next.filter ?? filter,
+        search: next.search ?? search,
+      }),
+      options,
+    );
 
   // The view picks the account read: the contacts list, or the recents surface.
   //
@@ -165,7 +206,7 @@ export default function PeoplePage() {
           <SegmentedControl<PeopleView>
             aria-label={t("views.label")}
             value={view}
-            onValueChange={setView}
+            onValueChange={(next) => go({ view: next })}
             options={[
               { value: "latest", label: t("views.latest") },
               { value: "directory", label: t("views.directory") },
@@ -177,7 +218,7 @@ export default function PeoplePage() {
           <Input
             type="search"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => go({ search: e.target.value }, { replace: true })}
             placeholder={t("search.placeholder")}
             aria-label={t("search.label")}
             className="w-full sm:w-72"
@@ -185,7 +226,7 @@ export default function PeoplePage() {
           <FilterChipGroup<PeopleFilter>
             aria-label={t("filters.groupLabel")}
             value={filter}
-            onValueChange={setFilter}
+            onValueChange={(next) => go({ filter: next })}
             className="flex-1"
             options={FILTER_ORDER.map((option) => ({
               value: option,

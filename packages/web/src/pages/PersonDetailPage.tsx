@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, CircleAlert } from "lucide-react";
 import { formatWhatsAppPhone, type TimelineEntry } from "@rome/api-types/people";
@@ -10,6 +10,7 @@ import { Avatar } from "./people/avatar";
 import { ChannelPill } from "./people/channel-meta";
 import { clockTime, dayLabel, navigatorLocale, startOfDay } from "./people/format";
 import { PersonManagement } from "./people/manage";
+import { PEOPLE_VIEW_PATH } from "./people/people-model";
 import { usePerson, usePersonTimeline } from "./people/use-roster";
 
 /**
@@ -48,6 +49,15 @@ export default function PersonDetailPageRoute() {
 function PersonDetailPage({ personId }: { personId: string | undefined }) {
   const { t } = useTranslation("people");
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Back to where the dossier was opened from, which is a real address now that
+  // each People view has one: a guardian who reached this person from the
+  // directory, on a chip, returns to that and not to the default stream. A
+  // dossier opened by pasted link has nothing behind it — react-router marks
+  // that first entry "default" — so it falls back to the view `/people` is.
+  const back = () =>
+    location.key === "default" ? navigate(PEOPLE_VIEW_PATH.latest) : navigate(-1);
 
   const personQuery = usePerson(personId);
   const timeline = usePersonTimeline(personId);
@@ -74,7 +84,7 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
     return (
       <PageShell>
         <PageBody>
-          <BackLink onClick={() => navigate("/people")} />
+          <BackLink onClick={back} />
           <Alert variant="destructive">
             <CircleAlert aria-hidden="true" />
             <AlertTitle>
@@ -103,7 +113,7 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
   return (
     <PageShell>
       <PageBody>
-        <BackLink onClick={() => navigate("/people")} />
+        <BackLink onClick={back} />
 
         <div className="flex flex-wrap items-start gap-4 rounded-14 border border-border bg-surface p-5 shadow-1">
           <Avatar name={person.displayName} tone="bg-surface-muted text-muted-foreground" />

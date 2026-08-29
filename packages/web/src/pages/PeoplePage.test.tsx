@@ -2,7 +2,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   countPeople,
@@ -21,7 +21,7 @@ import {
   type StreamAccount,
 } from "@rome/api-types/people";
 import i18n from "@/i18n";
-import PeoplePage from "./PeoplePage";
+import PeoplePage, { PeopleIndexRedirect } from "./PeoplePage";
 
 // The People page as the guardian drives it: a stream that routes to whoever
 // has something new, and a directory — a contacts list — that reads the roster.
@@ -422,17 +422,43 @@ function mockApi(
   return { calls, state };
 }
 
-function renderPage() {
+/** The People routes as `App.tsx` declares them, so a test drives the same
+ *  redirect, the same two view paths and the same person route the app does —
+ *  and a control that navigates is exercised end to end rather than against a
+ *  single route that would swallow every address it produced. */
+function renderPage(entry = "/people") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/people"]}>
+      <MemoryRouter initialEntries={[entry]}>
         <Routes>
-          <Route path="/people" element={<PeoplePage />} />
+          <Route path="/people" element={<PeopleIndexRedirect />} />
+          <Route path="/people/latest" element={<PeoplePage view="latest" />} />
+          <Route path="/people/directory" element={<PeoplePage view="directory" />} />
           <Route path="/people/:personId" element={<div>person page</div>} />
         </Routes>
+        <Address />
+        <Back />
       </MemoryRouter>
     </QueryClientProvider>,
+  );
+}
+
+/** Reports the address the page is at, for the assertions about what a control
+ *  put in it. Rendered inside the router so it sees every navigation. */
+function Address() {
+  const location = useLocation();
+  return <div data-testid="address">{`${location.pathname}${location.search}`}</div>;
+}
+
+/** The browser's back button, which `MemoryRouter` has no chrome for. What it
+ *  lands on is the assertion that says which gestures spent a history entry. */
+function Back() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" data-testid="back" onClick={() => navigate(-1)}>
+      back
+    </button>
   );
 }
 
@@ -999,5 +1025,100 @@ describe("PeoplePage load failures", () => {
 
     expect(await screen.findByText("Nothing new yet")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+});
+
+// Every control on the page is in the address, so each of them is a link to
+// share, a state to reload into, and a step the back button can undo.
+describe("PeoplePage puts its controls in the address", () => {
+  const address = () => screen.getByTestId("address").textContent;
+  const searchBox = () => screen.getByRole("searchbox") as HTMLInputElement;
+  const checked = (name: string) =>
+    screen.getByRole("radio", { name }).getAttribute("aria-checked") === "true";
+
+  it("forwards /people to the stream, keeping the chip and term it arrived with", async () => {
+    mockApi({ people: [GUARDIAN, FRIEND] });
+    renderPage("/people?level=inner-circle&q=wei");
+
+    await waitFor(() => expect(address()).toBe("/people/latest?level=inner-circle&q=wei"));
+  });
+
+  it("opens the view its address names, not the default one", async () => {
+    mockApi({ people: [GUARDIAN, FRIEND, QUIET_PERSON] });
+    renderPage("/people/directory");
+
+    // The quiet person is a directory row and never a stream one, so their
+    // presence is what says which view the address opened.
+    expect(await screen.findByText("Nadia Petrova")).toBeTruthy();
+    expect(checked("Directory")).toBe(true);
+  });
+
+  it("moves the view into the path and the chip into the query", async () => {
+    const user = userEvent.setup();
+    mockApi({ people: [GUARDIAN, FRIEND] });
+    renderPage();
+
+    await screen.findByText("Wei Chen");
+    expect(address()).toBe("/people/latest");
+
+    await showDirectory(user);
+    await waitFor(() => expect(address()).toBe("/people/directory"));
+
+    await user.click(chip(/^Inner circle/));
+    await waitFor(() => expect(address()).toBe("/people/directory?level=inner-circle"));
+  });
+
+  it("carries the chip across a view change, and back undoes one choice", async () => {
+    const user = userEvent.setup();
+    mockApi({ people: [GUARDIAN, FRIEND] });
+    renderPage();
+
+    await screen.findByText("Wei Chen");
+    await user.click(chip(/^Inner circle/));
+    await waitFor(() => expect(address()).toBe("/people/latest?level=inner-circle"));
+
+    await showDirectory(user);
+    await waitFor(() => expect(address()).toBe("/people/directory?level=inner-circle"));
+
+    // One deliberate choice, one history entry: back undoes the view change
+    // and returns to the stream still on the chip picked before it.
+    await user.click(screen.getByTestId("back"));
+    await waitFor(() => expect(address()).toBe("/people/latest?level=inner-circle"));
+  });
+
+  it("puts the typed term in the address without an entry per letter", async () => {
+    const user = userEvent.setup();
+    mockApi({ people: [GUARDIAN, FRIEND] });
+    renderPage();
+
+    await screen.findByText("Wei Chen");
+    await showDirectory(user);
+    await user.type(searchBox(), "wei");
+    await waitFor(() => expect(address()).toBe("/people/directory?q=wei"));
+    expect(searchBox().value).toBe("wei");
+
+    // Three keystrokes replaced the view's entry rather than stacking three on
+    // top of it, so one step back is the way out of the directory — not a walk
+    // through "we" and "w" to get there.
+    await user.click(screen.getByTestId("back"));
+    await waitFor(() => expect(address()).toBe("/people/latest"));
+  });
+
+  it("opens the box on the term its address names, and searches for it", async () => {
+    const { calls } = mockApi({ people: [GUARDIAN, FRIEND, QUIET_PERSON] });
+    renderPage("/people/latest?q=nadia");
+
+    await waitFor(() => expect(searchBox().value).toBe("nadia"));
+    await waitFor(() =>
+      expect(calls.some((call) => call.url.includes("/api/people?q=nadia"))).toBe(true),
+    );
+  });
+
+  it("falls back to every level when the address names one the rail dropped", async () => {
+    mockApi({ people: [GUARDIAN, FRIEND] });
+    renderPage("/people/latest?level=former-colleague");
+
+    expect(await screen.findByText("Wei Chen")).toBeTruthy();
+    expect(checked("All")).toBe(true);
   });
 });

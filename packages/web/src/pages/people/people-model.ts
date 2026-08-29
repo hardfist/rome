@@ -55,6 +55,51 @@ export const FILTER_ORDER: PeopleFilter[] = [
   "stranger",
 ];
 
+/**
+ * Where each view answers, and what the controls above it ride in the query.
+ *
+ * The view is the route rather than a piece of component state, so a directory
+ * is something to link to, the back button steps between the two, and a reload
+ * comes back to what was on screen. The chip and the term ride the query under
+ * the names the reads themselves take — `level` and `q` — so a shared address
+ * reads as the request it produces.
+ */
+export const PEOPLE_VIEW_PATH: Record<PeopleView, string> = {
+  latest: "/people/latest",
+  directory: "/people/directory",
+};
+export const FILTER_PARAM = "level";
+export const SEARCH_PARAM = "q";
+
+/**
+ * The chip a URL asks for, or "all" when it names none the rail offers.
+ *
+ * An address is typed, kept and shared, so it will eventually name a level the
+ * rail has stopped offering. Falling back leaves the page on its default view
+ * rather than with a rail where nothing is selected.
+ */
+export function parsePeopleFilter(raw: string | null | undefined): PeopleFilter {
+  return FILTER_ORDER.includes(raw as PeopleFilter) ? (raw as PeopleFilter) : "all";
+}
+
+/**
+ * The address a view, a chip and a term make together — every link this page
+ * builds, from whichever one of the three the guardian just moved.
+ *
+ * Defaults are left out, so the plain `/people/latest` is what the page is
+ * usually at and a query parameter means somebody chose something.
+ */
+export function peoplePath(
+  view: PeopleView,
+  controls: { filter: PeopleFilter; search: string },
+): string {
+  const query = new URLSearchParams();
+  if (controls.filter !== "all") query.set(FILTER_PARAM, controls.filter);
+  if (controls.search) query.set(SEARCH_PARAM, controls.search);
+  const suffix = query.toString();
+  return suffix ? `${PEOPLE_VIEW_PATH[view]}?${suffix}` : PEOPLE_VIEW_PATH[view];
+}
+
 /** Directory groups, in ladder order. */
 export const GROUP_ORDER: RowLevel[] = [...BOND_LADDER];
 

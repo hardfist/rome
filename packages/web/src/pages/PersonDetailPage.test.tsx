@@ -2,7 +2,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { TimelineEntry } from "@rome/api-types/people";
 import {
@@ -207,19 +207,32 @@ function mockApi(
   return calls;
 }
 
-function renderPage(id = "wei-chen") {
+/** The dossier under the People routes `App.tsx` declares, so where its back
+ *  link lands is decided by the same history the app gives it. `before` is what
+ *  the guardian was looking at when they opened the person — nothing, when the
+ *  dossier is the address they arrived on. */
+function renderPage(id = "wei-chen", before?: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const entries = before ? [before, `/people/${id}`] : [`/people/${id}`];
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/people/${id}`]}>
+      <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
         <Routes>
-          <Route path="/people" element={<div>people page</div>} />
+          <Route path="/people/latest" element={<div>the stream</div>} />
+          <Route path="/people/directory" element={<div>the directory</div>} />
           <Route path="/people/:personId" element={<PersonDetailPage />} />
         </Routes>
+        <Address />
       </MemoryRouter>
     </QueryClientProvider>,
   );
   return { ...view, queryClient };
+}
+
+/** The address the dossier's back link left the guardian on. */
+function Address() {
+  const location = useLocation();
+  return <div data-testid="address">{`${location.pathname}${location.search}`}</div>;
 }
 
 describe("PersonDetailPage", () => {
@@ -422,7 +435,7 @@ describe("PersonDetailPage", () => {
     expect(await screen.findByText("Nothing has happened on any channel yet.")).toBeTruthy();
   });
 
-  it("goes back to the roster", async () => {
+  it("goes back to the stream when the dossier is the address the guardian arrived on", async () => {
     const user = userEvent.setup();
     mockApi();
     renderPage();
@@ -430,7 +443,19 @@ describe("PersonDetailPage", () => {
     await screen.findByRole("heading", { name: "Wei Chen" });
     await user.click(screen.getByRole("button", { name: "People" }));
 
-    expect(await screen.findByText("people page")).toBeTruthy();
+    expect(await screen.findByText("the stream")).toBeTruthy();
+  });
+
+  it("returns to the view the person was opened from, on the chip it was on", async () => {
+    const user = userEvent.setup();
+    mockApi();
+    renderPage("wei-chen", "/people/directory?level=inner-circle");
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("button", { name: "People" }));
+
+    expect(await screen.findByText("the directory")).toBeTruthy();
+    expect(screen.getByTestId("address").textContent).toBe("/people/directory?level=inner-circle");
   });
 });
 

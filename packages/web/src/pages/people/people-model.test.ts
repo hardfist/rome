@@ -8,6 +8,8 @@ import type {
 import {
   directoryGroups,
   levelCounts,
+  parsePeopleFilter,
+  peoplePath,
   peopleRows,
   rowHandle,
   streamRows,
@@ -300,5 +302,39 @@ describe("rowHandle", () => {
   it("falls back to the raw identifier on a channel with no phone shape", () => {
     const [row] = peopleRows([], [contact({ channel: "discord", channelUserId: "6128843201" })]);
     expect(rowHandle(row)).toBe("6128843201");
+  });
+});
+
+describe("peoplePath", () => {
+  it("gives each view its own address", () => {
+    expect(peoplePath("latest", { filter: "all", search: "" })).toBe("/people/latest");
+    expect(peoplePath("directory", { filter: "all", search: "" })).toBe("/people/directory");
+  });
+
+  it("carries the chip and the term, and leaves the defaults out", () => {
+    expect(peoplePath("directory", { filter: "unknown", search: "" })).toBe(
+      "/people/directory?level=unknown",
+    );
+    expect(peoplePath("latest", { filter: "all", search: "wei chen" })).toBe(
+      "/people/latest?q=wei+chen",
+    );
+    expect(peoplePath("latest", { filter: "stranger", search: "wei" })).toBe(
+      "/people/latest?level=stranger&q=wei",
+    );
+  });
+});
+
+describe("parsePeopleFilter", () => {
+  it("takes the chips the rail offers", () => {
+    expect(parsePeopleFilter("inner-circle")).toBe("inner-circle");
+    expect(parsePeopleFilter("stranger")).toBe("stranger");
+  });
+
+  it("answers a missing or unoffered level with every level", () => {
+    // Guardian is a ladder position with no chip, so an address naming it is
+    // as unusable as one naming a level that never existed.
+    expect(parsePeopleFilter("guardian")).toBe("all");
+    expect(parsePeopleFilter("former-colleague")).toBe("all");
+    expect(parsePeopleFilter(null)).toBe("all");
   });
 });
