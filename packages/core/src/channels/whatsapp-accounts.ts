@@ -47,8 +47,8 @@ function firstNonEmpty(...values: Array<string | null>): string | null {
  * (`<pn>@s.whatsapp.net`) and the privacy LID (`<lid>@lid`) — and the mirror
  * holds a row for each. The canonical form is the phone-number JID, and it is
  * built from the account's digits rather than picked from whichever row exists,
- * so learning the second addressing later never moves the id (I2) while either
- * addressing still resolves to it (I4). Preferring the LID would invert that: a
+ * so learning the second address later never moves the id (I2) while either
+ * address still resolves to it (I4). Preferring the LID would invert that: a
  * LID can only be found, never derived, so every account's id would move the
  * first time a conversation arrived.
  *
@@ -56,14 +56,14 @@ function firstNonEmpty(...values: Array<string | null>): string | null {
  *
  * Two gaps stay open, both because the mirror stores no key that outlives the
  * digits an id is built from. Closing either needs a durable stored account
- * key, not a different choice of addressing, and code that persists an
+ * key, not a different choice of address, and code that persists an
  * `AccountId` has to survive both:
  *
  * - An account that changes its phone number gets a new id (I2).
  * - A named LID row carrying no phone number addresses itself. Its id moves to
  *   the phone-number form once the mirror learns the number (I2), and until
  *   then a phone-number row for the same person is a second `Account` (I1).
- *   Nothing links the two but the name, and names are not identity.
+ *   Nothing links the two but the name, and a name does not name an account.
  */
 export class WhatsAppAccounts implements Accounts {
   constructor(private readonly store: WhatsAppStoreRepository) {}
@@ -99,7 +99,7 @@ export class WhatsAppAccounts implements Accounts {
   private readonly load = sharedRead(() => this.read());
 
   /**
-   * The store already folds a person's two addressings onto one card, but it
+   * The store already folds a person's two addresses onto one card, but it
    * folds on the phone number a row carries, so a row that has not learned its
    * number yet stays separate. Re-keying on the canonical id here collapses
    * those too — one `Account` per account, whatever the mirror's row shape (I1).

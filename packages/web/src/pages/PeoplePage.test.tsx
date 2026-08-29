@@ -164,7 +164,7 @@ const LINKED_ACCOUNT: WorldAccount = {
 
 /** A LinkedIn sender nobody has placed. LinkedIn had a section of its own on
  *  this page while its threads reached no account read; it has an accounts
- *  plane now, so it arrives here as a sender like any other and is placed by
+ *  address book now, so it arrives here as a sender like any other and is placed by
  *  the same gesture. */
 const LINKEDIN_SENDER: WorldAccount = {
   channel: "linkedin",

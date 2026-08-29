@@ -1947,6 +1947,13 @@ export function upgradeWebSocket(
   return accept(handlers);
 }
 
+/**
+ * One account linked to a person.
+ *
+ * A channel mapping is a link and `channelUserId` is the account's own address
+ * (docs/concepts/people.md). The names here are the published wire contract and
+ * the database's, so they stay as they are.
+ */
 export interface ChannelMappingRecord {
   channel: string;
   channelUserId: string;
@@ -1963,6 +1970,8 @@ export interface PersonRecord {
   [key: string]: unknown;
 }
 
+/** The people the host knows and the accounts linked to each. Named for the
+ *  `channel_mappings` table it reads; see {@link ChannelMappingRecord}. */
 export interface PersonMappingRepository {
   findByChannelUser(channel: string, channelUserId: string): Promise<PersonRecord | null>;
   findByName(displayName: string): Promise<PersonRecord[]>;

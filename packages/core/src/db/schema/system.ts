@@ -76,6 +76,8 @@ export const sessionTurnCheckpoints = sqliteTable(
   (table) => [primaryKey({ columns: [table.sessionId, table.turnId] })],
 );
 
+/** The people the guardian knows (docs/concepts/people.md#person). Table name
+ *  kept: renaming it needs a migration, and every reader already holds it. */
 export const persons = sqliteTable("persons", {
   id: text("id").primaryKey(),
   displayName: text("display_name").notNull(),
@@ -87,6 +89,15 @@ export const persons = sqliteTable("persons", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * Which person each account belongs to — a channel mapping is a
+ * [link](docs/concepts/people.md#link), and `channel_user_id` is the account's
+ * own [address](docs/concepts/people.md#address).
+ *
+ * The table, its columns, and its index keep the older names: renaming any of
+ * them needs a migration, and `channelMappings` is also the wire field
+ * `@rome-os/app-runtime` publishes on `PersonRecord`.
+ */
 export const channelMappings = sqliteTable(
   "channel_mappings",
   {
@@ -99,10 +110,10 @@ export const channelMappings = sqliteTable(
     displayName: text("display_name"),
   },
   (table) => [
-    // One channel identity belongs to exactly one person. Held in the database
-    // rather than checked before each write: two concurrent placements of the
-    // same waiting sender both read "unmapped" and both insert, and the People
-    // page would then show that identity under two people at once.
+    // One account belongs to exactly one person. Held in the database rather
+    // than checked before each write: two concurrent placements of the same
+    // waiting sender both read "unlinked" and both insert, and the People page
+    // would then show that account under two people at once.
     uniqueIndex("idx_channel_mappings_identity").on(table.channel, table.channelUserId),
   ],
 );

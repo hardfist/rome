@@ -1,12 +1,13 @@
 // What every platform calls its accounts, behind one call. `Accounts`
 // (accounts.ts) is one channel's address book; this is the display-name half of
 // all of them folded together, so a caller holding a (channel, channelUserId)
-// pair — the identity of an account, per docs/concepts/identity.md — never
+// pair — the channel and the account's own address, per
+// docs/concepts/people.md — never
 // learns which address book answers for which channel, nor that some channels
 // have none at all.
 
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
-import { mirrorRegistry } from "./account-fold.js";
+import { addressBookRegistry } from "./account-fold.js";
 import type { Accounts } from "./accounts.js";
 
 /**
@@ -29,8 +30,8 @@ export class AccountNames {
    *
    * A channel that addresses one account several ways answers its platform's
    * name to every one of them. Neither fallback can: a sender's own name is
-   * filed under the addressing its message arrived on, and the last resort only
-   * echoes what it was asked. A caller that folds addressings itself asks with
+   * filed under the address its message arrived on, and the last resort only
+   * echoes what it was asked. A caller that folds addresses itself asks with
    * the account's own address.
    */
   async displayName(channel: string, channelUserId: string): Promise<string> {
@@ -71,14 +72,14 @@ export class AccountNames {
   }
 }
 
-/** A provider joins the directory by taking an entry in {@link mirrorRegistry},
+/** A provider joins the directory by taking an entry in {@link addressBookRegistry},
  *  and every caller keeps asking the same one question. */
 export function createAccountNames(deps: {
   whatsAppAccounts: Accounts;
   linkedInAccounts: Accounts;
   sentinelLogRepo: SentinelLogRepository;
 }): AccountNames {
-  return new AccountNames(mirrorRegistry<Accounts>(deps), deps.sentinelLogRepo);
+  return new AccountNames(addressBookRegistry<Accounts>(deps), deps.sentinelLogRepo);
 }
 
 const key = (account: { channel: string; channelUserId: string }) =>

@@ -1,6 +1,6 @@
 /**
- * The read-sharing half of a mirrored account plane, for a channel that folds
- * its whole address book on every call.
+ * The read-sharing half of an address book, for a channel that folds its
+ * whole address book on every call.
  *
  * An `Accounts` consumer usually needs several answers about the same mirror
  * at once — a listing, and a `resolve` for each address it already holds — and

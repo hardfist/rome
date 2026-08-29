@@ -145,8 +145,8 @@ interface PersonFixture {
 /**
  * What a contact row actually stores: address-book facts, and nothing derived.
  *
- * The five omitted fields are all projections on the real API — the identity
- * pair is a join onto `channel_mappings`, and the summary trio is a subquery
+ * The five omitted fields are all projections on the real API — the pair
+ * naming the account is a join onto `channel_mappings`, and the summary trio is a subquery
  * over `wa_messages`. Storing any of them here would let a link or a send leave
  * the card disagreeing with the thread behind it, which is the one thing these
  * fixtures exist to keep honest.
@@ -252,9 +252,9 @@ type SentinelRow = {
   lastMessageAt: number | null;
   reply?: string;
   /** This log row's own id. A timeline `ref` has to be unique across
-   *  everything one source contributes to a person, and one channel
-   *  identity can hold several log rows, so the refs key on this rather
-   *  than on the channel identity those rows share. */
+   *  everything one source contributes to a person, and one account can hold
+   *  several log rows, so the refs key on this rather than on the account those
+   *  rows share. */
   logId: string;
 };
 
@@ -331,9 +331,9 @@ export const sentinelSenders: SentinelRow[] = (
     },
     {
       // A second log row for 林晓, newer than the one above. The log keys on the
-      // exchange rather than the sender, so one identity can hold several — and
+      // exchange rather than the sender, so one account can hold several — and
       // a reader that takes the first would preview an older line than the one
-      // sitting at the top of this identity's own timeline.
+      // sitting at the top of this account's own timeline.
       channel: "feishu",
       channelUserId: "ou_9f21c04ab7",
       displayName: "林晓",
@@ -613,7 +613,7 @@ export function summarize(
   };
 }
 
-/** The person a channel identity currently maps to, or `undefined` while it is
+/** The person an account currently maps to, or `undefined` while it is
  *  still unmapped. The `channel_mappings` lookup both the unknown-sender query
  *  and the contacts join run. */
 export function ownerOf(channel: string, channelUserId: string): PersonFixture | undefined {
@@ -691,7 +691,7 @@ function timelineForChannels(channels: AccountRef[]): TimelineEntry[] {
       const mirrored = threads[jid] ?? [];
       // The sentinel recorded the same arrival the mirror holds, so the two are
       // alternatives rather than additions. With no mirrored thread the
-      // sentinel is all there is, and skipping it leaves an identity that has
+      // sentinel is all there is, and skipping it leaves an account that has
       // plainly messaged with an empty timeline, a null `latest`, and no place
       // in the Unknown count.
       if (mirrored.length === 0) {
@@ -700,7 +700,7 @@ function timelineForChannels(channels: AccountRef[]): TimelineEntry[] {
       }
       for (const message of mirrored) {
         // A reaction is not its own dynamic — `summarize` skips them when it
-        // picks `latest`, so carrying them here would let one identity report
+        // picks `latest`, so carrying them here would let one account report
         // two different newest things. Whether the page renders them against
         // the line they answer is the page rebuild's call.
         if (message.type === "reaction") continue;
@@ -710,7 +710,7 @@ function timelineForChannels(channels: AccountRef[]): TimelineEntry[] {
           body: message.text,
           direction: message.fromMe ? "outbound" : "inbound",
           // A WhatsApp message id is unique within its chat, and a person can
-          // hold several WhatsApp identities, so the chat qualifies it into
+          // hold several WhatsApp accounts, so the chat qualifies it into
           // the source-global ref the contract asks for.
           ref: `${jid}:${message.id}`,
         });
@@ -722,7 +722,7 @@ function timelineForChannels(channels: AccountRef[]): TimelineEntry[] {
   return entries.sort(compareTimelineEntries);
 }
 
-/** Every sentinel log row for one channel identity, as timeline entries. */
+/** Every sentinel log row for one account, as timeline entries. */
 function sentinelEntriesFor(mapping: AccountRef): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
   for (const sender of sentinelSenders) {

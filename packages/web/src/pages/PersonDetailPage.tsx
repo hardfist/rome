@@ -15,7 +15,7 @@ import { usePerson, usePersonTimeline } from "./people/use-roster";
 /**
  * One person's page: the dossier.
  *
- * Identity on top — name, bond, the accounts that resolve to this person — then
+ * Who they are on top — name, bond, the accounts that resolve to this person — then
  * the merged timeline of everything said on any of them, grouped by day.
  * Timeline entries are generic, so a channel Rome learns about later shows up
  * here without a change to this page.

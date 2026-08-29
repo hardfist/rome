@@ -23,7 +23,7 @@ function chunked<T>(items: T[], size: number): T[][] {
 }
 
 /**
- * Group key folding a single person's two WhatsApp addressings — their
+ * Group key folding a single person's two WhatsApp addresses — their
  * phone-number JID (`<pn>@s.whatsapp.net`) and their privacy LID (`<lid>@lid`) —
  * onto one identity. WhatsApp delivers a contact's conversation under the LID
  * (which Baileys annotates with the resolved phone number) while the address-book
@@ -61,7 +61,7 @@ function coalesceField<K extends keyof WhatsAppContactAliasRow>(
  * the chat still resolves its messages) and fold the missing pieces in from its
  * siblings: the address-book name, a person link, and the richer message history.
  * Every JID that went into the group is kept in `aliases`, sorted, so a caller
- * that needs the whole addressing set does not have to re-derive the grouping.
+ * that needs the whole address set does not have to re-derive the grouping.
  */
 function consolidateByIdentity(rows: WhatsAppContactAliasRow[]): WhatsAppContactRow[] {
   const groups = new Map<string, WhatsAppContactAliasRow[]>();
@@ -82,7 +82,7 @@ function consolidateByIdentity(rows: WhatsAppContactAliasRow[]): WhatsAppContact
     const primary = group[0];
     const linked = group.find((r) => r.linkedPersonId != null);
     // The whole conversation usually lives on one JID, but take the latest row
-    // defensively in case history is split across both addressings.
+    // defensively in case history is split across both addresses.
     const latest = group.reduce(
       (best, r) => ((r.lastMessageAt ?? -1) > (best.lastMessageAt ?? -1) ? r : best),
       primary,

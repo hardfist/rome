@@ -15,7 +15,7 @@ function ok(stdout: string): OpencliResult {
 }
 
 describe("parseWhoami", () => {
-  it("returns the identity of a signed-in session", () => {
+  it("returns the account of a signed-in session", () => {
     const identity = parseWhoami(
       ok(
         JSON.stringify({
@@ -259,7 +259,7 @@ describe("parseThreadParticipants", () => {
     expect(participants.map((p) => p.participantId)).toEqual(["ACoAAAda0001", "ACoAALurk0002"]);
   });
 
-  it("drops rows with no member id rather than storing a blank identity", () => {
+  it("drops rows with no member id rather than storing a blank account", () => {
     const participants = parseThreadParticipants(
       ok(JSON.stringify([row(), row({ participant_index: 2, participant_id: "" })])),
     );

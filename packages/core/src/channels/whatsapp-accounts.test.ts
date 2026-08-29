@@ -34,7 +34,7 @@ describe("WhatsAppAccounts", () => {
 
   afterEach(() => close());
 
-  it("keeps one id when a message lands on the other addressing", async () => {
+  it("keeps one id when a message lands on the other address", async () => {
     await repo.upsertContacts([
       { jid: PHONE, phoneNumber: "15550007777", name: "One Contact" },
       { jid: LID, phoneNumber: "15550007777", name: "One Contact" },
@@ -49,7 +49,7 @@ describe("WhatsAppAccounts", () => {
     expect((await accounts.resolve(before))!.id).toBe(before);
   });
 
-  it("folds both addressings into a single account", async () => {
+  it("folds both addresses into a single account", async () => {
     await repo.upsertContacts([
       { jid: PHONE, phoneNumber: "15550007777", name: "One Contact" },
       { jid: LID, phoneNumber: "15550007777" },
@@ -85,7 +85,7 @@ describe("WhatsAppAccounts", () => {
       { jid: "99900099999@lid", phoneNumber: "15550009999" },
     ]);
 
-    // The listing is where a caller learns which addressings fold together, so
+    // The listing is where a caller learns which addresses fold together, so
     // the account has to carry all of them — the derived id among them, whether
     // or not a row spelled it out.
     const page = await accounts.listAccounts({ limit: 50 });

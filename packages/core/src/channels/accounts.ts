@@ -1,8 +1,7 @@
 /**
- * The account plane of a channel. `ProviderAdapter` (adapter.ts) is the
- * message plane — it moves text. This is the address book behind it: who a
- * channel can reach, and which of the identifiers a channel hands out name one
- * and the same account.
+ * A channel's address book. `ProviderAdapter` (adapter.ts) moves text; this
+ * is who a channel can reach, and which of the identifiers a channel hands out
+ * name one and the same account. Vocabulary: docs/concepts/people.md.
  *
  * An account answers *who*. What was said to it — a last message, a count, a
  * preview — is a separate read over the same addresses, and it belongs to
@@ -18,7 +17,7 @@ export interface Account {
   /**
    * Every address the account answers to, `id` among them.
    *
-   * The addressing set a channel folds onto one account: a WhatsApp contact
+   * The address set a channel folds onto one account: a WhatsApp contact
    * answers to both a phone JID and a `@lid` JID, and history hangs off
    * either. A caller that has to show or match every form an account can be
    * reached at reads them here rather than asking the channel a second time.
@@ -57,7 +56,7 @@ export interface Account {
  * - **I1 Uniqueness.** Exactly one {@link Account} per real account. The same
  *   `id` means the same account. Callers never fold aliases themselves.
  * - **I2 Stability.** `id` does not change for the life of the account — not
- *   across a restart, a re-sync, a message arriving on a different addressing,
+ *   across a restart, a re-sync, a message arriving on a different address,
  *   or a change to any identifier the account is reachable on.
  * - **I3 Opacity.** Callers never parse or construct an `id`. This is what lets
  *   a channel change its canonical form later without touching a consumer.
@@ -76,7 +75,7 @@ export interface Accounts {
    * large enough to hold the listing.
    *
    * Each account carries its own {@link Account.addresses}, so this is also how
-   * a caller learns which addressings fold together. There is no separate
+   * a caller learns which addresses fold together. There is no separate
    * address map to ask for: a second answer to a question the listing already
    * answers is a second answer to disagree with.
    */

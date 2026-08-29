@@ -435,7 +435,7 @@ describe("LinkedInInboxPoller fault handling", () => {
 
 /**
  * Promotion is a guardian action, never a consequence of syncing. A LinkedIn
- * inbox holds many identities — recruiters, newsletters, strangers — that must
+ * inbox holds many accounts — recruiters, newsletters, strangers — that must
  * not walk into the curated person graph on their own.
  *
  * The sink contract is the guarantee: it exposes no way to write `persons`. This

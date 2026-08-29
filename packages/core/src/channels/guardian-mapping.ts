@@ -5,9 +5,9 @@ import { createLogger } from "../logger.js";
 const log = createLogger("guardian-mapping");
 
 /**
- * Auto-map the guardian person onto their own identity on a channel.
+ * Auto-map the guardian person onto their own account on a channel.
  *
- * Called on connect for channels that surface the guardian's self identity
+ * Called on connect for channels that surface the guardian's self address
  * (WhatsApp pairing today) and by the channels routes/descriptors. Returns
  * `true` when a mapping was created or re-canonicalized, `false` when the
  * channel user was already mapped or no guardian person exists.
@@ -31,7 +31,7 @@ export async function mapGuardianToChannel(
 
   const guardian = guardians[0];
 
-  const stale = staleIdentity(guardian.channelMappings, channel);
+  const stale = staleAddress(guardian.channelMappings, channel);
   if (stale) {
     if (await repo.updateChannelUserId(guardian.id, channel, stale, channelUserId)) {
       log.info("re-canonicalized guardian channel mapping", {
@@ -43,10 +43,10 @@ export async function mapGuardianToChannel(
       return true;
     }
     // Nothing holds the guardian read above against the write, so a link write
-    // can retire that identity in between. Fall through and map the incoming one
+    // can retire that account in between. Fall through and map the incoming one
     // rather than report a heal that did not happen. The transactional path
     // cannot: its write is one statement settled before the transaction opened.
-    log.info("guardian identity to re-canonicalize is gone", {
+    log.info("guardian account to re-canonicalize is gone", {
       channel,
       from: stale,
       personId: guardian.id,
@@ -59,23 +59,23 @@ export async function mapGuardianToChannel(
 }
 
 /**
- * The identity on `channel` that the incoming one supersedes, or undefined when
+ * The address on `channel` that the incoming one supersedes, or undefined when
  * the incoming one is a further account rather than a canonicalization.
  *
- * A single held identity is stale by definition here: the connect callback only
- * ever hands over the guardian's *current* self identity, the caller has already
+ * A single held address is stale by definition here: the connect callback only
+ * ever hands over the guardian's *current* self address, the caller has already
  * established that nobody holds it, and what remains is the same account under a
  * superseded identifier — e.g. a device-suffixed WhatsApp self JID
  * (`<pn>:8@s.whatsapp.net`) captured before canonicalization. Re-pointing it
  * keeps the mapping joinable to the canonicalized contacts mirror.
  *
- * Several held identities are several accounts (a person may hold more than one
+ * Several held addresses are several accounts (a person may hold more than one
  * per channel, and the link verb places them), and nothing distinguishes a
- * superseded one from a live one. Adding the incoming identity leaves a stale
+ * superseded one from a live one. Adding the incoming address leaves a stale
  * identifier behind at worst; re-pointing an arbitrary one would take an account
  * away from the guardian.
  */
-function staleIdentity(
+function staleAddress(
   mappings: readonly { channel: string; channelUserId: string }[],
   channel: string,
 ): string | undefined {
@@ -104,10 +104,10 @@ export type GuardianMappingPlan =
  * per-(service, grant) section, so no competing conferral can change the guardian
  * between plan and apply.
  *
- * An identity another writer claimed in that window does not abort the conferral,
+ * An account another writer claimed in that window does not abort the conferral,
  * on either branch: the add upserts and the re-point takes `to` from its holder,
  * so both commit. That settles the right way round here — the channel handed this
- * identity over as the guardian's own, so a competing claim on it is the one
+ * account over as the guardian's own, so a competing claim on it is the one
  * mistaken about whose it is. The conferral aborting would cost the guardian the
  * credential in the same transaction, to preserve a claim that is wrong.
  */
@@ -123,8 +123,8 @@ export async function planGuardianMapping(
   if (guardians.length === 0) return { op: "noop" };
 
   const guardian = guardians[0];
-  const stale = staleIdentity(guardian.channelMappings, channel);
-  // The plan names the row it re-points, so an identity placed between this read
+  const stale = staleAddress(guardian.channelMappings, channel);
+  // The plan names the row it re-points, so an account placed between this read
   // and the apply — a link write runs outside the grant section that holds
   // competing conferrals off — is left where it is rather than swept onto
   // `channelUserId` with it.
@@ -140,11 +140,11 @@ export async function planGuardianMapping(
  * zero residual state.
  *
  * A planned re-point whose `from` is gone by now — a link write moved or
- * removed that identity in the window — writes nothing and leaves the incoming
- * identity unmapped, which the log below records. Deliberate: the guardian
- * decided where that identity belongs more recently than the plan did, and
+ * removed that account in the window — writes nothing and leaves the incoming
+ * account unmapped, which the log below records. Deliberate: the guardian
+ * decided where that account belongs more recently than the plan did, and
  * failing the conferral over it would cost them the credential too. The next
- * connect maps the incoming identity.
+ * connect maps the incoming account.
  */
 export function applyGuardianMappingWithinTx(
   tx: DrizzleTx,
@@ -157,7 +157,7 @@ export function applyGuardianMappingWithinTx(
   if (plan.op === "update") {
     const moved = repo.writeChannelUserId(tx, plan.guardianId, channel, plan.from, channelUserId);
     if (!moved) {
-      log.info("planned guardian re-point found no identity to move", {
+      log.info("planned guardian re-point found no account to move", {
         channel,
         from: plan.from,
         to: channelUserId,

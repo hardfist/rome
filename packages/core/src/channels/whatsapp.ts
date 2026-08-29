@@ -176,7 +176,7 @@ export class WhatsAppAdapter implements ProviderAdapter {
 
         this.seedSelfContact();
 
-        // Hand the guardian auto-mapper our *canonical* self identity, not the raw
+        // Hand the guardian auto-mapper our *canonical* self address, not the raw
         // socket id. `user.id` carries a `:device` suffix (`<pn>:8@s.whatsapp.net`)
         // that never matches the device-stripped JIDs we persist contacts under, so
         // mapping the guardian onto it leaves the self contact unlinked in the People
@@ -426,13 +426,13 @@ export class WhatsAppAdapter implements ProviderAdapter {
     };
   }
 
-  /** Our own phone-number identity (`<pn>@s.whatsapp.net`), device stripped. */
+  /** Our own phone-number address (`<pn>@s.whatsapp.net`), device stripped. */
   private selfPnJid(): string | null {
     const id = this.sock?.user?.id;
     return id ? jidNormalizedUser(id) : null;
   }
 
-  /** Our own LID identity (`<lid>@lid`), device stripped, when WhatsApp reports one. */
+  /** Our own LID address (`<lid>@lid`), device stripped, when WhatsApp reports one. */
   private selfLidJid(): string | null {
     const lid = this.sock?.user?.lid;
     return lid ? jidNormalizedUser(lid) : null;

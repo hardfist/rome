@@ -6,7 +6,7 @@
 // Grouping is the point. The People surface reads a whole directory at once:
 // one `latest` and one `count` per row, all issued together. Served one query
 // each, a directory of a thousand people is a thousand passes over the same
-// mirror. Served here, it is one, the way the WhatsApp account plane already
+// mirror. Served here, it is one, the way the WhatsApp address book already
 // answers concurrent `resolve` calls from a single shared load.
 
 import { sql, type SQL } from "drizzle-orm";

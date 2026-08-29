@@ -2,11 +2,11 @@
 
 ## Memory
 
-The memory system provides persistent, git-tracked knowledge that survives across agent [sessions](sessions.md). It holds general memory (preferences, key facts, privacy boundaries), the agent's identity, a daily journal, relationship profiles for [persons](identity.md#persons), and summaries of the guardian's [projects](#projects).
+The memory system provides persistent, git-tracked knowledge that survives across agent [sessions](sessions.md). It holds general memory (preferences, key facts, privacy boundaries), the agent's identity, a daily journal, relationship profiles for [persons](people.md#person), and summaries of the guardian's [projects](#projects).
 
 **Contracts:**
 
-- The entire memory directory is a git repository: every change (by agents or the [guardian](identity.md#guardian)) is tracked with full commit history and can be reverted.
+- The entire memory directory is a git repository: every change (by agents or the [guardian](people.md#guardian)) is tracked with full commit history and can be reverted.
 - Key files load into agent context at session start. Person profiles and journal entries load on demand when relevant.
 - Privacy boundaries are part of memory itself: topics marked off-limits must not be remembered.
 

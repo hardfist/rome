@@ -1,4 +1,4 @@
-# Identity: Guardian, Visitor, Persons, Accounts & Links
+# People: Guardian, Visitor, Persons, Accounts, Addresses & Links
 
 ## Guardian
 
@@ -9,11 +9,11 @@ The guardian is the single human user that a Rome instance serves. They control 
 - One Rome instance serves exactly one guardian. There is no multi-guardian mode.
 - The guardian is always the highest-trust [bond level](#bond-levels). No person can outrank them.
 - Only the guardian can approve or reject an [approval-gated action](messaging.md#approvals).
-- The guardian's full access is inherent. Every other authenticated identity is a [visitor](#visitor) whose access is granted and revocable.
+- The guardian's full access is inherent. Every other authenticated caller is a [visitor](#visitor) whose access is granted and revocable.
 
 **Not to be confused with:**
 
-- **[Person](#persons)** — a person is someone the guardian knows. The guardian is the one the instance serves.
+- **[Person](#person)** — a person is someone the guardian knows. The guardian is the one the instance serves.
 - **[Visitor](#visitor)** — a visitor holds scoped access the guardian granted. The guardian owns the instance and can never be outranked by one.
 - **The agent's identity** — the agent has its own name and personality, stored separately from the guardian's profile.
 
@@ -30,44 +30,61 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 **Not to be confused with:**
 
 - **[Guardian](#guardian)** — the guardian owns the instance and holds full access. A visitor holds scoped access the guardian granted.
-- **[Person](#persons)** — a person is someone the guardian knows, carrying a bond level. A visitor is an authenticated caller, and the two are orthogonal — a visitor need not be a tracked person.
+- **[Person](#person)** — a person is someone the guardian knows, carrying a bond level. A visitor is an authenticated caller, and the two are orthogonal — a visitor need not be a tracked person.
 
-## Persons
+## Person
 
 Rome tracks people the guardian knows. Each person carries a [bond level](#bond-levels) that determines how the system interacts with them. [Links](#link) to multiple [accounts](#account) let the system recognize the same person across [channels](messaging.md#channels).
 
 **Contracts:**
 
-- A person's identity is channel-independent: multiple linked accounts resolve to the same person, and what the system knows about someone travels with the person, not with any account.
+- A person is channel-independent: multiple linked accounts resolve to the same person, and what the system knows about someone travels with the person, not with any account.
 - Every person carries exactly one [bond level](#bond-levels).
 
 **Not to be confused with:**
 
 - **[Guardian](#guardian)** — the guardian is served by the instance. Persons are known to it.
-- **[Account](#account)** — an account is an identity on one platform. A person aggregates the accounts linked to them.
+- **[Account](#account)** — an account is a party on one platform. A person aggregates the accounts linked to them.
 
 ## Account
 
-An account is an identity on an external messaging platform — a Telegram user ID, a WhatsApp number, a LinkedIn profile. The platform owns the account, and Rome only observes it. Deprecated alias: *platform identity*.
+An account is a party on an external messaging platform — a Telegram user, a WhatsApp number, a LinkedIn profile. The platform owns the account, and Rome only observes it. Deprecated alias: *platform identity*.
 
 **Contracts:**
 
-- An account is identified by its [channel](messaging.md#channels) plus its platform user ID. The same pair always names the same account.
+- An account is identified by its [channel](messaging.md#channels) plus its own [address](#address). The same pair always names the same account.
 - Rome never creates or deletes an account. Platforms own the account lifecycle, and Rome learns of accounts from inbound messages.
 - An account resolves to a person only through its [link](#link). An account with no link resolves to no one.
 - An account is in exactly one of three states: unlinked, linked, or dismissed. Dismissal records that the account belongs to no one the guardian tracks. A dismissed account stays out of discovery until the guardian restores or links it.
 - The state is derived from the account's link. No surface stores or reports a state that can disagree with the link behind it.
-- The guardian's own platform identities are accounts like any other, linked to the guardian.
+- The guardian's own accounts on a platform are accounts like any other, linked to the guardian.
 
 **Not to be confused with:**
 
-- **[Person](#persons)** — Rome owns persons, and platforms own accounts. A person aggregates the accounts linked to them.
-- **[Channel](messaging.md#channels)** — a channel is the platform integration messages arrive through. An account is one identity on that platform.
+- **[Person](#person)** — Rome owns persons, and platforms own accounts. A person aggregates the accounts linked to them.
+- **[Address](#address)** — an account is the party. An address is one of the forms it is reachable at.
+- **[Channel](messaging.md#channels)** — a channel is the platform integration messages arrive through. An account is one party on that platform.
 - **Connection** — a connection joins the Rome instance to a service. An account belongs to a party on that service.
+
+## Address
+
+An address is a form an [account](#account) is reachable at on its [channel](messaging.md#channels) — a phone number, a member id, a mailbox. The platform owns the form and Rome carries it whole. Deprecated alias: *channel user id*.
+
+**Contracts:**
+
+- An address is opaque. No surface parses, constructs, or compares parts of one, so a platform can change the form it hands out without any reader changing.
+- Every address a channel can receive a message on resolves to exactly one account. One account reachable under several addresses is one account, never two.
+- Exactly one of an account's addresses is the account's own — the one a [link](#link), a dismissal, or a stored message names it by. Which one is the channel's answer, not a rule any reader derives.
+- An address names an account, never a person. Who is behind it is the account's [link](#link).
+
+**Not to be confused with:**
+
+- **[Account](#account)** — the account is the party, stable across every address it answers to. An address is one form of reach.
+- **Identifier** — an identifier is a searchable fact about an account, such as an email or a profile URL. An address is what a message is addressed to, and a searchable fact is not one.
 
 ## Link
 
-A link is the recorded fact that an [account](#account) belongs to a [person](#persons). It is the only identity fact Rome adds to what the platforms provide. Deprecated alias: *channel mapping*.
+A link is the recorded fact that an [account](#account) belongs to a [person](#person). It is the only fact about who is who that Rome adds to what the platforms provide. Deprecated alias: *channel mapping*.
 
 **Contracts:**
 
@@ -83,7 +100,7 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 
 ## Bond levels
 
-A bond level is the trust tier assigned to a [person](#persons). It determines how deeply the system remembers them and whether their messages are trusted by default.
+A bond level is the trust tier assigned to a [person](#person). It determines how deeply the system remembers them and whether their messages are trusted by default.
 
 | Level | Examples | Memory depth |
 |---|---|---|

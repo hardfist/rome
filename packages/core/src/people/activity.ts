@@ -43,7 +43,7 @@ export async function readPeopleActivity(
   // One summary per person per store, over every account of theirs that store
   // owns — not one per account. A store reads a set of accounts as a single
   // history, so this is the same read the page makes, and a message that two
-  // addressings of a person both name is one message in both.
+  // addresses of a person both name is one message in both.
   const summaries = accountsByPerson.flatMap((accounts, person) => {
     const byStore = new Map<Messages, MessageAccount[]>();
     for (const account of accounts) {

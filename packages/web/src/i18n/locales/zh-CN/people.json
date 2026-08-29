@@ -116,7 +116,6 @@
     "back": "人物",
     "bond": "亲密度",
     "linkAccount": "关联账号…",
-    "linkNeedsPerson": "请先把这个身份安置到亲密度阶梯上，然后再为它关联账号",
     "timeline": "时间线",
     "timelineEmpty": "各个渠道都还没有任何往来。",
     "loadOlder": "加载更早",
@@ -126,7 +125,7 @@
     "composerLabel": "消息内容",
     "composerPlaceholder": "给 {{name}} 发消息…",
     "missingTitle": "找不到这个人",
-    "missingBody": "该身份可能已被合并到其他人名下。返回人物页面即可找到他们。",
+    "missingBody": "该人物可能已被合并到其他人名下。返回人物页面即可找到他们。",
     "linkDescription": "你选择的账号将归属到此人名下，其历史记录也会并入这条时间线。",
     "noAccounts": "暂无账号"
   },

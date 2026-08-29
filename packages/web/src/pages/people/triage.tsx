@@ -36,7 +36,7 @@ import type { PeopleRow, PeopleView } from "./people-model";
 // there is no target list to enumerate and nothing here has to know which moves
 // a row admits.
 //
-// A gesture names the account by the pair the contract says is its identity,
+// A gesture names the account by the pair the contract names it with,
 // never by one of the addresses it answers to: the server folds a WhatsApp
 // contact's phone jid and `@lid` jid into one account, so one call already
 // covers every address the row stands for.

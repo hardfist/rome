@@ -65,7 +65,7 @@ async function serialize(
   // One mapping is one account on the wire, so a client can address the link
   // it sees. The activity fold is the one place two mappings of a single
   // account collapse — reporting one person's history twice would be a wrong
-  // number, whereas showing both addressings is only what the guardian stored.
+  // number, whereas showing both addresses is only what the guardian stored.
   const refs = persons.flatMap((person) => person.channelMappings);
 
   // Independent of each other, and both reach the same channel mirrors: read

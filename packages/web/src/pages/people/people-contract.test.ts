@@ -30,10 +30,6 @@ import { protectedPersonReason, STRANGER_PERSON_ID } from "@rome/api-types/perso
 // that does not escape its parts, a search that does not normalize: none of
 // those show up as a failure in the surface that calls them, only as a wrong
 // answer.
-//
-// Previously `identity-contract.test.ts`, against the identity union. The union
-// is retired; these are the rules that outlived it, repointed at the module
-// they live in now.
 
 const entry = (over: Partial<TimelineEntry> = {}): TimelineEntry => ({
   source: "whatsapp",

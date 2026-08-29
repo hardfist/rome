@@ -87,7 +87,7 @@ describe("peopleRows", () => {
 
   it("leaves a linked account to the person it resolves to", () => {
     // The account and the person are the same human seen from two sides. Two
-    // rows is the duplication the one-row-per-identity rule exists to remove —
+    // rows is the duplication the one-row-per-account rule exists to remove —
     // and the person is the row that can carry a bond.
     const rows = peopleRows(
       [person()],
@@ -105,9 +105,9 @@ describe("peopleRows", () => {
     expect(rows[0].kind).toBe("person");
   });
 
-  it("carries every addressing the server folded onto one account", () => {
+  it("carries every address the server folded onto one account", () => {
     // The `@lid` consolidation is the contract's `addresses`: the server decides
-    // which addressings are one account, and the client renders what it decided.
+    // which addresses are one account, and the client renders what it decided.
     const rows = peopleRows(
       [],
       [

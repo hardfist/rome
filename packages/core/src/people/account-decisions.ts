@@ -10,7 +10,7 @@
 // real person holds: linking and unlinking are that account's verbs, and a
 // dismissal that quietly displaced a placement would lose the guardian's work.
 //
-// The account, not the addressing. A channel that reaches one account several
+// The account, not the address. A channel that reaches one account several
 // ways is folded by `readAccountDirectory`, so a caller holding any address of
 // an account decides the account — otherwise a dismissal by the address the
 // guardian happened to see would leave the account undismissed by every other
@@ -67,7 +67,7 @@ export async function dismissAccount(
   if (account == null) return { unknown: true };
 
   // What the guardian was looking at. It refuses the account they can see is
-  // placed — including one placed on an addressing other than the one they
+  // placed — including one placed on an address other than the one they
   // named, which only the fold knows is the same account.
   const holder = heldBy(account);
   if (holder) return { conflict: linkConflict(account, holder) };
@@ -158,7 +158,7 @@ function heldBy(account: DirectoryAccount): { id: string; displayName: string } 
  * directory is what decided the account's state, which addresses are one
  * account, and which person holds it, and a write that answered those questions
  * a second way could refuse what the guardian is looking at, or dismiss an
- * addressing of an account it is not allowed to touch.
+ * address of an account it is not allowed to touch.
  */
 async function locate(
   deps: AccountDecisionDeps,

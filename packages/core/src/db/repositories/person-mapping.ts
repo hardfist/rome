@@ -14,7 +14,7 @@ import {
 // predict the ids this repository mints.
 export { generatePersonSlug };
 
-/** An identity cleared for a person to take, with the channel-side name that
+/** An account cleared for a person to take, with the channel-side name that
  *  travels with it. */
 interface ChannelClaim {
   channel: string;
@@ -44,7 +44,7 @@ export interface AccountHolder {
 export class AccountHeldError extends Error {
   constructor(readonly holder: AccountHolder) {
     super(
-      `Channel identity ${holder.channel}:${holder.channelUserId} already belongs to person "${holder.personId}"`,
+      `Account ${holder.channel}:${holder.channelUserId} already belongs to person "${holder.personId}"`,
     );
     this.name = "AccountHeldError";
   }
@@ -85,6 +85,16 @@ export interface NewPersonData {
   approved?: boolean;
 }
 
+/**
+ * The people the guardian knows and which accounts belong to each of them.
+ *
+ * The repository and its verbs keep the `channel_mappings` name: a channel
+ * mapping is a [link](docs/concepts/people.md#link), and `channelUserId` is the
+ * account's own [address](docs/concepts/people.md#address), but the table, the
+ * columns, and the `PersonMappingRepository` interface `@rome-os/app-runtime`
+ * publishes all carry the older names, so renaming here would leave two names
+ * for one thing rather than one.
+ */
 export class PersonMappingRepository {
   constructor(private db: DrizzleDb) {}
 
@@ -228,7 +238,7 @@ export class PersonMappingRepository {
    * One statement rather than one per person, and not only to save the reads:
    * a mapping moving between two people mid-read would otherwise land under
    * both of them (or neither), because each person's mappings would arrive in
-   * their own autocommit query. Every reader of this table assumes an identity
+   * their own autocommit query. Every reader of this table assumes an account
    * has one owner.
    */
   async findAllWithMappings() {
@@ -260,18 +270,18 @@ export class PersonMappingRepository {
   }
 
   /**
-   * Create a person and claim their channel identities, both or neither.
+   * Create a person and claim their accounts, both or neither.
    *
-   * An identity filed under the stranger sentinel is a dismissal rather than a
-   * placement, so naming its sender releases it. An identity a real person
+   * An account filed under the stranger sentinel is a dismissal rather than a
+   * placement, so naming its sender releases it. An account a real person
    * holds stays held: this throws {@link AccountHeldError} instead of stealing
    * it, because creating a person is not a re-point. The refusal is a
-   * rollback, not a partial write — a person committed without their identity
+   * rollback, not a partial write — a person committed without their account
    * would be unreachable and permanent, since {@link findByName} would then
    * reject every retry as a duplicate of the wreckage.
    *
-   * Whatever the caller names, all of it or none of it: the identities are
-   * settled together before the transaction opens, so one held identity in a
+   * Whatever the caller names, all of it or none of it: the accounts are
+   * settled together before the transaction opens, so one held account in a
    * list of five leaves the other four where they were.
    */
   async create(data: {
@@ -294,8 +304,8 @@ export class PersonMappingRepository {
   }
 
   /**
-   * Settle who may take each identity, before any transaction opens, so a
-   * refusal can name the holder. An identity filed under the stranger sentinel
+   * Settle who may take each account, before any transaction opens, so a
+   * refusal can name the holder. An account filed under the stranger sentinel
    * is a dismissal rather than a placement, so it is released to whoever names
    * its sender; one a real person holds is refused. The unique index still
    * backstops a rival claim landing between this read and the write.
@@ -325,7 +335,7 @@ export class PersonMappingRepository {
     return claims;
   }
 
-  /** Take an identity {@link resolveClaims} cleared for this person. */
+  /** Take an account {@link resolveClaims} cleared for this person. */
   private writeClaim(exec: SqliteExec, personId: string, claim: ChannelClaim): void {
     this.writeReleaseStrangerClaim(exec, claim.channel, claim.channelUserId);
     exec
@@ -334,7 +344,7 @@ export class PersonMappingRepository {
       .run();
   }
 
-  /** The row holding a channel identity and the name of the person holding it,
+  /** The row holding an account and the name of the person holding it,
    *  or null when nobody holds it. The join loses nothing — every mapping
    *  references a person row. */
   private async findChannelMapping(channel: string, channelUserId: string) {
@@ -393,7 +403,7 @@ export class PersonMappingRepository {
     channelUserId: string,
     displayName?: string,
   ): string {
-    // Claiming an identity is one statement, not a read followed by a write:
+    // Claiming an account is one statement, not a read followed by a write:
     // `(channel, channel_user_id)` is unique, so a second writer re-points the
     // mapping instead of adding a rival one, whatever order the two arrive in.
     const row = exec
@@ -416,9 +426,9 @@ export class PersonMappingRepository {
     return row.id;
   }
 
-  /** Release a channel identity that was only dismissed onto the stranger
+  /** Release an account that was only dismissed onto the stranger
    *  sentinel, so a caller naming its sender can claim it. Scoped to the
-   *  sentinel deliberately: an identity a real person holds is a placement, and
+   *  sentinel deliberately: an account a real person holds is a placement, and
    *  leaving it in place lets the unique index turn an attempt to take it into
    *  a rollback rather than a silent theft. */
   writeReleaseStrangerClaim(exec: SqliteExec, channel: string, channelUserId: string): void {
@@ -426,13 +436,13 @@ export class PersonMappingRepository {
   }
 
   /**
-   * {@link writeReleaseStrangerClaim} over every addressing of one account, as
+   * {@link writeReleaseStrangerClaim} over every address of one account, as
    * a single statement.
    *
    * One statement rather than one per address because they are one decision: a
    * channel can reach an account several ways, a dismissal is stored against
    * whichever one the guardian dismissed it by, and an undo that committed
-   * some of them would leave the account still dismissed by the addressing it
+   * some of them would leave the account still dismissed by the address it
    * missed.
    */
   writeReleaseStrangerClaims(
@@ -469,7 +479,7 @@ export class PersonMappingRepository {
   }
 
   /** Write helper for {@link updateChannelUserId}, taking an executor (see
-   *  {@link writeChannelMapping}). Returns whether the identity moved, so a
+   *  {@link writeChannelMapping}). Returns whether the account moved, so a
    *  caller that decided on `from` earlier can tell that it is gone. */
   writeChannelUserId(
     exec: SqliteExec,
@@ -493,15 +503,15 @@ export class PersonMappingRepository {
       );
 
     // A rival holding `to` yields it, which is where {@link writeChannelMapping}'s
-    // upsert lands a claim on the same identity. Re-pointing onto a held
-    // identifier would otherwise collide on the identity index and abort the
+    // upsert lands a claim on the same account. Re-pointing onto a held
+    // identifier would otherwise collide on the unique index and abort the
     // caller's transaction — the one outcome a claim on this path must not have,
     // since that transaction also carries the credential.
     //
     // Only a rival's. This person holding `to` themselves is a second account of
     // theirs, not a claim to settle, and deleting it here would merge two of
-    // their identities into one. Conditioned, too, on the re-pointed row still
-    // being there: a `from` that went away leaves the rival holding an identity
+    // their accounts into one. Conditioned, too, on the re-pointed row still
+    // being there: a `from` that went away leaves the rival holding an account
     // nothing is about to take.
     exec
       .delete(channelMappings)
@@ -522,9 +532,9 @@ export class PersonMappingRepository {
       .from(channelMappings)
       .where(and(eq(channelMappings.channel, channel), eq(channelMappings.channelUserId, to)));
 
-    // Scoped to the one identity being re-pointed, not to every identity the
+    // Scoped to the one account being re-pointed, not to every account the
     // person holds on the channel: a person may hold several there, and moving
-    // them all onto `to` would collide on the identity index too.
+    // them all onto `to` would collide on the unique index too.
     const result = exec
       .update(channelMappings)
       .set({ channelUserId: to })
@@ -541,8 +551,8 @@ export class PersonMappingRepository {
   }
 
   /**
-   * Repoint one of a person's channel identities onto a new identifier, leaving
-   * their other identities on that channel alone. Used to heal a stale guardian
+   * Repoint one of a person's accounts onto a new identifier, leaving
+   * their other accounts on that channel alone. Used to heal a stale guardian
    * self JID (e.g. a device-suffixed WhatsApp id captured before
    * canonicalization) onto its canonical form on reconnect.
    *
@@ -564,7 +574,7 @@ export class PersonMappingRepository {
   }
 
   /**
-   * Remove only guardian identities for a channel after its Talk grant is
+   * Remove only guardian accounts for a channel after its Talk grant is
    * explicitly disconnected. Other people mappings remain curated data, and
    * transient transport faults never call this path.
    */
@@ -674,7 +684,7 @@ export class PersonMappingRepository {
    *
    * The links move rather than being rewritten, so each carries its
    * channel-side name across the way a transfer does. Nothing can collide on
-   * the identity index: an account carries at most one link, so no account is
+   * the unique index: an account carries at most one link, so no account is
    * held by both people to begin with.
    *
    * Both rows are read inside the transaction and the refusals are decided

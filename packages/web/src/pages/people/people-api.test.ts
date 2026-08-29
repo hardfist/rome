@@ -109,7 +109,7 @@ test("proposed /people contract walkthrough", async () => {
     { channel: "whatsapp", channelUserId: DEV_JID, displayName: expect.any(String) },
   ]);
 
-  // Link a second account — an unseen LinkedIn identity; linking does not
+  // Link a second account — an unseen LinkedIn account; linking does not
   // require the account to have been observed first. Re-link is idempotent.
   r = await call("POST", `/api/people/${devikaId}/accounts`, {
     channel: "linkedin",

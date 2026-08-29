@@ -20,7 +20,7 @@ const entry = (
 const held: HeldMessage[] = [
   { channel: "whatsapp", address: PHONE, entry: entry("whatsapp", 100, "wa:a") },
   { channel: "whatsapp", address: PHONE, entry: entry("whatsapp", 300, "wa:c", "outbound") },
-  // The same second as wa:c, on the account's other addressing: the direction
+  // The same second as wa:c, on the account's other address: the direction
   // settles the tie, and both have to survive a page boundary.
   { channel: "whatsapp", address: LID, entry: entry("whatsapp", 300, "wa:d") },
   { channel: "whatsapp", address: PHONE, entry: entry("whatsapp", 500, "wa:e") },

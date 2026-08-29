@@ -32,7 +32,7 @@ interface Seed {
 const seeds: Seed[] = [
   { id: "a", chat: PHONE, at: 100, text: "first" },
   { id: "c", chat: PHONE, at: 300, fromMe: true, text: "answered" },
-  // The same second as `c`, on the account's other addressing: the direction
+  // The same second as `c`, on the account's other address: the direction
   // settles the tie, and both have to survive a page boundary.
   { id: "d", chat: LID, at: 300, text: "and on the lid" },
   { id: "e", chat: PHONE, at: 500, text: "latest" },
@@ -76,7 +76,7 @@ describe("whatsAppMessages", () => {
 
   const refs = (entries: { ref: string }[]) => entries.map((entry) => entry.ref);
 
-  it("merges both addressings of the account, newest first", async () => {
+  it("merges both addresses of the account, newest first", async () => {
     const messages = whatsAppMessages(testDb.db);
     const page = await messages.read({ accounts, limit: WHOLE_HISTORY });
     expect(refs(page)).toEqual([`${PHONE}:e`, `${PHONE}:c`, `${LID}:d`, `${PHONE}:a`]);
@@ -118,21 +118,21 @@ describe("whatsAppMessages", () => {
     expect(await messages.read({ accounts: [], limit: WHOLE_HISTORY })).toEqual([]);
   });
 
-  // The scope is the account's addressing set, and the three verbs answer one
+  // The scope is the account's address set, and the three verbs answer one
   // history over it: `count` is the length of the full read and `latest` its
   // first entry. Per scope rather than once, because a store that scoped `read`
   // one way and `count` another would still agree on the widest scope there is.
   it.each([
     {
       scope: accounts,
-      of: "both addressings of the account",
+      of: "both addresses of the account",
       refs: [`${PHONE}:e`, `${PHONE}:c`, `${LID}:d`, `${PHONE}:a`],
     },
-    // `d` arrived on the `@lid` addressing, so a scope naming only the phone
-    // leaves it out — the addressing set is the scope, not the account.
+    // `d` arrived on the `@lid` address, so a scope naming only the phone
+    // leaves it out — the address set is the scope, not the account.
     {
       scope: [{ channel: "whatsapp", addresses: [PHONE] }],
-      of: "one addressing",
+      of: "one address",
       refs: [`${PHONE}:e`, `${PHONE}:c`, `${PHONE}:a`],
     },
     { scope: silent, of: "a contact the mirror holds nothing for", refs: [] },

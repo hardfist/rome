@@ -5,6 +5,10 @@
 // `outgoing_message` and `person_mapping`. Leaving the column a bare string
 // invited callers — and fixtures — to invent kinds nothing downstream knows how
 // to resolve.
+//
+// `person_mapping` is the lifecycle for approving a link (docs/concepts/
+// people.md#link). It keeps its name because it is a persisted column value: a
+// rename would strand every stored row.
 
 // Defined in @rome-os/app-runtime — the SDK apps compile against, and therefore
 // the only place that can constrain the two lifecycles apps create. Re-exported

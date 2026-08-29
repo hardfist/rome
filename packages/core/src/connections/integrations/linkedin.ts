@@ -33,7 +33,7 @@ import {
   openLinkedInBrowserTab,
   parseWhoami,
   runOpencli,
-  type LinkedInIdentity,
+  type LinkedInWhoami,
   type RunOpencli,
 } from "../../channels/linkedin-cli.js";
 import { LinkedInInboxPoller } from "../../channels/linkedin.js";
@@ -77,7 +77,7 @@ const linkedinGrantProfileSchema = z
 export type LinkedInGrantProfile = z.infer<typeof linkedinGrantProfileSchema>;
 
 export function linkedinProfileFromIdentity(
-  identity: LinkedInIdentity,
+  identity: LinkedInWhoami,
   connectedAt: Date,
 ): LinkedInGrantProfile | null {
   const raw: LinkedInGrantProfile = {
@@ -166,7 +166,7 @@ export function makeLinkedInSetup(deps: {
   run: RunOpencli;
   openLoginTab: (url: string) => Promise<boolean>;
 }): SetupFn {
-  const probe = async (signal: AbortSignal): Promise<LinkedInIdentity | null> => {
+  const probe = async (signal: AbortSignal): Promise<LinkedInWhoami | null> => {
     try {
       return parseWhoami(
         await deps.run(["linkedin", "whoami"], { timeoutMs: WHOAMI_TIMEOUT_MS, signal }),
@@ -208,7 +208,7 @@ export function makeLinkedInSetup(deps: {
         const deadline = Date.now() + LOGIN_WAIT_TIMEOUT_MS;
         for (;;) {
           if (signal.aborted) throw new Error("setup cancelled");
-          let found: LinkedInIdentity | null = null;
+          let found: LinkedInWhoami | null = null;
           try {
             found = await probe(signal);
           } catch {

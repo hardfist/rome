@@ -2,7 +2,7 @@ import type { NormalizedMessage, OutgoingMessage } from "./types.js";
 import type { ChannelSendResult } from "@rome-os/app-runtime";
 
 /**
- * The message-plane port resolved by the rest of Rome. Concrete channel
+ * The message-moving port resolved by the rest of Rome. Concrete channel
  * adapters retain their lifecycle methods for registry integrations, but the
  * registry exclusively owns starting and stopping transports.
  */

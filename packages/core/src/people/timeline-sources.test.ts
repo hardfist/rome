@@ -31,7 +31,7 @@ const adaLid = "77770001@lid";
 const grace = "12025550111@s.whatsapp.net";
 
 describe("timelineAccounts", () => {
-  it("collapses two addressings of one account onto one account", async () => {
+  it("collapses two addresses of one account onto one account", async () => {
     const whatsAppAccounts = new FakeAccounts([account(ada, [ada, adaLid])]);
 
     const [accounts] = await timelineAccounts({ whatsAppAccounts }, [
@@ -79,7 +79,7 @@ describe("timelineAccounts", () => {
     expect(accounts).toEqual([{ channel: "whatsapp", addresses: ["12025550999@s.whatsapp.net"] }]);
   });
 
-  it("gives a channel with no account plane the mapping's own address", async () => {
+  it("gives a channel with no address book the link's own address", async () => {
     const whatsAppAccounts = new FakeAccounts([account(ada, [ada, adaLid])]);
 
     const [accounts] = await timelineAccounts({ whatsAppAccounts }, [

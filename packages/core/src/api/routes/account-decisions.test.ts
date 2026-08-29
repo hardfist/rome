@@ -46,7 +46,7 @@ describe("Account dismiss and restore", () => {
       { jid: TALKING_JID, notify: "Talky Tina" },
       { jid: LINKED_JID, name: "Alice WA" },
       // One contact the address book reaches two ways, so a write has to land
-      // on the account rather than on the addressing it was named by.
+      // on the account rather than on the address it was named by.
       { jid: PHONE_JID, name: "Split Contact" },
       { jid: LID_JID, phoneNumber: "15550009999" },
     ]);

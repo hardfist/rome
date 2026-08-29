@@ -2,9 +2,11 @@
 // account in. The stores themselves are the channels' — one `Messages` adapter
 // each, in channels/ — and the merge over them is timeline.ts's.
 //
-// Also the fold from a person's channel mappings to the accounts those stores
-// are read for, since the two are the same question asked of one channel: which
+// Also the fold from a person's links to the accounts those stores are read
+// for, since the two are the same question asked of one channel: which
 // addresses are one account, and what was said at them.
+//
+// Vocabulary: docs/concepts/people.md.
 //
 // Direct threads only. Each store scopes itself by the account's own addresses,
 // so a group conversation — addressed by the group rather than by the person —
@@ -46,15 +48,15 @@ export function personMessageStores(deps: { db: DrizzleDb }): Messages[] {
 }
 
 /**
- * Every account each group of mappings is reachable at, with every address the
- * channel folds onto it — one result per group, in the order given.
+ * Every account each group of linked addresses is reachable at, with every
+ * address the channel folds onto it — one result per group, in the order given.
  *
- * Two mappings that name two addressings of one account collapse to one
- * account, so a person mapped under both a WhatsApp phone JID and its `@lid`
- * form reads one timeline rather than two halves of one.
+ * Two links that name two addresses of one account collapse to one account, so
+ * a person linked under both a WhatsApp phone JID and its `@lid` form reads one
+ * timeline rather than two halves of one.
  *
- * A channel with no account plane contributes the mapping's own address and
- * nothing else, which is all the channel can say about who it can reach.
+ * A channel with no address book contributes the link's own address and nothing
+ * else, which is all the channel can say about who it can reach.
  *
  * Positional and over every group at once, like `AccountNames.displayNames`
  * next door: each channel's address book costs a full read, so one caller
@@ -62,14 +64,16 @@ export function personMessageStores(deps: { db: DrizzleDb }): Messages[] {
  */
 export async function timelineAccounts(
   deps: { whatsAppAccounts: AddressBook },
-  groups: readonly (readonly ChannelMapping[])[],
+  groups: readonly (readonly LinkedAddress[])[],
 ): Promise<TimelineAccount[][]> {
-  const channels = new Set(groups.flatMap((group) => group.map((mapping) => mapping.channel)));
+  const channels = new Set(groups.flatMap((group) => group.map((link) => link.channel)));
   const books = await readAddressBooks(deps, channels);
   return groups.map((group) => foldAccounts(books, group));
 }
 
-interface ChannelMapping {
+/** One address a link names. `channelUserId` is the account's own address —
+ *  the wire field's name, kept because the column and the contract carry it. */
+interface LinkedAddress {
   channel: string;
   channelUserId: string;
 }
@@ -82,22 +86,22 @@ type AddressBook = Accounts;
 /** Each channel's accounts, indexed the two ways the fold reads them: which
  *  account an address belongs to, and every address of that account.
  *
- *  Read only for the channels the mappings name, since a plane costs a full
- *  address-book read. LinkedIn has a plane too but is deliberately absent: it
- *  stores a member under its member id and nothing else, so folding it would
- *  buy a whole mirror read and change no answer. It joins here when it starts
- *  storing a second addressing. */
+ *  Read only for the channels the links name, since an address book costs a
+ *  full read. LinkedIn has one too but is deliberately absent: it stores a
+ *  member under its member id and nothing else, so folding it would buy a whole
+ *  read and change no answer. It joins here when it starts storing a second
+ *  address. */
 async function readAddressBooks(
   deps: { whatsAppAccounts: AddressBook },
   channels: ReadonlySet<string>,
 ): Promise<Map<string, FoldedBook>> {
-  const planes = new Map<string, AddressBook>([["whatsapp", deps.whatsAppAccounts]]);
+  const known = new Map<string, AddressBook>([["whatsapp", deps.whatsAppAccounts]]);
   const books = new Map<string, FoldedBook>();
-  for (const [channel, accounts] of planes) {
+  for (const [channel, accounts] of known) {
     if (!channels.has(channel)) continue;
     // One page big enough to hold the listing: its order is stable but the
-    // listing under it is not, so walking cursors across a live mirror would
-    // skip or repeat an account as an inbound message reordered it.
+    // listing under it is not, so walking cursors across a live address book
+    // would skip or repeat an account as an inbound message reordered it.
     const { accounts: listing } = await accounts.listAccounts({ limit: WHOLE_LISTING });
     const of = new Map<string, string>();
     const folded = new Map<string, string[]>();
@@ -123,17 +127,17 @@ interface FoldedBook {
 
 function foldAccounts(
   books: Map<string, FoldedBook>,
-  mappings: readonly ChannelMapping[],
+  links: readonly LinkedAddress[],
 ): TimelineAccount[] {
   const byAccount = new Map<string, TimelineAccount>();
-  for (const mapping of mappings) {
-    const book = books.get(mapping.channel);
-    const accountId = book?.of.get(mapping.channelUserId) ?? mapping.channelUserId;
-    const key = `${mapping.channel}\n${accountId}`;
+  for (const link of links) {
+    const book = books.get(link.channel);
+    const accountId = book?.of.get(link.channelUserId) ?? link.channelUserId;
+    const key = `${link.channel}\n${accountId}`;
     if (byAccount.has(key)) continue;
     byAccount.set(key, {
-      channel: mapping.channel,
-      addresses: [...new Set([mapping.channelUserId, ...(book?.folded.get(accountId) ?? [])])],
+      channel: link.channel,
+      addresses: [...new Set([link.channelUserId, ...(book?.folded.get(accountId) ?? [])])],
     });
   }
   return [...byAccount.values()];

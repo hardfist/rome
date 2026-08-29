@@ -23,7 +23,7 @@ import {
 // The contract is two nouns — a person (`GET /api/people`) and an account
 // somebody is reachable at (`GET /api/accounts`) — and this page is one ladder
 // over both. `PeopleRow` is that join: the shape a row renders from, whichever
-// noun it came from. Everything channel-shaped about it — which addressings are
+// noun it came from. Everything channel-shaped about it — which addresses are
 // one account, what the channel calls it, how much is on record — is the
 // server's answer carried through, not a rule restated here.
 
@@ -228,7 +228,7 @@ export function rowMatchesFilter(row: PeopleRow, filter: PeopleFilter): boolean 
 }
 
 /**
- * The stream: one row per identity that has a dynamic, newest first, over both
+ * The stream: one row per account that has a dynamic, newest first, over both
  * nouns at once.
  *
  * The reader is asking who has something new, and whether Rome has placed the

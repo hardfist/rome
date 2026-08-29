@@ -47,7 +47,7 @@ import {
  * The /people contract — Person, Account, Link — over the fixture store in
  * ./people.ts, so a link made here is visible to the channel thread the mirror
  * endpoints open. Wire types and route map: `@rome/api-types/people`;
- * vocabulary: docs/concepts/identity.md.
+ * vocabulary: docs/concepts/people.md.
  *
  * Mock mode's implementation of the same surface core serves
  * (`packages/core/src/api/routes/people.ts` and `.../accounts.ts`), typed

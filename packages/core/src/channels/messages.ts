@@ -1,6 +1,5 @@
 /**
- * The message plane behind a channel's accounts: what was said, as one store
- * holds it. `Accounts` (accounts.ts) answers who a channel can reach, and this
+ * What was said to a channel's accounts, as one store holds it. `Accounts` (accounts.ts) answers who a channel can reach, and this
  * answers what passed between Rome and them.
  *
  * A message is a {@link TimelineEntry}. The shape, the ordering and the cursor
@@ -13,7 +12,7 @@ import type { TimelineEntry } from "@rome/api-types/people";
 
 /**
  * One account a store reads for, named by every address it answers to —
- * `Account.addresses` on the channel's own account plane.
+ * `Account.addresses` on the channel's own address book.
  *
  * The addresses rather than the id, because a store keys its rows by whichever
  * address a message arrived on. A read that named only the address a person

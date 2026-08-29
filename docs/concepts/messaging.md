@@ -2,7 +2,7 @@
 
 ## Channels
 
-Channels are messaging platform integrations — external platforms like Telegram, WhatsApp, and Discord, plus the webchat built into the dashboard. Each channel has an adapter that normalizes platform-specific messages into a common shape carrying the channel, the sender's [account](identity.md#account), thread addressing, content, and the raw platform event.
+Channels are messaging platform integrations — external platforms like Telegram, WhatsApp, and Discord, plus the webchat built into the dashboard. Each channel has an adapter that normalizes platform-specific messages into a common shape carrying the channel, the sender's [account](people.md#account), thread addressing, content, and the raw platform event.
 
 **Contracts:**
 
@@ -12,7 +12,7 @@ Channels are messaging platform integrations — external platforms like Telegra
 
 **Not to be confused with:**
 
-- **[Person](identity.md#persons)** — a channel is where a message arrives. The person is who sent it, resolved across channels.
+- **[Person](people.md#person)** — a channel is where a message arrives. The person is who sent it, resolved across channels.
 - **[Hook](apps.md#hooks)** — the `channel-message` hook is how an inbound message enters app code. The channel is the integration that produced it.
 
 ## Policies
@@ -20,9 +20,9 @@ Channels are messaging platform integrations — external platforms like Telegra
 The policy engine decides how to handle each incoming message based on who sent it and where.
 
 Evaluation order (first match wins):
-1. **Sender-specific** — exact [person](identity.md#persons) match
+1. **Sender-specific** — exact [person](people.md#person) match
 2. **Thread-specific** — thread name + type match
-3. **Sender tier** — [bond level](identity.md#bond-levels) match
+3. **Sender tier** — [bond level](people.md#bond-levels) match
 4. **Channel-specific** — [channel](#channels) match
 5. **Global** — catch-all
 
@@ -38,14 +38,14 @@ Policy actions:
 
 **Not to be confused with:**
 
-- **[Bond level](identity.md#bond-levels)** — a bond level is an attribute of a person. A policy is a routing rule that may key on it.
+- **[Bond level](people.md#bond-levels)** — a bond level is an attribute of a person. A policy is a routing rule that may key on it.
 - **[Approvals](#approvals)** — a policy routes inbound messages. An approval gates a sensitive action before it executes.
 
 ## Sentinel
 
 The sentinel is a lightweight [agent](agents.md) that triages messages from untrusted senders. When the [policy engine](#policies) routes a message to sentinel review, the sentinel decides:
 
-- **Reply** — respond directly (logged for [guardian](identity.md#guardian) review)
+- **Reply** — respond directly (logged for [guardian](people.md#guardian) review)
 - **Escalate** — forward to the [main agent](agents.md#agent-hierarchy)
 - **Ignore** — drop the message (logged)
 
@@ -61,7 +61,7 @@ The sentinel is a lightweight [agent](agents.md) that triages messages from untr
 
 ## Approvals
 
-The approval system gates sensitive [actions](actions.md) behind [guardian](identity.md#guardian) sign-off. When a gated action is triggered, execution pauses and Rome records an approval. The guardian approves or rejects it from the web dashboard.
+The approval system gates sensitive [actions](actions.md) behind [guardian](people.md#guardian) sign-off. When a gated action is triggered, execution pauses and Rome records an approval. The guardian approves or rejects it from the web dashboard.
 
 **Contracts:**
 

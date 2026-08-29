@@ -607,7 +607,7 @@ describe("People API", () => {
     ]);
   });
 
-  it("names an account as its platform does, over every addressing of it", async () => {
+  it("names an account as its platform does, over every address of it", async () => {
     const nadia = await fetchPerson(nadiaId);
     // One account, two mappings: a client addresses the link it stored, and
     // both carry the mirror's name for the account rather than the raw jid.
@@ -681,7 +681,7 @@ describe("People API", () => {
   it("counts one account's history once, whatever it is addressed by", async () => {
     const nadia = await fetchPerson(nadiaId);
     // Two mappings onto one mirrored account, and one conversation on it: the
-    // reaction and the group message are not entries, and the two addressings
+    // reaction and the group message are not entries, and the two addresses
     // are not two histories.
     expect(nadia.messageCount).toBe(2);
     expect(nadia.latest).toEqual({

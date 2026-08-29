@@ -14,7 +14,7 @@ An agent is an LLM-backed runtime entity: a named configuration that sets a mode
 
 - **[Action](actions.md)** — an action is code that runs. An agent is the LLM-backed entity that decides to run it.
 - **[Session](sessions.md)** — the session is the durable boundary around a body of agent work. The agent is the configured entity doing the work.
-- **[Guardian](identity.md#guardian)** — the agent has its own identity (name, personality), separate from the human it serves.
+- **[Guardian](people.md#guardian)** — the agent has its own identity (name, personality), separate from the human it serves.
 
 ## Agent hierarchy
 

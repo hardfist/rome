@@ -1,6 +1,6 @@
 # Access Control
 
-How a Rome instance decides who is on the other end of a request and what that request may reach. The surface has four components: the edge proxy, the verify probe behind it, the policies the probe reads, and the app-API dispatch. The identities themselves are concepts vocabulary — the [guardian](../concepts/identity.md#guardian) and the [visitor](../concepts/identity.md#visitor) — and the [single HTTP listener](api.md#http-surface) behind the edge is owned by `api.md`.
+How a Rome instance decides who is on the other end of a request and what that request may reach. The surface has four components: the edge proxy, the verify probe behind it, the policies the probe reads, and the app-API dispatch. The callers themselves are concepts vocabulary — the [guardian](../concepts/people.md#guardian) and the [visitor](../concepts/people.md#visitor) — and the [single HTTP listener](api.md#http-surface) behind the edge is owned by `api.md`.
 
 ## Policies
 
@@ -25,7 +25,7 @@ browser ──every request──► edge proxy ──consults──► verify p
                        backend route ──app-API dispatch──► app handler (caller re-derived)
 ```
 
-The edge consults the probe on every proxied request and forwards or rejects on its answer. For a gated path, the probe passes a guardian session or an allow-listed [visitor](../concepts/identity.md#visitor) and rejects everything else.
+The edge consults the probe on every proxied request and forwards or rejects on its answer. For a gated path, the probe passes a guardian session or an allow-listed [visitor](../concepts/people.md#visitor) and rejects everything else.
 
 ### Invariants
 

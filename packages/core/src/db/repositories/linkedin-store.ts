@@ -118,7 +118,7 @@ function chunked<T>(items: T[], size: number): T[][] {
 /**
  * Durable store for the LinkedIn inbox mirror (threads + recent message
  * history). Writes are fed by the inbox poller as a {@link LinkedInSyncSink};
- * reads serve the poller's watermarks, the account plane's fold over mirrored
+ * reads serve the poller's watermarks, the address book's fold over mirrored
  * identities, and the history talk feature.
  *
  * Nothing here hands a thread or its messages to a reader as a thread. The

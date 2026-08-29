@@ -22,8 +22,8 @@ describe("guardian channel mapping", () => {
     testDb.close();
   });
 
-  /** The guardian's identities on `channel`, sorted so the assertion is order-free. */
-  async function identities(channel: string): Promise<string[]> {
+  /** The guardian's accounts on `channel`, sorted so the assertion is order-free. */
+  async function accounts(channel: string): Promise<string[]> {
     const guardian = await repo.findById("guardian");
     return guardian!.channelMappings
       .filter((m) => m.channel === channel)
@@ -31,27 +31,27 @@ describe("guardian channel mapping", () => {
       .sort();
   }
 
-  it("re-canonicalizes the guardian's only identity on the channel", async () => {
+  it("re-canonicalizes the guardian's only account on the channel", async () => {
     await repo.addChannelMapping("guardian", "whatsapp", "15551234567:8@s.whatsapp.net");
 
     expect(await mapGuardianToChannel(repo, "whatsapp", "15551234567@s.whatsapp.net")).toBe(true);
-    expect(await identities("whatsapp")).toEqual(["15551234567@s.whatsapp.net"]);
+    expect(await accounts("whatsapp")).toEqual(["15551234567@s.whatsapp.net"]);
   });
 
-  it("leaves an identity on another channel alone when it re-canonicalizes", async () => {
+  it("leaves an account on another channel alone when it re-canonicalizes", async () => {
     await repo.addChannelMapping("guardian", "whatsapp", "15551234567:8@s.whatsapp.net");
     await repo.addChannelMapping("guardian", "telegram", "tg-guardian");
 
     await mapGuardianToChannel(repo, "whatsapp", "15551234567@s.whatsapp.net");
-    expect(await identities("telegram")).toEqual(["tg-guardian"]);
+    expect(await accounts("telegram")).toEqual(["tg-guardian"]);
   });
 
-  it("adds a further identity when the guardian already holds several on the channel", async () => {
+  it("adds a further account when the guardian already holds several on the channel", async () => {
     await repo.addChannelMapping("guardian", "telegram", "tg-work");
     await repo.addChannelMapping("guardian", "telegram", "tg-personal");
 
     expect(await mapGuardianToChannel(repo, "telegram", "tg-third")).toBe(true);
-    expect(await identities("telegram")).toEqual(["tg-personal", "tg-third", "tg-work"]);
+    expect(await accounts("telegram")).toEqual(["tg-personal", "tg-third", "tg-work"]);
   });
 
   it("plans an add when the guardian already holds several on the channel", async () => {
@@ -64,16 +64,16 @@ describe("guardian channel mapping", () => {
     testDb.db.transaction((tx) => {
       applyGuardianMappingWithinTx(tx, repo, "telegram", "tg-third", plan);
     });
-    expect(await identities("telegram")).toEqual(["tg-personal", "tg-third", "tg-work"]);
+    expect(await accounts("telegram")).toEqual(["tg-personal", "tg-third", "tg-work"]);
   });
 
-  it("applies a planned re-point to the planned identity only", async () => {
+  it("applies a planned re-point to the planned account only", async () => {
     await repo.addChannelMapping("guardian", "telegram", "tg-work");
 
     const plan = await planGuardianMapping(repo, "telegram", "tg-work-canonical");
     expect(plan).toEqual({ op: "update", guardianId: "guardian", from: "tg-work" });
 
-    // A second identity lands between the plan and its application: the grant
+    // A second account lands between the plan and its application: the grant
     // section the conferral holds keeps competing conferrals out, not
     // a link write.
     await repo.addChannelMapping("guardian", "telegram", "tg-personal");
@@ -81,21 +81,21 @@ describe("guardian channel mapping", () => {
     testDb.db.transaction((tx) => {
       applyGuardianMappingWithinTx(tx, repo, "telegram", "tg-work-canonical", plan);
     });
-    expect(await identities("telegram")).toEqual(["tg-personal", "tg-work-canonical"]);
+    expect(await accounts("telegram")).toEqual(["tg-personal", "tg-work-canonical"]);
   });
 
-  it("maps the incoming identity when the one it would re-canonicalize is gone", async () => {
-    // The guardian read reports an identity the database no longer holds — the
+  it("maps the incoming account when the one it would re-canonicalize is gone", async () => {
+    // The guardian read reports an account the database no longer holds — the
     // window between that read and the write, where a link write runs.
     vi.spyOn(repo, "findByBondLevel").mockResolvedValue([
       { id: "guardian", channelMappings: [{ channel: "telegram", channelUserId: "tg-gone" }] },
     ] as unknown as Awaited<ReturnType<PersonMappingRepository["findByBondLevel"]>>);
 
     expect(await mapGuardianToChannel(repo, "telegram", "tg-new")).toBe(true);
-    expect(await identities("telegram")).toEqual(["tg-new"]);
+    expect(await accounts("telegram")).toEqual(["tg-new"]);
   });
 
-  it("writes nothing when the planned identity is gone by the time it applies", async () => {
+  it("writes nothing when the planned account is gone by the time it applies", async () => {
     await repo.addChannelMapping("guardian", "telegram", "tg-work");
 
     const plan = await planGuardianMapping(repo, "telegram", "tg-work-canonical");
@@ -104,10 +104,10 @@ describe("guardian channel mapping", () => {
     testDb.db.transaction((tx) => {
       applyGuardianMappingWithinTx(tx, repo, "telegram", "tg-work-canonical", plan);
     });
-    expect(await identities("telegram")).toEqual([]);
+    expect(await accounts("telegram")).toEqual([]);
   });
 
-  it("re-points an identity another writer claimed between the plan and the apply", async () => {
+  it("re-points an account another writer claimed between the plan and the apply", async () => {
     const alice = await repo.create({ displayName: "Alice", bondLevel: "acquaintance" });
 
     const plan = await planGuardianMapping(repo, "telegram", "tg-guardian");
@@ -122,11 +122,11 @@ describe("guardian channel mapping", () => {
       applyGuardianMappingWithinTx(tx, repo, "telegram", "tg-guardian", plan);
     });
 
-    expect(await identities("telegram")).toEqual(["tg-guardian"]);
+    expect(await accounts("telegram")).toEqual(["tg-guardian"]);
     expect((await repo.findByChannelUser("telegram", "tg-guardian"))!.id).toBe("guardian");
   });
 
-  it("commits a planned re-point onto an identity another writer claimed", async () => {
+  it("commits a planned re-point onto an account another writer claimed", async () => {
     await repo.addChannelMapping("guardian", "whatsapp", "15551234567:8@s.whatsapp.net");
     const alice = await repo.create({ displayName: "Alice", bondLevel: "acquaintance" });
 
@@ -137,7 +137,7 @@ describe("guardian channel mapping", () => {
       from: "15551234567:8@s.whatsapp.net",
     });
 
-    // The canonical identity is claimed in the window the plan cannot hold. The
+    // The canonical account is claimed in the window the plan cannot hold. The
     // conferral must not abort over it — the credential rides the same
     // transaction.
     await repo.addChannelMapping(alice, "whatsapp", "15551234567@s.whatsapp.net");
@@ -146,7 +146,7 @@ describe("guardian channel mapping", () => {
       applyGuardianMappingWithinTx(tx, repo, "whatsapp", "15551234567@s.whatsapp.net", plan);
     });
 
-    expect(await identities("whatsapp")).toEqual(["15551234567@s.whatsapp.net"]);
+    expect(await accounts("whatsapp")).toEqual(["15551234567@s.whatsapp.net"]);
     expect((await repo.findById(alice))!.channelMappings).toEqual([]);
   });
 
@@ -156,6 +156,6 @@ describe("guardian channel mapping", () => {
 
     expect(await mapGuardianToChannel(repo, "telegram", "tg-alice")).toBe(false);
     expect(await planGuardianMapping(repo, "telegram", "tg-alice")).toEqual({ op: "noop" });
-    expect(await identities("telegram")).toEqual([]);
+    expect(await accounts("telegram")).toEqual([]);
   });
 });

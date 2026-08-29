@@ -15,7 +15,7 @@ import { agentMessages } from "./messages-agent.js";
 // channel sessions the account itself addresses.
 
 const CHANNEL = "telegram";
-/** The two addressings of the one account the fixtures speak to. */
+/** The two addresses of the one account the fixtures speak to. */
 const DIRECT = "tg-777";
 const DIRECT_ALT = "tg-777-alt";
 const GROUP = "tg-group-1";
@@ -80,7 +80,7 @@ async function seed(db: DrizzleDb) {
   // A message that did not wake the agent is still something the person said.
   await message(db, "m-note", { sessionId: "s-direct", role: "notification", at: 200 });
   await message(db, "m-later", { sessionId: "s-direct", role: "user", at: 300 });
-  // The account's other addressing: one history, not two halves of one.
+  // The account's other address: one history, not two halves of one.
   await message(db, "m-alt", { sessionId: "s-direct-alt", role: "user", at: 250 });
 
   // Out of scope, each for its own reason.

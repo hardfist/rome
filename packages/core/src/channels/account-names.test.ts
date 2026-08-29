@@ -77,7 +77,7 @@ describe("AccountNames", () => {
     expect(await names.displayName("telegram", "5512345")).toBe("Alan T");
   });
 
-  it("answers the same name to every addressing the channel folds together", async () => {
+  it("answers the same name to every address the channel folds together", async () => {
     expect(await names.displayName("whatsapp", LID)).toBe("Ada Lovelace");
   });
 
@@ -113,7 +113,7 @@ describe("AccountNames", () => {
     ).toEqual(["Alan T", "Ada Lovelace", NAMELESS]);
   });
 
-  it("takes a new provider as one account plane, with no change to the call", async () => {
+  it("takes a new provider as one address book, with no change to the call", async () => {
     const matrix = {
       resolve: async (identifier: string) =>
         identifier === "@ada:matrix.org"

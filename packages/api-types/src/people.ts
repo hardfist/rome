@@ -18,19 +18,17 @@
 //   POST   /api/accounts/:channel/:channelUserId/dismiss  -> DirectoryAccount
 //   POST   /api/accounts/:channel/:channelUserId/restore  -> DirectoryAccount
 //
-// The vocabulary is docs/concepts/identity.md's. Rome never mints an account:
-// an account is platform-owned, named by the pair (channel, channelUserId),
-// and the only identity fact Rome contributes is which person it belongs to.
-// So the writes here move a link between people; none of them creates or
-// destroys the account under it.
+// The vocabulary is docs/concepts/people.md's. Rome never mints an account:
+// an account is platform-owned, named by the pair (channel, channelUserId) —
+// its channel and its own address — and the only fact about who is who that
+// Rome contributes is which person it belongs to. So the writes here move a
+// link between people; none of them creates or destroys the account under it.
 //
 // The bond ladder, the merged timeline and the activity order both the person
-// listing and the account stream run on live here too. They outlived the
-// identity union that first defined them — the flattened row shape this
-// two-noun contract replaced — and they are the pieces both nouns still share:
-// a row's `latest` is the head of the timeline the same row opens, and a
-// cursor written against one activity listing has to name a position in the
-// other. A second definition of any of them is a page boundary the two ends
+// listing and the account stream run on live here too. They are the pieces both
+// nouns share: a row's `latest` is the head of the timeline the same row opens,
+// and a cursor written against one activity listing has to name a position in
+// the other. A second definition of any of them is a page boundary the two ends
 // disagree about, so they are stated once, here.
 //
 // The account read is two reads, because two surfaces ask two questions. The
@@ -402,8 +400,9 @@ export function accountPresentation(
  * One account in the directory: one person on one channel, however many
  * addresses that channel reaches them at.
  *
- * `channel` and `channelUserId` are its identity — the pair a link, a dismissal
- * or a timeline read names. {@link accountRef} renders the pair as the single
+ * `channel` and `channelUserId` name it — the pair a link, a dismissal or a
+ * timeline read carries. `channelUserId` is the account's own address, kept
+ * under its wire name here. {@link accountRef} renders the pair as the single
  * token a key or a path segment needs.
  *
  * A contacts list's row, so it carries who the account is and nothing about
@@ -413,8 +412,8 @@ export function accountPresentation(
  */
 export interface DirectoryAccount {
   channel: string;
-  /** The address the channel folds its other addressings of this account onto.
-   *  Stable across a re-sync and across which addressing a message arrives on. */
+  /** The address the channel folds its other addresses of this account onto.
+   *  Stable across a re-sync and across which address a message arrives on. */
   channelUserId: string;
   /**
    * Every address the channel can reach the account at, `channelUserId`
@@ -501,8 +500,8 @@ export interface AccountStream {
 }
 
 /**
- * Render an account's identity as one token, for a client's row key and for the
- * position a cursor names.
+ * Render the pair naming an account as one token, for a client's row key and
+ * for the position a cursor names.
  *
  * Only the first colon is structural, so a channel carrying one would make the
  * token ambiguous. Channel names are short slugs, so refusing the separator
@@ -810,11 +809,12 @@ export function sliceAccountStream(
 /**
  * One account as it appears under the person linked to it.
  *
- * `(channel, channelUserId)` is the account's identity — Rome never mints one,
- * every pair here is observed from a message or an address-book mirror — and
- * `displayName` is what the platform calls it, the raw identifier being only
- * the last resort. The directory's {@link DirectoryAccount} is the same
- * account seen from the other side, with what Rome decided about it.
+ * `(channel, channelUserId)` names the account — its channel and its own
+ * address. Rome never mints one: every pair here is observed from a message or
+ * from a channel's address book. `displayName` is what the platform calls it,
+ * the raw identifier being only the last resort. The directory's
+ * {@link DirectoryAccount} is the same account seen from the other side, with
+ * what Rome decided about it.
  */
 export interface LinkedAccount {
   channel: string;

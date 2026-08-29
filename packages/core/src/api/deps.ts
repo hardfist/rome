@@ -75,10 +75,10 @@ export interface ApiDeps {
   personMappingRepo: PersonMappingRepository;
   /** Durable mirror of the WhatsApp address book + message history (People tab). */
   whatsAppStoreRepo: WhatsAppStoreRepository;
-  /** WhatsApp's account plane over that mirror — who it can reach, folded onto
+  /** WhatsApp's address book over that mirror — who it can reach, folded onto
    *  one account per person, and what was last said to each. */
   whatsAppAccounts: WhatsAppAccounts;
-  /** LinkedIn's account plane over its own inbox mirror — the same shape
+  /** LinkedIn's address book over its own inbox mirror — the same shape
    *  WhatsApp's is, and all the API needs of LinkedIn. The mirror behind it is
    *  the poller's and the timeline's; no route reads it directly. */
   linkedInAccounts: LinkedInAccounts;

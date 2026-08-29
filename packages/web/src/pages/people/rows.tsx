@@ -121,7 +121,7 @@ export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.R
 }
 
 /**
- * A directory row is identity only: avatar, name, and the identifier the person
+ * A directory row says who only: avatar, name, and the identifier the person
  * is recognized by. Nothing about what anyone said — the directory read carries
  * none of it, which is what makes this a contacts list rather than a second
  * stream. Clicking a person opens their dossier; an account has none to open
@@ -152,7 +152,7 @@ export function DirectoryRow({
   const fixed = isRowFixed(row);
   const handle = rowHandle(row);
 
-  const identity = (
+  const who = (
     <>
       <span className="block truncate text-ui text-foreground">{row.displayName}</span>
       <span className="block truncate text-aux text-muted-foreground">
@@ -192,10 +192,10 @@ export function DirectoryRow({
       )}
       {onOpen && !fixed ? (
         <button type="button" onClick={onOpen} className="min-w-0 text-left">
-          {identity}
+          {who}
         </button>
       ) : (
-        <span className="min-w-0">{identity}</span>
+        <span className="min-w-0">{who}</span>
       )}
       <span className="flex items-center justify-end gap-2">{actions}</span>
     </div>

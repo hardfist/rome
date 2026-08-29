@@ -788,7 +788,7 @@ describe("WhatsAppAdapter", () => {
   });
 
   describe("JID canonicalization", () => {
-    // Self has a device-suffixed phone id and a separate LID identity — the two
+    // Self has a device-suffixed phone id and a separate LID address — the two
     // unrelated user numbers WhatsApp uses for "me".
     const SELF_PHONE = "15550101000";
     const SELF_PN = `${SELF_PHONE}@s.whatsapp.net`;

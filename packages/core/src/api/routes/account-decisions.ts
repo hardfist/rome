@@ -14,10 +14,10 @@ import type { ApiDeps } from "../deps.js";
 // (@rome/api-types/people). This route is the join between a path and those,
 // and holds no rule of its own beyond which status each outcome is.
 //
-// The account is named by a pair in the path, not by a body: it is the
-// account's identity rather than an argument of the write, so the same account
-// is addressed the same way by every verb, and a retry of a POST is a retry of
-// the same decision.
+// The account is named by a pair in the path, not by a body: the pair names the
+// account rather than arguing the write, so the same account is addressed the
+// same way by every verb, and a retry of a POST is a retry of the same
+// decision.
 //
 // The identifier takes the rest of the path before the verb, separators
 // included, the way the unlink route takes the rest of its own. A channel mints

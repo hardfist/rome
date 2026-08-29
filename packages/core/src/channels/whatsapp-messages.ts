@@ -21,7 +21,7 @@ import { addressesIn, inList, sqlMessages } from "./messages-sql.js";
  *   anyone on it, so no address of an account names one — the `NOT LIKE` is
  *   belt and braces against a group JID arriving as an address.
  * - Reactions. A reaction answers a line rather than being one, and the
- *   account plane's own activity already leaves it out of what an account last
+ *   address book's own activity already leaves it out of what an account last
  *   did. Carrying it here would let a directory row preview a thumbs-up and
  *   open on the message it was aimed at.
  */

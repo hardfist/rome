@@ -14,7 +14,7 @@ import type {
 // only names the route and reduces the answer to something a click handler can
 // render.
 //
-// An account is named by the pair the contract says is its identity, never by
+// An account is named by the pair the contract names it with, never by
 // one of the addresses it answers to. The server folds a WhatsApp contact's
 // phone jid and `@lid` jid into one account and reports both in `addresses`, so
 // a gesture on a row already covers every address it stands for — the reason

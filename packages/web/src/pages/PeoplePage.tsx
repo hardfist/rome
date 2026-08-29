@@ -26,7 +26,7 @@ import { usePeopleRoster } from "./people/use-roster";
 /**
  * The People page: an activity stream and a roster, over two reads.
  *
- * Latest answers "who has something new" — one row per identity with a
+ * Latest answers "who has something new" — one row per account with a
  * dynamic, newest first, carrying only what routing needs. Directory answers
  * "who does Rome know" — a contacts list, everyone Rome holds, by name, with no
  * preview and no count anywhere in it. Unknown and Stranger are positions on

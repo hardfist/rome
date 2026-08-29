@@ -52,7 +52,7 @@ export function linkedInMemberIdFromProfileUrl(url: string | null | undefined): 
   return MEMBER_ID_IN_PROFILE_URL.exec(url)?.[1] ?? null;
 }
 
-/** One identity in a thread's participant list, per the thread snapshot. */
+/** One account in a thread's participant list, per the thread snapshot. */
 export interface LinkedInParticipantInput {
   /**
    * LinkedIn member id, bare (`ACoAA…`) — not a urn or a profile URL — so it

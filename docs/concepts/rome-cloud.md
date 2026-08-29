@@ -1,6 +1,6 @@
 # Rome Cloud
 
-Rome Cloud is the operator-run service that complements Rome instances. Where each Rome instance serves a single [guardian](identity.md#guardian), Rome Cloud is the shared piece of infrastructure that sits in front of all of them.
+Rome Cloud is the operator-run service that complements Rome instances. Where each Rome instance serves a single [guardian](people.md#guardian), Rome Cloud is the shared piece of infrastructure that sits in front of all of them.
 
 It plays four roles:
 

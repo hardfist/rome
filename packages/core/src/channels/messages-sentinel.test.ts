@@ -66,7 +66,7 @@ async function seed(db: DrizzleDb) {
   await groupSession(db, "s-group-elsewhere", { channel: "discord", threadId: "tg-quiet-thread" });
 
   await row(db, "answered", { at: 1000, text: "ping", response: "pong", threadId: DIRECT });
-  // The account's other addressing: one history, not two halves of one.
+  // The account's other address: one history, not two halves of one.
   await row(db, "alt", { at: 1050, text: "over here", channelUserId: DIRECT_ALT });
   // A thread no session covers is a direct exchange until something says so.
   await row(db, "unheard", { at: 1100, text: "solo", threadId: "tg-unknown-thread" });
@@ -124,7 +124,7 @@ describe("sentinelLogMessages", () => {
     expect(await refs()).toContain("sentinel:quiet");
   });
 
-  it("merges every addressing of the account into one newest-first history", async () => {
+  it("merges every address of the account into one newest-first history", async () => {
     expect(await refs()).toEqual([
       "sentinel:quiet",
       "sentinel:unheard",

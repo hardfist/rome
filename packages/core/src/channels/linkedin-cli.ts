@@ -158,7 +158,7 @@ const whoamiSchema = z.object({
   name: z.string().optional(),
 });
 
-export interface LinkedInIdentity {
+export interface LinkedInWhoami {
   publicId?: string;
   plainId?: string;
   name?: string;
@@ -166,7 +166,7 @@ export interface LinkedInIdentity {
 
 /** Parse `linkedin whoami`. A clean `logged_in: false` is an auth error — the
  *  command ran fine, the session is simply signed out. */
-export function parseWhoami(result: OpencliResult): LinkedInIdentity {
+export function parseWhoami(result: OpencliResult): LinkedInWhoami {
   const parsed = whoamiSchema.safeParse(parseJsonOutput("linkedin whoami", result));
   if (!parsed.success) {
     throw new OpencliCommandError("linkedin whoami", "unexpected output shape");
@@ -343,7 +343,7 @@ function emptyToNull(value: string | null | undefined): string | null {
 
 /**
  * Parse `linkedin thread-participants`. Rows without a member id are dropped
- * rather than stored as a blank identity — `participant_id` is the primary key
+ * rather than stored as a blank account — `participant_id` is the primary key
  * of `linkedin_participants` and has to match `channel_mappings.channel_user_id`.
  *
  * An empty result is a failure, not an empty thread: the store reads an empty

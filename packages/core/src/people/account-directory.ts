@@ -3,14 +3,14 @@
 // links the guardian has made, the sentinel log's senders, and the address
 // books Rome mirrors.
 //
-// An account is one person on one channel, whatever addressings that channel
+// An account is one person on one channel, whatever addresses that channel
 // reaches them at. Which of them fold together is the channel's own answer,
 // read once through `AccountFold` (../channels/account-fold.ts), so nothing
 // here is channel-specific and adding a mirror changes nothing in this file.
 //
 // Two reads, because the two surfaces ask two questions — "who does Rome know"
 // and "who has something new". They fold the same address books to decide which
-// addressings are one account, and only the stream goes on to read a history.
+// addresses are one account, and only the stream goes on to read a history.
 
 import {
   accountPresentation,
@@ -22,7 +22,7 @@ import {
 } from "@rome/api-types/people";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import type { AccountNames } from "../channels/account-names.js";
-import { foldAccounts, mirrorRegistry } from "../channels/account-fold.js";
+import { foldAccounts, addressBookRegistry } from "../channels/account-fold.js";
 import type { Accounts } from "../channels/accounts.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -52,7 +52,7 @@ interface AccountLink {
  * Every account there is, unordered and unfiltered — the whole directory a page
  * is cut out of (`sliceAccountDirectory`).
  *
- * Whole rather than paged: the fold that decides which addressings are one
+ * Whole rather than paged: the fold that decides which addresses are one
  * account needs every address book entire, and an account past a channel's own
  * cutoff is one the guardian cannot find and no count includes. The cost is one
  * read of each address book for the fold and one more to name what it found.
@@ -173,7 +173,7 @@ async function observeAccounts(deps: AccountDirectoryDeps): Promise<DirectoryAcc
   const mappings = persons.flatMap((person) =>
     person.channelMappings.map((mapping) => ({ ...mapping, person })),
   );
-  const fold = await foldAccounts(mirrorRegistry(deps), { stored: [...senders, ...mappings] });
+  const fold = await foldAccounts(addressBookRegistry(deps), { stored: [...senders, ...mappings] });
 
   /** Who holds each account, decided once before any row is built. */
   const linkOf = new Map<string, AccountLink>();
@@ -191,7 +191,7 @@ async function observeAccounts(deps: AccountDirectoryDeps): Promise<DirectoryAcc
         channel,
         channelUserId: own,
         // A channel with no address book can say nothing about which
-        // addressings are the same account, so an address it named is an
+        // addresses are the same account, so an address it named is an
         // account of its own.
         addresses: [...(addresses ?? [own])].sort(compareCodePoints),
       });
@@ -227,9 +227,9 @@ async function observeAccounts(deps: AccountDirectoryDeps): Promise<DirectoryAcc
  * Whether a claim on an account beats the one already held.
  *
  * A real person outranks the stranger sentinel. The unique index already holds
- * one mapping per identifier, but two mappings can name two addressings of one
+ * one mapping per identifier, but two mappings can name two addresses of one
  * account, and that account is one row: a placement the guardian made is what
- * it should say, and reading the dismissal of a second addressing instead would
+ * it should say, and reading the dismissal of a second address instead would
  * hide someone they already placed. Among real people the lowest id wins, so
  * the answer does not depend on read order.
  */

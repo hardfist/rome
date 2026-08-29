@@ -11,7 +11,7 @@ const account = (id: string, addresses: string[] = [id], name: string | null = n
 
 /**
  * A channel answering the whole of what a fold may ask it: a listing whose
- * accounts carry their own addressing sets, and `resolve` for an address the
+ * accounts carry their own address sets, and `resolve` for an address the
  * listing does not carry.
  *
  * It is an `Accounts` and nothing more — no address map and no history — so a
@@ -50,7 +50,7 @@ const adaLid = "77770001@lid";
 const grace = "12025550111@s.whatsapp.net";
 
 describe("foldAccounts", () => {
-  it("takes an account's addressing set from the account itself", async () => {
+  it("takes an account's address set from the account itself", async () => {
     const whatsapp = new FakePlane([account(ada, [ada, adaLid], "Ada")]);
 
     const fold = await foldAccounts({ whatsapp }, { stored: [] });
@@ -63,10 +63,10 @@ describe("foldAccounts", () => {
         name: "Ada",
       },
     ]);
-    // Both addressings name the one account, whichever one a caller holds.
+    // Both addresses name the one account, whichever one a caller holds.
     expect(fold.canonical("whatsapp", adaLid)).toBe(ada);
     expect(fold.canonical("whatsapp", ada)).toBe(ada);
-    expect(fold.mirrorFor("whatsapp", adaLid)?.name).toBe("Ada");
+    expect(fold.accountFor("whatsapp", adaLid)?.name).toBe("Ada");
     expect(whatsapp.listings).toBe(1);
   });
 
@@ -91,7 +91,7 @@ describe("foldAccounts", () => {
 
     expect(linkedin.resolved).toEqual([profileUrl]);
     expect(fold.canonical("linkedin", profileUrl)).toBe("ACoAAAda0001");
-    expect(fold.mirrorFor("linkedin", profileUrl)?.channelUserId).toBe("ACoAAAda0001");
+    expect(fold.accountFor("linkedin", profileUrl)?.channelUserId).toBe("ACoAAAda0001");
     // The stored form stays the caller's: the fold reads it, it does not
     // publish it as an address of the account.
     expect(fold.accounts[0]?.aliases).toEqual(["ACoAAAda0001"]);
