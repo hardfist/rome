@@ -259,6 +259,54 @@ describe("PersonDetailPage", () => {
     expect(screen.getByText("You:")).toBeTruthy();
   });
 
+  it("reads a LinkedIn conversation here, the way it reads a WhatsApp one", async () => {
+    // The People page carried LinkedIn in a section of its own for as long as
+    // its threads resolved to no person. They resolve now, so a LinkedIn
+    // conversation is read where every other channel's is: on the person,
+    // merged into one history, with no thread dialog and no composer.
+    const person: PersonResource = {
+      id: "priya-nair",
+      displayName: "Priya Nair",
+      bondLevel: "acquaintance",
+      accounts: [
+        { channel: "linkedin", channelUserId: "ACoAAPriya01", displayName: "Priya Nair" },
+      ],
+      messageCount: 2,
+      latest: {
+        source: "linkedin",
+        timestamp: NOW - 300,
+        preview: "sent you a note about the role",
+      },
+    };
+    mockApi({
+      person,
+      entries: [
+        {
+          source: "linkedin",
+          timestamp: NOW - 300,
+          body: "thanks — reading it now",
+          direction: "outbound",
+          ref: "li-2",
+        },
+        {
+          source: "linkedin",
+          timestamp: NOW - 600,
+          body: "sent you a note about the role",
+          direction: "inbound",
+          ref: "li-1",
+        },
+      ],
+    });
+    renderPage("priya-nair");
+
+    expect(await screen.findByText("sent you a note about the role")).toBeTruthy();
+    expect(screen.getByText("thanks — reading it now")).toBeTruthy();
+    expect(screen.getByText("You:")).toBeTruthy();
+    expect(screen.getByText("ACoAAPriya01")).toBeTruthy();
+    // Read, not write: no channel offers dashboard send from this page.
+    expect(screen.queryByPlaceholderText("Reply on LinkedIn")).toBeNull();
+  });
+
   it("pages older entries by the cursor the page it holds ended on", async () => {
     const user = userEvent.setup();
     const calls = mockApi({

@@ -162,6 +162,35 @@ const LINKED_ACCOUNT: WorldAccount = {
   messageCount: 30,
 };
 
+/** A LinkedIn sender nobody has placed. LinkedIn had a section of its own on
+ *  this page while its threads reached no account read; it has an accounts
+ *  plane now, so it arrives here as a sender like any other and is placed by
+ *  the same gesture. */
+const LINKEDIN_SENDER: WorldAccount = {
+  channel: "linkedin",
+  channelUserId: "ACoAAArvind01",
+  addresses: ["ACoAAArvind01"],
+  displayName: "Arvind Srivastav",
+  state: "unlinked",
+  personId: null,
+  personName: null,
+  latest: {
+    source: "linkedin",
+    timestamp: NOW - 3_600,
+    preview: "Thursday works. Calendar invite sent.",
+  },
+  messageCount: 3,
+};
+
+const LINKEDIN_PERSON: PersonResource = {
+  id: "priya-nair",
+  displayName: "Priya Nair",
+  bondLevel: "acquaintance",
+  accounts: [{ channel: "linkedin", channelUserId: "ACoAAPriya01", displayName: "Priya Nair" }],
+  messageCount: 4,
+  latest: { source: "linkedin", timestamp: NOW - 900, preview: "sent you a note about the role" },
+};
+
 /** The world both reads are served from, and every write applies to. */
 interface World {
   people: PersonResource[];
@@ -851,6 +880,96 @@ describe("PeoplePage placement", () => {
 
     release();
     await waitFor(() => expect(state.accounts[0]!.personId).toBe("wei-chen"));
+  });
+});
+
+describe("PeoplePage folds LinkedIn into the general surface", () => {
+  it("renders no section of its own for LinkedIn", async () => {
+    mockApi({ people: [FRIEND], accounts: [LINKEDIN_SENDER] });
+    renderPage();
+
+    await screen.findByText("Wei Chen");
+    // The section is gone whole, heading and all — there is no channel-shaped
+    // surface below the two views any more.
+    expect(screen.queryByText("LinkedIn messages")).toBeNull();
+    expect(screen.queryByText("No LinkedIn conversations")).toBeNull();
+    // And with it the two abilities only it had: no group thread reaches this
+    // page, and nothing on it composes a reply.
+    expect(screen.queryByText("Group conversation")).toBeNull();
+    expect(screen.queryByPlaceholderText("Reply on LinkedIn")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Messages" })).toBeNull();
+  });
+
+  it("reads the two contract endpoints for LinkedIn, never a mirror of its own", async () => {
+    const { calls } = mockApi({ people: [FRIEND], accounts: [LINKEDIN_SENDER] });
+    renderPage();
+
+    await screen.findByText("Wei Chen");
+    const reads = calls.filter((call) => call.method === "GET").map((call) => call.url);
+    // The same thing already true of WhatsApp: the contract answers the roster,
+    // so no channel mirror is read to build it.
+    expect(reads.filter((url) => url.includes("/api/linkedin/"))).toEqual([]);
+    expect(reads.filter((url) => url.includes("/api/whatsapp/contacts"))).toEqual([]);
+  });
+
+  it("streams a LinkedIn sender the way it streams a WhatsApp one", async () => {
+    const user = userEvent.setup();
+    mockApi({ people: [GUARDIAN, FRIEND], accounts: [UNKNOWN_SENDER, LINKEDIN_SENDER] });
+    renderPage();
+
+    await screen.findByText("Wei Chen");
+    // Both are senders waiting on a decision, so both sit behind the same chip
+    // and are counted by it once each.
+    await user.click(chip(/^Unknown/));
+    expect(await screen.findByText("Arvind Srivastav")).toBeTruthy();
+    expect(screen.getByText("Thursday works. Calendar invite sent.")).toBeTruthy();
+    expect(screen.getByText("Rachel Lim")).toBeTruthy();
+    // Named by the same channel vocabulary every other channel is named by.
+    expect(screen.getByText("LinkedIn")).toBeTruthy();
+    await waitFor(() => expect(within(chip(/^Unknown/)).getByText("2")).toBeTruthy());
+  });
+
+  it("lists a LinkedIn contact in the directory the way it lists a WhatsApp one", async () => {
+    const user = userEvent.setup();
+    const WHATSAPP_PERSON: PersonResource = {
+      id: "nadia-cross",
+      displayName: "Nadia Cross",
+      bondLevel: "acquaintance",
+      accounts: [
+        {
+          channel: "whatsapp",
+          channelUserId: "6591881123@s.whatsapp.net",
+          displayName: "Nadia",
+        },
+      ],
+      messageCount: 8,
+      latest: null,
+    };
+    mockApi({ people: [GUARDIAN, WHATSAPP_PERSON, LINKEDIN_PERSON] });
+    renderPage();
+
+    await screen.findByText("Priya Nair");
+    await showDirectory(user);
+
+    // Same heading, same row: name over the identifier the channel recognizes
+    // them by, and one row per human either way.
+    const acquaintances = (await screen.findByRole("heading", { name: "Acquaintance" }))
+      .parentElement!.parentElement!;
+    expect(within(acquaintances).getByText("Priya Nair")).toBeTruthy();
+    expect(within(acquaintances).getByText("ACoAAPriya01")).toBeTruthy();
+    expect(within(acquaintances).getByText("Nadia Cross")).toBeTruthy();
+    expect(within(acquaintances).getAllByText("Priya Nair")).toHaveLength(1);
+  });
+
+  it("opens a LinkedIn contact's dossier from their row", async () => {
+    const user = userEvent.setup();
+    mockApi({ people: [LINKEDIN_PERSON] });
+    renderPage();
+
+    await user.click(await screen.findByText("Priya Nair"));
+    // The person page, not a thread dialog: a LinkedIn conversation is read
+    // where every other channel's is.
+    expect(await screen.findByText("person page")).toBeTruthy();
   });
 });
 
