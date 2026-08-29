@@ -61,8 +61,7 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
   // the arrow honest about which view it owes. A dossier reached by pasted link
   // has no view behind it and replaces itself with the one `/people` is.
   const origin = (location.state as { from?: string } | null)?.from;
-  const back = () =>
-    origin ? navigate(-1) : navigate(PEOPLE_VIEW_PATH.latest, { replace: true });
+  const back = () => (origin ? navigate(-1) : navigate(PEOPLE_VIEW_PATH.latest, { replace: true }));
 
   const personQuery = usePerson(personId);
   const timeline = usePersonTimeline(personId);
