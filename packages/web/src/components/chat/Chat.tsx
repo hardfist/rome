@@ -55,6 +55,8 @@ import { useFreeCells, type WidgetType } from "@/pages/free/use-free-cells";
 import type { TraceSegment, TraceSnapshot, TraceSummary } from "@rome/api-types/trace-segments";
 import { useSmoothText } from "@/hooks/use-smooth-text";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
+import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
+import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useSseEvents } from "@/hooks/use-sse-events";
 import { renderFlatBlocks, renderSingleBlock } from "@/components/chat/blocks";
@@ -80,6 +82,12 @@ import type {
   StreamBlock,
 } from "@/lib/chat-types";
 import { SCROLL_BOTTOM_THRESHOLD_PX } from "@/lib/chat-constants";
+
+// Leave a jumped-to question clear of the top edge — flush against it reads
+// as cut off.
+const TIMELINE_JUMP_OFFSET_PX = 24;
+// How long the landed-on question stays tinted.
+const TIMELINE_LANDING_MS = 900;
 import { buildOptimisticUserText } from "@/lib/chat-helpers";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import {
@@ -354,6 +362,28 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     thresholdPx: SCROLL_BOTTOM_THRESHOLD_PX,
   });
 
+  // The timeline rail measures against these two nodes, so they are held as
+  // state rather than refs: its effect has to re-run once they mount. Both
+  // callbacks forward to the stick-to-bottom hook, which owns them first. Its
+  // refs are stable (useCallback with no deps), so these are too and React
+  // never re-invokes them; the cost is one extra render on mount.
+  const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null);
+  const [contentEl, setContentEl] = useState<HTMLElement | null>(null);
+  const attachScroller = useCallback(
+    (node: HTMLDivElement | null) => {
+      setScrollerEl(node);
+      stickScrollRef(node);
+    },
+    [stickScrollRef],
+  );
+  const attachContent = useCallback(
+    (node: HTMLElement | null) => {
+      setContentEl(node);
+      stickContentRef(node);
+    },
+    [stickContentRef],
+  );
+
   useImperativeHandle(
     ref,
     () => ({
@@ -395,6 +425,53 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     }
     return ids;
   }, [displayMessages, mainSessionId]);
+
+  // The timeline rail's data source — the same main-session filter mainTurnIds
+  // uses. Memoized on displayMessages, which a streaming turn never touches, so
+  // this identity is stable across stream ticks and the rail's effect does not
+  // tear down and re-observe every frame.
+  const timelineQuestions = useMemo(
+    () => buildTimelineQuestions(displayMessages, mainSessionId),
+    [displayMessages, mainSessionId],
+  );
+
+  const landingTimerRef = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(landingTimerRef.current), []);
+
+  const jumpToQuestion = useCallback(
+    (messageId: string) => {
+      const scroller = scrollerEl;
+      if (!scroller) return;
+      const anchor = [...scroller.querySelectorAll<HTMLElement>("[data-timeline-anchor]")].find(
+        (el) => el.getAttribute("data-timeline-anchor") === messageId,
+      );
+      if (!anchor) return;
+      const top =
+        anchor.getBoundingClientRect().top -
+        scroller.getBoundingClientRect().top +
+        scroller.scrollTop;
+      // `auto`, not `smooth`, and deliberately so. use-stick-to-bottom treats a
+      // scroll outside its 300ms user-gesture window as accidental drift and
+      // snaps back to the bottom while pinned; an instant scroll emits its one
+      // event on the frame right after this click's pointerdown, safely inside
+      // that window, so the hook releases the pin for us. A smooth scroll's
+      // later frames fall outside it. Instant also reads better here: you land
+      // and start reading rather than watching half a second of blur.
+      scroller.scrollTo({ top: Math.max(top - TIMELINE_JUMP_OFFSET_PX, 0), behavior: "auto" });
+
+      // Every user bubble is the same tint, so without this you cannot tell
+      // whether the jump landed on the question you picked.
+      window.clearTimeout(landingTimerRef.current);
+      for (const el of scroller.querySelectorAll("[data-timeline-landed]")) {
+        el.removeAttribute("data-timeline-landed");
+      }
+      anchor.setAttribute("data-timeline-landed", "");
+      landingTimerRef.current = window.setTimeout(() => {
+        anchor.removeAttribute("data-timeline-landed");
+      }, TIMELINE_LANDING_MS);
+    },
+    [scrollerEl],
+  );
 
   const enterShareMode = useCallback(() => {
     setSelectedShareTurns(new Set(mainTurnIds));
@@ -1607,106 +1684,119 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               moves the sidebar/composer. `overscroll-contain` kills page-level
               rubber-banding/scroll-chaining; momentum scrolling keeps the iPad
               touch feel. */}
-          <div
-            ref={stickScrollRef}
-            className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
-          >
-            <MessageList
-              rows={rows}
-              live={{
-                isStreaming: displayedStreaming,
-                runningTurnId,
-                snapshot: currentSnapshot,
-                text: liveAssistantText,
-                blockIx: floorSessionStream?.assistantBlockIx,
-                sourceText: floorSessionStream?.assistantText,
-                identity: floorIdentity,
-              }}
-              selection={
-                shareMode
-                  ? {
-                      active: true,
-                      selectedTurns: selectedShareTurns,
-                      selectableSessionId: mainSessionId,
-                      onToggleTurn: toggleShareTurn,
-                    }
-                  : undefined
-              }
-              contentRef={stickContentRef}
-              onOpenLiveTrace={openLiveTraceDrawer}
-              onOpenStoredTrace={setTraceDrawerTarget}
-              onOpenSubagentTrace={openSubagentTraceDrawer}
-              activeTraceTarget={traceDrawerTarget}
-              subagentIconByName={subagentIconByName}
-              actions={blockActions}
-              feedback
-            />
+          {/* Positioning + measurement parent for the timeline rail. Its own
+              container name matters: `@container/chat` is declared on the outer
+              element and does NOT narrow when the trace drawer reserves its
+              480px on this column, so a gate keyed to it would show the rail at
+              widths where the transcript has no gutter left. */}
+          <div className="@container/transcript relative flex min-h-0 flex-1 flex-col">
+            <div
+              ref={attachScroller}
+              className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
+            >
+              <MessageList
+                rows={rows}
+                live={{
+                  isStreaming: displayedStreaming,
+                  runningTurnId,
+                  snapshot: currentSnapshot,
+                  text: liveAssistantText,
+                  blockIx: floorSessionStream?.assistantBlockIx,
+                  sourceText: floorSessionStream?.assistantText,
+                  identity: floorIdentity,
+                }}
+                selection={
+                  shareMode
+                    ? {
+                        active: true,
+                        selectedTurns: selectedShareTurns,
+                        selectableSessionId: mainSessionId,
+                        onToggleTurn: toggleShareTurn,
+                      }
+                    : undefined
+                }
+                contentRef={attachContent}
+                onOpenLiveTrace={openLiveTraceDrawer}
+                onOpenStoredTrace={setTraceDrawerTarget}
+                onOpenSubagentTrace={openSubagentTraceDrawer}
+                activeTraceTarget={traceDrawerTarget}
+                subagentIconByName={subagentIconByName}
+                actions={blockActions}
+                feedback
+              />
 
-            {/* The single floating composer — a `sticky bottom-0` floor inside the
+              {/* The single floating composer — a `sticky bottom-0` floor inside the
                 message scroller, so messages scroll behind its translucent blur
                 ("scroll under the composer") instead of stopping at a solid dock.
                 It talks to whoever holds the floor (the open handoff's specialist,
                 or the main agent). In share mode it's swapped for the ShareBar,
                 which configures + mints the link for the turns selected above. */}
-            <div className="pointer-events-none sticky bottom-0 z-10 px-3 pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:px-6 md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]">
-              <div className="pointer-events-auto mx-auto max-w-5xl">
-                {shareMode ? (
-                  <ShareBar
-                    sessionId={mainSessionId}
-                    selectedTurnIds={[...selectedShareTurns]}
-                    onExit={exitShareMode}
-                  />
-                ) : isArchived ? (
-                  <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
-                    <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void handleUnarchive()}
-                    >
-                      <ArchiveRestore data-icon="inline-start" className="size-3.5" />
-                      {t("archived.unarchive")}
-                    </Button>
-                  </div>
-                ) : (
-                  <ChatComposer
-                    ref={composerRef}
-                    // The box look lives on the composer now so the chip row can sit
-                    // outside it; this mount adds the floating blur/translucency.
-                    boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
-                    onSend={handleComposerSend}
-                    isStreaming={displayedStreaming}
-                    onStop={() => void stopMessage()}
-                    streamError={streamError}
-                    // The chip names the floor agent — the specialist during a
-                    // handoff, the main agent otherwise.
-                    pinnedAgentMention={floorAgentMention}
-                    lockAgentMention
-                    designingInteraction={
-                      floorHandoff
-                        ? {
-                            agentLabel: floorHandoff.agentLabel,
-                            // A pending submission turns the banner into an Approve
-                            // that resolves the handoff with that payload.
-                            onApprove: activeSubmission
-                              ? () =>
-                                  void handleResolveHandoff(
-                                    floorHandoff,
-                                    activeSubmission.payload,
-                                    "Approved",
-                                  )
-                              : undefined,
-                            // Cancel lives here now (off the @mention seam): dismiss
-                            // the handoff and hand the floor back to the caller.
-                            onCancel: () => handleCancelHandoff(floorHandoff),
-                          }
-                        : null
-                    }
-                  />
-                )}
+              <div className="pointer-events-none sticky bottom-0 z-10 px-3 pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:px-6 md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]">
+                <div className="pointer-events-auto mx-auto max-w-5xl">
+                  {shareMode ? (
+                    <ShareBar
+                      sessionId={mainSessionId}
+                      selectedTurnIds={[...selectedShareTurns]}
+                      onExit={exitShareMode}
+                    />
+                  ) : isArchived ? (
+                    <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
+                      <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handleUnarchive()}
+                      >
+                        <ArchiveRestore data-icon="inline-start" className="size-3.5" />
+                        {t("archived.unarchive")}
+                      </Button>
+                    </div>
+                  ) : (
+                    <ChatComposer
+                      ref={composerRef}
+                      // The box look lives on the composer now so the chip row can sit
+                      // outside it; this mount adds the floating blur/translucency.
+                      boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                      onSend={handleComposerSend}
+                      isStreaming={displayedStreaming}
+                      onStop={() => void stopMessage()}
+                      streamError={streamError}
+                      // The chip names the floor agent — the specialist during a
+                      // handoff, the main agent otherwise.
+                      pinnedAgentMention={floorAgentMention}
+                      lockAgentMention
+                      designingInteraction={
+                        floorHandoff
+                          ? {
+                              agentLabel: floorHandoff.agentLabel,
+                              // A pending submission turns the banner into an Approve
+                              // that resolves the handoff with that payload.
+                              onApprove: activeSubmission
+                                ? () =>
+                                    void handleResolveHandoff(
+                                      floorHandoff,
+                                      activeSubmission.payload,
+                                      "Approved",
+                                    )
+                                : undefined,
+                              // Cancel lives here now (off the @mention seam): dismiss
+                              // the handoff and hand the floor back to the caller.
+                              onCancel: () => handleCancelHandoff(floorHandoff),
+                            }
+                          : null
+                      }
+                    />
+                  )}
+                </div>
               </div>
             </div>
+            <ChatTimelineRail
+              scroller={scrollerEl}
+              content={contentEl}
+              questions={timelineQuestions}
+              onJump={jumpToQuestion}
+            />
           </div>
         </div>
         <TraceDrawer

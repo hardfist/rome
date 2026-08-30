@@ -39,9 +39,13 @@ vi.mock("@/pages/free/use-free-cells", () => ({
 }));
 
 vi.mock("@/hooks/use-stick-to-bottom", () => ({
+  // Callback refs, matching the real hook. Chat composes these with its own
+  // refs and CALLS them, so a ref object here would throw on mount — and a
+  // vi.mock factory is not checked against the module's real shape, so nothing
+  // but a test run would catch it.
   useStickToBottom: () => ({
-    contentRef: { current: null },
-    scrollRef: { current: null },
+    contentRef: vi.fn(),
+    scrollRef: vi.fn(),
     scrollToBottom: vi.fn(),
   }),
 }));

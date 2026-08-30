@@ -594,3 +594,13 @@ html.is-electron [data-app-titlebar="strip"] {
   height: 2rem;
   z-index: 1;
 }
+
+/* Set for ~900ms on the question a timeline dot jumped to. Every user bubble
+   carries the same tint, so without a confirmation you cannot tell whether the
+   jump landed where you meant. Attribute-scoped, so it can only ever affect a
+   row the rail explicitly marked. */
+[data-timeline-landed] {
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  border-radius: 0.75rem;
+  transition: background 300ms ease-out;
+}
