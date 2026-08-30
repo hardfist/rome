@@ -125,13 +125,39 @@ describe("layoutTimelineNodes", () => {
     expect(nodes.map((n) => Math.round(n.fraction * 500))).toEqual([0, 8, 16]);
   });
 
-  it("clamps at the end of the track once saturated", () => {
+  it("ends the last dot at the foot of the track", () => {
     const anchors: MeasuredAnchor[] = [
       { messageId: "a", top: 1000 },
       { messageId: "b", top: 1000 },
     ];
     const nodes = layoutTimelineNodes(anchors, opts);
-    expect(nodes.map((n) => n.fraction)).toEqual([1, 1]);
+    expect(nodes.map((n) => Math.round(n.fraction * 500))).toEqual([492, 500]);
+  });
+
+  it("pulls a dense run at the bottom back up instead of stacking it", () => {
+    // Three questions in the last 1% of the transcript. A forward-only pass
+    // clamps the last two onto the same pixel, so one of them can never be
+    // clicked — while the track still has 484px of unused room above.
+    const anchors: MeasuredAnchor[] = [
+      { messageId: "a", top: 990 },
+      { messageId: "b", top: 995 },
+      { messageId: "c", top: 1000 },
+    ];
+    const nodes = layoutTimelineNodes(anchors, opts);
+    expect(nodes.map((n) => Math.round(n.fraction * 500))).toEqual([484, 492, 500]);
+  });
+
+  it("keeps every dot distinct up to the track's real capacity", () => {
+    // 60 questions all at the very bottom; a 500px track at an 8px gap holds
+    // 63, so none of them may share a position.
+    const anchors: MeasuredAnchor[] = Array.from({ length: 60 }, (_, i) => ({
+      messageId: `q${i}`,
+      top: 1000,
+    }));
+    const ys = layoutTimelineNodes(anchors, opts).map((n) => n.fraction * 500);
+    expect(new Set(ys.map((y) => Math.round(y))).size).toBe(60);
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...ys)).toBeCloseTo(500, 5);
   });
 
   it("returns nothing before layout", () => {

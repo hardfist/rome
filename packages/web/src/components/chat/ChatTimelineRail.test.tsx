@@ -143,18 +143,28 @@ describe("ChatTimelineRail", () => {
     expect(onJump).toHaveBeenCalledWith("q4");
   });
 
-  it("stays out of the tab order", () => {
-    // ~40 dots would otherwise add ~40 tab stops to the chat. ⌘K search is the
-    // keyboard path to a message.
+  it("lets a keyboard reach every question", () => {
+    // Search cannot scroll to a message yet, so the rail is the only way to
+    // reach an earlier question — it cannot be pointer-only.
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
     for (const dot of dots()) {
-      expect(dot.getAttribute("tabindex")).toBe("-1");
+      expect(dot.getAttribute("tabindex")).toBe("0");
     }
-    // The hide control is the exception: one control, so it keeps its tab stop
-    // and its focus ring.
     expect(
       screen.getByRole("button", { name: "Hide timeline" }).getAttribute("tabindex"),
     ).toBeNull();
+  });
+
+  it("takes hidden dots out of the tab order", () => {
+    // They stay mounted so the retract animates, and carry aria-hidden — which
+    // must never contain something focusable.
+    renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
+    fireEvent.click(screen.getByRole("button", { name: "Hide timeline" }));
+    const hiddenDots = [...document.querySelectorAll<HTMLElement>("[data-timeline-track] button")];
+    expect(hiddenDots).toHaveLength(4);
+    for (const dot of hiddenDots) {
+      expect(dot.getAttribute("tabindex")).toBe("-1");
+    }
   });
 
   it("renders no dots below the question floor", () => {

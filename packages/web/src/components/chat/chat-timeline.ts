@@ -83,9 +83,16 @@ export function shouldShowTimeline(
  * swallowed questions unreachable by click while looking identical to a
  * lossless dot — the rail would lie, in exactly the long conversations it
  * exists for. Spreading trades local positional fidelity for the guarantee that
- * every question stays individually clickable. Past saturation the dots pile up
- * at the end of the track, which reads as "too many to show" instead of
- * silently dropping them.
+ * every question stays individually clickable.
+ *
+ * Two passes, because one is not enough. The forward pass pushes each crowded
+ * dot below its predecessor. On its own that collapses at the bottom edge: a
+ * run of questions near the end of the transcript is pushed past the track and
+ * clamped, so several dots land on the same pixel and all but one become
+ * unclickable — the exact failure spreading exists to avoid. The backward pass
+ * pulls such a run back up, which the track has room for whenever the dots fit
+ * at all. Only a genuine overflow (more dots than `trackHeight / minGapPx`)
+ * still overlaps, now at the top, where the alternative is dropping questions.
  */
 export function layoutTimelineNodes(
   anchors: MeasuredAnchor[],
@@ -93,15 +100,26 @@ export function layoutTimelineNodes(
 ): TimelineNode[] {
   const { contentHeight, trackHeight, minGapPx } = opts;
   if (contentHeight <= 0 || trackHeight <= 0) return [];
-  const nodes: TimelineNode[] = [];
+
+  const ys: number[] = [];
   let floor = 0;
   for (const anchor of anchors) {
     const natural = Math.min(Math.max(anchor.top / contentHeight, 0), 1) * trackHeight;
-    const y = Math.min(Math.max(natural, floor), trackHeight);
-    nodes.push({ messageId: anchor.messageId, fraction: y / trackHeight });
+    const y = Math.max(natural, floor);
+    ys.push(y);
     floor = y + minGapPx;
   }
-  return nodes;
+
+  let ceiling = trackHeight;
+  for (let i = ys.length - 1; i >= 0; i--) {
+    if (ys[i] > ceiling) ys[i] = ceiling;
+    ceiling = ys[i] - minGapPx;
+  }
+
+  return ys.map((y, i) => ({
+    messageId: anchors[i].messageId,
+    fraction: Math.max(y, 0) / trackHeight,
+  }));
 }
 
 /**

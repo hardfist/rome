@@ -217,14 +217,20 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
                     free-positioned dot fails by construction. The label is the
                     question alone — Radix already wires the tooltip as
                     aria-describedby, so a "jump to" prefix would make a screen
-                    reader announce the question twice. */}
+                    reader announce the question twice.
+
+                    Keyboard-reachable, and focus is styled like hover so the
+                    dot under the caret reads like the one under the cursor.
+                    Hidden dots leave the tab order explicitly rather than
+                    relying on `visibility`, so nothing focusable ever sits
+                    inside `aria-hidden`. */}
                     <button
                       type="button"
-                      tabIndex={-1}
+                      tabIndex={hidden ? -1 : 0}
                       aria-label={label}
                       onClick={() => onJump(node.messageId)}
                       style={{ top: `${node.fraction * 100}%` }}
-                      className="pointer-events-auto absolute right-6 size-3.5 -translate-y-1/2 translate-x-1/2 rounded-full before:absolute before:inset-[5px] before:rounded-full before:scale-100 before:bg-muted-foreground before:opacity-40 before:transition-[opacity,scale] before:duration-200 before:ease-out motion-reduce:before:transition-none group-hover:before:opacity-70 hover:before:scale-150 hover:before:opacity-100"
+                      className="pointer-events-auto absolute right-6 size-3.5 -translate-y-1/2 translate-x-1/2 rounded-full before:absolute before:inset-[5px] before:rounded-full before:scale-100 before:bg-muted-foreground before:opacity-40 before:transition-[opacity,scale] before:duration-200 before:ease-out motion-reduce:before:transition-none group-hover:before:opacity-70 hover:before:scale-150 hover:before:opacity-100 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring focus-visible:before:scale-150 focus-visible:before:opacity-100"
                     />
                   </TooltipTrigger>
                   {/* The offset clears the dot: TooltipContent's arrow is 10px
