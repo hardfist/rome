@@ -35,19 +35,25 @@ export interface TimelineNode {
 }
 
 /**
- * The questions the rail can point at: main-session user turns that actually
- * render a bubble. Handoff child turns are excluded for the same reason
- * `mainTurnIds` in Chat.tsx excludes them — they ride along with their parent
- * and are not independently addressable. Text-less user turns are excluded
- * because `UserMessage` returns null for them, so there would be no anchor.
+ * Every question the rail can point at: user turns that actually render a
+ * bubble, in transcript order.
+ *
+ * Deliberately not filtered to the main session. While a handoff is open the
+ * composer posts to the child session, so a filter would drop every question
+ * asked during that handoff — a whole stretch of the conversation missing from
+ * the rail with nothing to explain the gap. Those rows are spliced into
+ * `displayMessages` and carry their own anchors, so they are addressable like
+ * any other. Share selection does filter by session, but that decides which
+ * turns can be frozen into a link, not what can be scrolled to.
+ *
+ * Text-less user turns are excluded because `UserMessage` returns null for
+ * them, so there would be no anchor. The suppressed handoff seed is already
+ * absent from `displayMessages`.
  */
-export function buildTimelineQuestions(
-  messages: ChatMessage[],
-  mainSessionId: string,
-): TimelineQuestion[] {
+export function buildTimelineQuestions(messages: ChatMessage[]): TimelineQuestion[] {
   const questions: TimelineQuestion[] = [];
   for (const message of messages) {
-    if (message.role !== "user" || message.sessionId !== mainSessionId) continue;
+    if (message.role !== "user") continue;
     const text = userMessageText(message.content).trim();
     if (!text) continue;
     questions.push({ messageId: message.id, text });
@@ -91,8 +97,14 @@ export function shouldShowTimeline(
  * clamped, so several dots land on the same pixel and all but one become
  * unclickable — the exact failure spreading exists to avoid. The backward pass
  * pulls such a run back up, which the track has room for whenever the dots fit
- * at all. Only a genuine overflow (more dots than `trackHeight / minGapPx`)
- * still overlaps, now at the top, where the alternative is dropping questions.
+ * at all.
+ *
+ * When they do not fit — more questions than `trackHeight / minGapPx`, which a
+ * long chat in a short window reaches — the gap tightens so the whole set still
+ * spans the track. Every dot keeps a distinct centre and a sliver of itself to
+ * click. Holding the gap fixed instead would push the surplus off the top and
+ * clamp it there, stacking those questions on one pixel and making all but the
+ * last unreachable.
  */
 export function layoutTimelineNodes(
   anchors: MeasuredAnchor[],
@@ -101,19 +113,22 @@ export function layoutTimelineNodes(
   const { contentHeight, trackHeight, minGapPx } = opts;
   if (contentHeight <= 0 || trackHeight <= 0) return [];
 
+  const gap =
+    anchors.length > 1 ? Math.min(minGapPx, trackHeight / (anchors.length - 1)) : minGapPx;
+
   const ys: number[] = [];
   let floor = 0;
   for (const anchor of anchors) {
     const natural = Math.min(Math.max(anchor.top / contentHeight, 0), 1) * trackHeight;
     const y = Math.max(natural, floor);
     ys.push(y);
-    floor = y + minGapPx;
+    floor = y + gap;
   }
 
   let ceiling = trackHeight;
   for (let i = ys.length - 1; i >= 0; i--) {
     if (ys[i] > ceiling) ys[i] = ceiling;
-    ceiling = ys[i] - minGapPx;
+    ceiling = ys[i] - gap;
   }
 
   return ys.map((y, i) => ({

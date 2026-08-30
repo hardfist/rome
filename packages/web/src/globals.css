@@ -599,8 +599,10 @@ html.is-electron [data-app-titlebar="strip"] {
    carries the same tint, so without a confirmation you cannot tell whether the
    jump landed where you meant. Attribute-scoped, so it can only ever affect a
    row the rail explicitly marked. */
-[data-timeline-landed] {
-  background: color-mix(in srgb, var(--primary) 6%, transparent);
+[data-timeline-anchor] {
   border-radius: var(--rome-radius-12);
   transition: background 300ms ease-out;
+}
+[data-timeline-landed] {
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
 }

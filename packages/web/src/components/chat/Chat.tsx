@@ -82,12 +82,6 @@ import type {
   StreamBlock,
 } from "@/lib/chat-types";
 import { SCROLL_BOTTOM_THRESHOLD_PX } from "@/lib/chat-constants";
-
-// Leave a jumped-to question clear of the top edge — flush against it reads
-// as cut off.
-const TIMELINE_JUMP_OFFSET_PX = 24;
-// How long the landed-on question stays tinted.
-const TIMELINE_LANDING_MS = 900;
 import { buildOptimisticUserText } from "@/lib/chat-helpers";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import {
@@ -113,6 +107,12 @@ import {
   useWorkspaceContextRegistry,
 } from "@/pages/free/workspace-context";
 import { autoPlaceApp } from "@/pages/free/use-free-cells";
+
+// Leave a jumped-to question clear of the top edge — flush against it reads
+// as cut off.
+const TIMELINE_JUMP_OFFSET_PX = 24;
+// How long the landed-on question stays tinted.
+const TIMELINE_LANDING_MS = 900;
 
 // Chat Component
 
@@ -426,13 +426,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     return ids;
   }, [displayMessages, mainSessionId]);
 
-  // The timeline rail's data source — the same main-session filter mainTurnIds
-  // uses. Memoized on displayMessages, which a streaming turn never touches, so
-  // this identity is stable across stream ticks and the rail's effect does not
-  // tear down and re-observe every frame.
+  // The timeline rail's data source. Memoized on displayMessages, which a
+  // streaming turn never touches, so this identity is stable across stream
+  // ticks and the rail's effect does not tear down and re-observe every frame.
   const timelineQuestions = useMemo(
-    () => buildTimelineQuestions(displayMessages, mainSessionId),
-    [displayMessages, mainSessionId],
+    () => buildTimelineQuestions(displayMessages),
+    [displayMessages],
   );
 
   const landingTimerRef = useRef<number | undefined>(undefined);

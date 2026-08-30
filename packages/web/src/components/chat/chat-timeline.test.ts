@@ -31,17 +31,21 @@ describe("buildTimelineQuestions", () => {
     const a = msg("user", MAIN, text("first question"));
     const b = msg("assistant", MAIN, text("an answer"));
     const c = msg("user", MAIN, text("second question"));
-    expect(buildTimelineQuestions([a, b, c], MAIN)).toEqual([
+    expect(buildTimelineQuestions([a, b, c])).toEqual([
       { messageId: a.id, text: "first question" },
       { messageId: c.id, text: "second question" },
     ]);
   });
 
-  it("drops handoff child-session questions", () => {
+  it("includes questions asked during a handoff", () => {
+    // While a handoff is open the composer posts to the child session. Dropping
+    // those would leave a whole stretch of the conversation off the rail with
+    // nothing to explain the gap.
     const mine = msg("user", MAIN, text("mine"));
-    const theirs = msg("user", CHILD, text("theirs"));
-    expect(buildTimelineQuestions([mine, theirs], MAIN)).toEqual([
+    const duringHandoff = msg("user", CHILD, text("asked the specialist"));
+    expect(buildTimelineQuestions([mine, duringHandoff])).toEqual([
       { messageId: mine.id, text: "mine" },
+      { messageId: duringHandoff.id, text: "asked the specialist" },
     ]);
   });
 
@@ -53,7 +57,7 @@ describe("buildTimelineQuestions", () => {
       { type: "interaction_result", toolUseId: "t-1", output: { approved: true } },
     ]);
     const blank = msg("user", MAIN, text("   "));
-    expect(buildTimelineQuestions([resolution, blank], MAIN)).toEqual([]);
+    expect(buildTimelineQuestions([resolution, blank])).toEqual([]);
   });
 });
 
@@ -158,6 +162,26 @@ describe("layoutTimelineNodes", () => {
     expect(new Set(ys.map((y) => Math.round(y))).size).toBe(60);
     expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
     expect(Math.max(...ys)).toBeCloseTo(500, 5);
+  });
+
+  it("tightens the gap rather than stacking once the track overflows", () => {
+    // 60 questions on a 400px track: at an 8px gap only 51 fit, so a fixed gap
+    // would clamp the surplus onto y=0 and make all but one unreachable.
+    const anchors: MeasuredAnchor[] = Array.from({ length: 60 }, (_, i) => ({
+      messageId: `q${i}`,
+      top: 1000,
+    }));
+    const nodes = layoutTimelineNodes(anchors, {
+      contentHeight: 1000,
+      trackHeight: 400,
+      minGapPx: 8,
+    });
+    const ys = nodes.map((n) => n.fraction * 400);
+    expect(new Set(ys).size).toBe(60);
+    expect(ys[0]).toBeCloseTo(0, 5);
+    expect(ys[59]).toBeCloseTo(400, 5);
+    // Evenly spread across the track at the tightened gap.
+    expect(ys[1] - ys[0]).toBeCloseTo(400 / 59, 5);
   });
 
   it("returns nothing before layout", () => {
