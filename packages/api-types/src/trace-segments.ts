@@ -256,11 +256,12 @@ export interface TraceSummary {
   /** Wall-clock duration the outermost AgentSession measured for the turn.
    *  Read from the turn's `turn_end` block. */
   totalDurationMs?: number;
+  /** Authoritative outcome from the latest `turn_end` block. Absent while the
+   *  turn is still running and on legacy traces without lifecycle brackets. */
+  turnStatus?: TurnEndBlock["status"];
   /** Per-app invocation totals for the icon-strip tooltip. Keyed by app.id. */
   invocationCounts: Record<string, number>;
-  /** True when the turn was interrupted by the user via Stop. Derived by the
-   *  segment builder from a result/error block whose accounting.stopReason is
-   *  "interrupted" — the AnthropicProvider's signal for a graceful abort. */
+  /** True when the turn was interrupted by the user via Stop. */
   stoppedByUser?: boolean;
   /** Terminal agent error for failed turns. Present only when the trace ended
    *  with an error rather than a user stop. */

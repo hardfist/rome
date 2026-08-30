@@ -7,6 +7,12 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 vi.mock("@/components/logo", () => ({
   RomeLogo: (props: Record<string, unknown>) => <div data-testid="rome-logo" {...props} />,
 }));
+vi.mock("@/components/chat/TurnBranchButton", () => ({
+  TurnBranchButton: () => <button type="button">side-chat-branch</button>,
+}));
+vi.mock("@/components/chat/TurnFeedbackButtons", () => ({
+  TurnFeedbackButtons: () => null,
+}));
 import {
   findActiveSubmission,
   findLastSubmission,
@@ -228,6 +234,77 @@ describe("MessageList inline-card state across streaming→settled", () => {
     expect((screen.getByPlaceholderText("Type your answer…") as HTMLTextAreaElement).value).toBe(
       "Alice",
     );
+  });
+});
+
+describe("MessageList side-chat eligibility", () => {
+  const renderSettledTurn = (turnStatus?: "completed" | "interrupted" | "error") => {
+    const messages: ChatMessage[] = [
+      {
+        id: "assistant-side-chat",
+        sessionId: "s-1",
+        turnId: "turn-side-chat",
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "Turn output" }]),
+        createdAt: "2026-06-13T00:00:00.000Z",
+      },
+      {
+        id: "trace-side-chat",
+        sessionId: "s-1",
+        turnId: "turn-side-chat",
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-06-13T00:00:01.000Z",
+        traceSummary: {
+          distinctApps: [],
+          totalSteps: 0,
+          invocationCounts: {},
+          turnStatus,
+        },
+      },
+    ];
+    const rows = buildRows(messages, new Map([["s-1", IDENTITY]]), IDENTITY, {
+      runningTurnId: null,
+      isStreaming: false,
+    });
+    render(
+      <ThemeProvider>
+        <MessageList
+          rows={rows}
+          live={{
+            isStreaming: false,
+            runningTurnId: null,
+            snapshot: null,
+            text: "",
+            identity: IDENTITY,
+          }}
+          contentRef={() => {}}
+          onOpenLiveTrace={() => {}}
+          onOpenStoredTrace={() => {}}
+          actions={{
+            onApprovalResolved: () => {},
+            onSubmitAppComponent: () => {},
+            onDismissAppComponent: () => {},
+            interactionResults: new Map(),
+          }}
+          feedback
+        />
+      </ThemeProvider>,
+    );
+  };
+
+  it("shows Side Chat only for completed turns", () => {
+    renderSettledTurn("completed");
+    expect(screen.getByRole("button", { name: "side-chat-branch" })).toBeTruthy();
+  });
+
+  it.each([
+    "interrupted",
+    "error",
+    undefined,
+  ] as const)("hides Side Chat when turn status is %s", (status) => {
+    renderSettledTurn(status);
+    expect(screen.queryByRole("button", { name: "side-chat-branch" })).toBeNull();
   });
 });
 

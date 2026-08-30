@@ -2154,7 +2154,9 @@ class AgentSessionImpl implements AgentSession {
           // Persist the provider-native anchor first so an immediate click can
           // never fall back to (or race with) a later provider-thread head.
           if (outbound.type === "result") {
-            await this.maybePersistTurnCheckpoint(session, sink.turnId);
+            const interrupted =
+              sink.lifecycleInterrupted || outbound.accounting?.stopReason === "interrupted";
+            if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
             await this.maybePersistProviderInfo();
           }
           // Use `outbound` (not `msg`) so error-replacement (when an

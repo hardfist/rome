@@ -95,6 +95,7 @@ The caller creating the fork chooses one of two modes:
 
 - In both modes the source conversation is untouched: its next turn never sees the fork's prompt, output, or tool calls.
 - The fork's model is the caller's choice in both modes: it follows the source's live model unless the caller overrides the tier. Exact-mode callers that want provider prompt-cache reuse keep the source's model. Forks never write [model pins](#model-pin).
+- A turn can be forked only after it completes successfully and Rome persists that exact turn's provider checkpoint. Running, stopped, failed, and checkpoint-less turns are not forkable; Rome never substitutes another turn's transcript head or reconstructs provider history from visible output.
 - Every forked turn is recorded as its own fork session, linked back to the parent session and the turn the fork branched from, so its trajectory can be inspected like any other agent run.
 
 **Not to be confused with:**

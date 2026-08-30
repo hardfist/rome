@@ -277,9 +277,7 @@ describe("AnthropicProvider", () => {
     if (phase !== "startup") {
       expect(messages).toContainEqual({ type: "text", content: "Saved work", turnPhase: "final" });
     }
-    expect(session.lastCompletedTurnCheckpoint).toBe(
-      phase === "completed-block" ? "assistant-before-stop" : undefined,
-    );
+    expect(session.lastCompletedTurnCheckpoint).toBeUndefined();
     await expect(session.sendUserInput({ text: "next" })).rejects.toThrow("closed");
     await session.close();
   });
@@ -287,7 +285,7 @@ describe("AnthropicProvider", () => {
   it.each([
     { label: "the current assistant checkpoint", interruptedCheckpoint: "assistant-current" },
     { label: "no checkpoint", interruptedCheckpoint: undefined },
-  ])("replaces a prior successful checkpoint with $label when interrupted", async ({
+  ])("does not publish $label when interrupted after a successful turn", async ({
     interruptedCheckpoint,
   }) => {
     let controller!: AbortController;
@@ -365,7 +363,7 @@ describe("AnthropicProvider", () => {
       type: "result",
       content: interruptedCheckpoint ? "Current turn" : "",
     });
-    expect(session.lastCompletedTurnCheckpoint).toBe(interruptedCheckpoint);
+    expect(session.lastCompletedTurnCheckpoint).toBeUndefined();
     await session.close();
   });
 

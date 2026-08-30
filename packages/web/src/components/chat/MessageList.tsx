@@ -280,6 +280,7 @@ const RowView = memo(function RowView({
   const feedbackTurn = feedback && !live ? rowTurnRef(row) : null;
   const showFeedback = !!feedbackTurn?.turnId && !!feedbackTurn.sessionId;
   const summary = live?.snapshot?.summary ?? row.trace?.traceSummary;
+  const showBranch = showFeedback && summary?.turnStatus === "completed";
   const subagents = summary?.subagents;
   const recapMessageId = row.messages.find((message) =>
     parseMessageBlocks(message).some((block) => block.type === "turn_recap"),
@@ -366,7 +367,7 @@ const RowView = memo(function RowView({
               turnId={feedbackTurn.turnId}
             />
           ) : null}
-          {showFeedback && feedbackTurn?.turnId ? (
+          {showBranch && feedbackTurn?.turnId ? (
             <TurnBranchButton
               key={`branch:${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
               sessionId={feedbackTurn.sessionId}

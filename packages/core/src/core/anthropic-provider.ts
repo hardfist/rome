@@ -769,7 +769,6 @@ export class AnthropicProvider implements ModelProvider {
           }
           if (partialText) yield { type: "text", content: partialText, turnPhase: "final" };
           running = false;
-          lastCompletedTurnCheckpoint = activeTurnLastAssistantMessageId;
           yield { type: "result", content: partialText || pendingText || "" };
         }
       } catch (err) {
@@ -791,7 +790,6 @@ export class AnthropicProvider implements ModelProvider {
           await queryProcess.abort();
           if (running) {
             running = false;
-            lastCompletedTurnCheckpoint = activeTurnLastAssistantMessageId;
             yield { type: "result", content: partialText || pendingText || "" };
           }
           return;
@@ -843,6 +841,12 @@ export class AnthropicProvider implements ModelProvider {
           throw new Error("ModelSession is closed");
         }
         activeTurnLastAssistantMessageId = undefined;
+        // A checkpoint is publishable only after this turn reaches an SDK
+        // success result. Assistant UUIDs observed before an abort can be
+        // present in the stream without being resumable in Claude's durable
+        // transcript, so never let a prior or partial UUID stand in for the
+        // current turn.
+        lastCompletedTurnCheckpoint = undefined;
         running = true;
         permitPrompt();
         if (input.inputId && deferredInputs.delete(input.inputId)) return;

@@ -1147,6 +1147,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let threadContext: ThreadContext;
     let sourceCheckpoint: ForkSourceCheckpoint | null = null;
     try {
+      const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
+      const turnStatus = traceRow
+        ? parseStoredTraceBlocks(traceRow.content)
+            .filter(
+              (block): block is Extract<TraceBlockDto, { type: "turn_end" }> =>
+                block.type === "turn_end" && block.turnId === input.turnId,
+            )
+            .at(-1)?.status
+        : undefined;
+      if (turnStatus !== "completed") {
+        log.warn("turn fork skipped: source turn did not complete successfully", {
+          sessionId: input.session.id,
+          turnId: input.turnId,
+          label: input.label,
+          turnStatus,
+        });
+        return null;
+      }
       const projectPath = normalizeSelectedWebchatProjectPath(
         input.session.projectPath ?? input.session.projectName,
       );

@@ -2847,7 +2847,13 @@ describe("Webchat API", () => {
       // check passes; mirrors the real-world state where the feedback footer
       // only renders once the turn's trace row has been written.
       const id = `${sessionId}-${turnId}-anchor`;
-      await deps.webchatRepo.addMessage(id, sessionId, "trace", "[]", turnId);
+      await deps.webchatRepo.addMessage(
+        id,
+        sessionId,
+        "trace",
+        JSON.stringify([{ type: "turn_end", turnId, status: "completed", durationMs: 10 }]),
+        turnId,
+      );
     }
 
     beforeEach(async () => {
@@ -3306,7 +3312,15 @@ describe("Webchat API", () => {
 
     beforeEach(async () => {
       await deps.webchatRepo.createSession(SESSION_ID, "Branch Routes");
-      await deps.webchatRepo.addMessage("branch-anchor", SESSION_ID, "trace", "[]", TURN_ID);
+      await deps.webchatRepo.addMessage(
+        "branch-anchor",
+        SESSION_ID,
+        "trace",
+        JSON.stringify([
+          { type: "turn_end", turnId: TURN_ID, status: "completed", durationMs: 10 },
+        ]),
+        TURN_ID,
+      );
     });
 
     it("resumes the source, runs an exact fork, and shows its Sessions route", async () => {
@@ -3398,6 +3412,57 @@ describe("Webchat API", () => {
           turnId: "branch-fork-turn",
         }),
       );
+    });
+
+    it("refuses a stopped turn before acquiring or reading provider history", async () => {
+      await deps.webchatRepo.addMessage(
+        "branch-user",
+        SESSION_ID,
+        "user",
+        JSON.stringify([{ type: "text", content: "Run the long task" }]),
+        TURN_ID,
+      );
+      await deps.webchatRepo.addMessage(
+        "branch-assistant",
+        SESSION_ID,
+        "assistant",
+        JSON.stringify([{ type: "text", content: "Partial work before Stop" }]),
+        TURN_ID,
+      );
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: "branch-anchor",
+        sessionId: SESSION_ID,
+        turnId: TURN_ID,
+        startSeq: 0,
+        blocks: [{ type: "turn_end", turnId: TURN_ID, status: "interrupted", durationMs: 10 }],
+      });
+      const runForked = vi.fn(() => (async function* () {})());
+      deps.agentRunner = {
+        run: deps.agentRunner.run.bind(deps.agentRunner),
+        runForked,
+      };
+      const acquireSource = vi.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
+        sessionId: "live-source-session",
+      } as AgentSession);
+      const exactCheckpoint = vi.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue({
+        sessionId: "live-source-session",
+        turnId: "turn-before-stop",
+        provider: "anthropic",
+        providerThreadId: "claude-thread",
+        checkpointId: "durable-assistant-before-stop",
+      });
+      const app = createWebchatRuntime(deps).routes;
+
+      const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/forks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: "Explain what happened" }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(acquireSource).not.toHaveBeenCalled();
+      expect(exactCheckpoint).not.toHaveBeenCalled();
+      expect(runForked).not.toHaveBeenCalled();
     });
 
     it("rejects missing turns and invalid prompts", async () => {

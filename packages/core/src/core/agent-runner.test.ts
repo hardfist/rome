@@ -2049,6 +2049,54 @@ describe("AgentRunner", () => {
       });
     });
 
+    it("does not persist a provider checkpoint for an interrupted turn", async () => {
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "Claude",
+        builtinTools: new Set(),
+        async openSession(params) {
+          const session = createSessionFromRun(
+            "anthropic",
+            async function* () {
+              yield { type: "text", content: "partial output" };
+              yield {
+                type: "result",
+                content: "partial output",
+                accounting: {
+                  provider: "anthropic",
+                  model: params.model,
+                  usage: {
+                    cacheReadTokens: 0,
+                    cacheWriteTokens: 0,
+                    inputTokens: 0,
+                    outputTokens: 0,
+                  },
+                  stopReason: "interrupted",
+                },
+              };
+            },
+            params,
+          );
+          return {
+            ...session,
+            providerThreadId: "claude-thread",
+            lastCompletedTurnCheckpoint: "streamed-but-not-resumable-assistant-uuid",
+          };
+        },
+      };
+      const runner = createRunner(provider);
+
+      const messages = await collectMessages(
+        runner.run({ agentName: "test-main", prompt: "Hello" }),
+      );
+      const start = messages.find((message) => message.type === "turn_start");
+      expect(start).toBeDefined();
+      if (!start || start.type !== "turn_start") return;
+
+      expect(await sessionManager.getTurnCheckpoint(start.sessionId, start.turnId)).toBeNull();
+      expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "interrupted" });
+    });
+
     it("persists the session model pin for a completed Rome turn", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       const runner = createRunner(provider);

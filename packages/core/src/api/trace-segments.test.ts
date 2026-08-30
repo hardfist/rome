@@ -380,6 +380,7 @@ describe("buildTraceSnapshot — summary", () => {
     expect(snap.summary.distinctApps).toEqual([]);
     expect(snap.summary.stoppedByUser).toBeUndefined();
     expect(snap.summary.terminalError).toBeUndefined();
+    expect(snap.summary.turnStatus).toBeUndefined();
   });
 
   it("error block followed by turn_end flags summary.terminalError for failed turns", () => {
@@ -393,6 +394,7 @@ describe("buildTraceSnapshot — summary", () => {
     });
     expect(snap.summary.terminalError).toBe("Access token expired");
     expect(snap.summary.stoppedByUser).toBeUndefined();
+    expect(snap.summary.turnStatus).toBe("error");
   });
 
   it("interrupted turn with an error terminal is reported as stopped rather than failed", () => {
@@ -409,6 +411,7 @@ describe("buildTraceSnapshot — summary", () => {
     });
     expect(snap.summary.stoppedByUser).toBe(true);
     expect(snap.summary.terminalError).toBeUndefined();
+    expect(snap.summary.turnStatus).toBe("interrupted");
   });
 
   it("turn_end with status 'interrupted' flags summary.stoppedByUser", () => {
@@ -427,6 +430,7 @@ describe("buildTraceSnapshot — summary", () => {
     });
     expect(snap.summary.stoppedByUser).toBe(true);
     expect(snap.summary.totalSteps).toBe(1);
+    expect(snap.summary.turnStatus).toBe("interrupted");
   });
 
   it("turn_start clears the previous turn's terminal summary for the live trace", () => {
@@ -445,6 +449,7 @@ describe("buildTraceSnapshot — summary", () => {
     expect(snap.summary.terminalError).toBeUndefined();
     expect(snap.summary.stoppedByUser).toBeUndefined();
     expect(snap.summary.totalDurationMs).toBeUndefined();
+    expect(snap.summary.turnStatus).toBeUndefined();
   });
 
   it("stoppedByUser resets when a later turn in the same trace completes normally", () => {
@@ -461,6 +466,7 @@ describe("buildTraceSnapshot — summary", () => {
     });
     expect(snap.summary.stoppedByUser).toBeUndefined();
     expect(snap.summary.totalDurationMs).toBe(900);
+    expect(snap.summary.turnStatus).toBe("completed");
   });
 
   it("stoppedByUser resets when a later turn in the same trace fails", () => {
@@ -477,6 +483,7 @@ describe("buildTraceSnapshot — summary", () => {
     });
     expect(snap.summary.stoppedByUser).toBeUndefined();
     expect(snap.summary.terminalError).toBe("boom");
+    expect(snap.summary.turnStatus).toBe("error");
   });
 
   it("result block with a non-interrupted stopReason leaves stoppedByUser unset", () => {

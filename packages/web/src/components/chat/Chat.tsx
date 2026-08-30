@@ -155,6 +155,7 @@ const traceSummarySchema: z.ZodType<TraceSummary> = z.lazy(() =>
       )
       .optional(),
     totalDurationMs: z.number().optional(),
+    turnStatus: z.enum(["completed", "interrupted", "error"]).optional(),
     invocationCounts: z.record(z.string(), z.number()),
     stoppedByUser: z.boolean().optional(),
     terminalError: z.string().optional(),
