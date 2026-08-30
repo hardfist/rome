@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 // Real bundles, so the hide control's accessible name is the shipped
 // string rather than its key — the same thing a screen reader would read.
 import "@/i18n";
@@ -8,7 +8,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ChatTimelineRail } from "./ChatTimelineRail";
 import type { TimelineQuestion } from "./chat-timeline";
 
+beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   localStorage.clear();
 });
@@ -236,6 +238,45 @@ describe("ChatTimelineRail", () => {
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
     expect(dots()).toHaveLength(0);
     expect(screen.getByRole("button", { name: "Show timeline" })).toBeTruthy();
+  });
+
+  it("keeps watching while hidden with nothing to show", () => {
+    // A hidden rail that measured nothing — too narrow, too short — must stay
+    // subscribed, or becoming eligible later leaves no Show control until the
+    // next message or a reload.
+    const observed: Element[] = [];
+    let fire: (() => void) | null = null;
+    const RealRO = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(cb: () => void) {
+        fire = cb;
+      }
+      observe(el: Element) {
+        observed.push(el);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      localStorage.setItem("rome-timeline-hidden", "1");
+      // A transcript under two viewports: ineligible, so nothing is measured.
+      const scroller = stubScroller(SPREAD_ANCHORS);
+      Object.defineProperty(scroller, "scrollHeight", { value: 700, configurable: true });
+      renderRail(scroller, QUESTIONS);
+      expect(screen.queryByRole("button")).toBeNull();
+      expect(observed.length).toBeGreaterThan(0);
+
+      // It grows past the threshold; the observer has to bring the control back.
+      Object.defineProperty(scroller, "scrollHeight", { value: 3000, configurable: true });
+      act(() => {
+        fire?.();
+        vi.advanceTimersByTime(200);
+      });
+      expect(screen.getByRole("button", { name: "Show timeline" })).toBeTruthy();
+    } finally {
+      globalThis.ResizeObserver = RealRO;
+    }
   });
 
   it("offers no control when there is no timeline to hide", () => {

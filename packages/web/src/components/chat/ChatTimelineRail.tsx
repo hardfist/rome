@@ -78,17 +78,23 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
     }
     let timer = 0;
 
-    const measure = () => {
+    /** Lays the dots out, and reports whether there are any. */
+    const measure = (): boolean => {
       const track = trackRef.current;
+      // A zero-height track means the rail is CSS-hidden below its breakpoint,
+      // where the sweep below can only ever produce nothing. Checking it first
+      // keeps a narrow viewport from paying for a forced layout on every
+      // debounce tick of a streaming reply.
       if (
         !track ||
+        track.clientHeight === 0 ||
         !shouldShowTimeline(questions.length, {
           scrollHeight: scroller.scrollHeight,
           clientHeight: scroller.clientHeight,
         })
       ) {
         setNodes((prev) => (prev.length === 0 ? prev : EMPTY));
-        return;
+        return false;
       }
       // Rects rather than offsetTop: SelectableRow makes rows `relative` in
       // share mode, which would silently re-parent offsetTop onto the row.
@@ -113,6 +119,7 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
         minGapPx: MIN_NODE_GAP_PX,
       });
       setNodes((prev) => (sameNodes(prev, next) ? prev : next));
+      return next.length > 0;
     };
 
     const schedule = () => {
@@ -123,12 +130,17 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
     // Always measure once, even while hidden: the node count is what decides
     // whether the show control renders at all, and skipping this would strand a
     // reader who hid the rail and then reloaded with no way to bring it back.
-    measure();
-    // Beyond that first pass there is nothing to keep in sync while the column
-    // is away, and a streaming reply would otherwise drive a layout flush plus
-    // a re-render every debounce tick for something not on screen. Unhiding
+    const anyDots = measure();
+    // With dots to keep, a hidden column has nothing left to stay in sync with,
+    // and a streaming reply would otherwise drive a layout flush plus a
+    // re-render every debounce tick for something not on screen. Unhiding
     // re-runs this effect, so the dots are measured fresh when they return.
-    if (hidden) return () => window.clearTimeout(timer);
+    //
+    // With NO dots the observer has to stay: the rail may still become eligible
+    // — a wider viewport, a transcript that grows past two screens — and the
+    // show control has to appear when it does rather than waiting for the next
+    // message or a reload.
+    if (hidden && anyDots) return () => window.clearTimeout(timer);
 
     const observer = new ResizeObserver(schedule);
     observer.observe(scroller);
@@ -197,8 +209,11 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
     // dots, so the native scrollbar and the composer's right edge remain
     // grabbable underneath.
     <div
-      role="navigation"
-      aria-label={t("timeline.label")}
+      // No landmark until there is a timeline inside it. Short chats are the
+      // common case, and an empty named region is something a screen-reader
+      // user lands in and finds nothing.
+      role={empty ? undefined : "navigation"}
+      aria-label={empty ? undefined : t("timeline.label")}
       className="group pointer-events-none absolute inset-y-0 right-0 z-10 hidden w-8 @min-[48rem]/transcript:block"
     >
       {/* One tab stop, unlike the dots — this is a real control, so it takes
@@ -254,7 +269,10 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
                     free-positioned dot fails by construction. The label is the
                     question alone — Radix already wires the tooltip as
                     aria-describedby, so a "jump to" prefix would make a screen
-                    reader announce the question twice.
+                    reader add a prefix to a question it announces twice
+                    regardless: Radix wires the tooltip as the description while
+                    this is the name, so both carry the question. Naming the
+                    action instead would not remove the repetition, only pad it.
 
                     Focus is styled like hover, so the dot under the caret
                     reads like the one under the cursor. Only the roving dot is
