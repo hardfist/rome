@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+// Real bundles, so the hide control's accessible name is the shipped
+// string rather than its key — the same thing a screen reader would read.
+import "@/i18n";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ChatTimelineRail } from "./ChatTimelineRail";
 import type { TimelineQuestion } from "./chat-timeline";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 const QUESTIONS: TimelineQuestion[] = [
   { messageId: "q1", text: "how do I ship this?" },
@@ -13,6 +19,14 @@ const QUESTIONS: TimelineQuestion[] = [
   { messageId: "q3", text: "why is it slow?" },
   { messageId: "q4", text: "can we cache it?" },
 ];
+
+// The dots, excluding the hide control — which is a button too, but is
+// deliberately focusable and is not one of the questions. Hidden dots stay
+// mounted so the retract animates, and leave the a11y tree via aria-hidden —
+// which is exactly what getAllByRole filters on.
+function dots(): HTMLElement[] {
+  return screen.getAllByRole("button").filter((el) => el.getAttribute("aria-expanded") === null);
+}
 
 function rect(top: number, height = 0): DOMRect {
   return {
@@ -99,7 +113,7 @@ function renderRail(
 describe("ChatTimelineRail", () => {
   it("renders one dot per question, labelled with its text", () => {
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    expect(screen.getAllByRole("button")).toHaveLength(4);
+    expect(dots()).toHaveLength(4);
     expect(screen.getByRole("button", { name: "how do I ship this?" })).toBeTruthy();
   });
 
@@ -124,7 +138,7 @@ describe("ChatTimelineRail", () => {
       QUESTIONS,
       onJump,
     );
-    expect(screen.getAllByRole("button")).toHaveLength(4);
+    expect(dots()).toHaveLength(4);
     fireEvent.click(screen.getByRole("button", { name: "can we cache it?" }));
     expect(onJump).toHaveBeenCalledWith("q4");
   });
@@ -133,9 +147,14 @@ describe("ChatTimelineRail", () => {
     // ~40 dots would otherwise add ~40 tab stops to the chat. ⌘K search is the
     // keyboard path to a message.
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    for (const dot of screen.getAllByRole("button")) {
+    for (const dot of dots()) {
       expect(dot.getAttribute("tabindex")).toBe("-1");
     }
+    // The hide control is the exception: one control, so it keeps its tab stop
+    // and its focus ring.
+    expect(
+      screen.getByRole("button", { name: "Hide timeline" }).getAttribute("tabindex"),
+    ).toBeNull();
   });
 
   it("renders no dots below the question floor", () => {
@@ -156,5 +175,31 @@ describe("ChatTimelineRail", () => {
   it("renders no dots without a scroller", () => {
     const { container } = renderRail(null, QUESTIONS);
     expect(container.querySelectorAll("button")).toHaveLength(0);
+  });
+
+  it("hides the dots and offers to bring them back", () => {
+    renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
+    expect(dots()).toHaveLength(4);
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide timeline" }));
+    expect(dots()).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show timeline" }));
+    expect(dots()).toHaveLength(4);
+  });
+
+  it("remembers a hide across mounts", () => {
+    renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
+    fireEvent.click(screen.getByRole("button", { name: "Hide timeline" }));
+    cleanup();
+
+    renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
+    expect(dots()).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Show timeline" })).toBeTruthy();
+  });
+
+  it("offers no control when there is no timeline to hide", () => {
+    renderRail(stubScroller(SPREAD_ANCHORS.slice(0, 2)), QUESTIONS.slice(0, 2));
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

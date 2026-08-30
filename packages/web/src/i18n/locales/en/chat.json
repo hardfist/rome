@@ -54,7 +54,9 @@
     "unavailableBody": "The link may have been revoked or is no longer valid."
   },
   "timeline": {
-    "label": "Question timeline"
+    "label": "Question timeline",
+    "hide": "Hide timeline",
+    "show": "Show timeline"
   },
   "roles": {
     "agent": "Assistant"
