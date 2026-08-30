@@ -143,16 +143,46 @@ describe("ChatTimelineRail", () => {
     expect(onJump).toHaveBeenCalledWith("q4");
   });
 
-  it("lets a keyboard reach every question", () => {
-    // Search cannot scroll to a message yet, so the rail is the only way to
-    // reach an earlier question — it cannot be pointer-only.
+  it("takes one tab stop for the whole column", () => {
+    // Search cannot scroll to a message yet, so the rail is the only keyboard
+    // route to an earlier question — but forty questions must not mean forty
+    // tab stops. Exactly one dot is tabbable; arrows reach the rest.
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    for (const dot of dots()) {
-      expect(dot.getAttribute("tabindex")).toBe("0");
-    }
+    expect(dots().map((d) => d.getAttribute("tabindex"))).toEqual(["0", "-1", "-1", "-1"]);
     expect(
       screen.getByRole("button", { name: "Hide timeline" }).getAttribute("tabindex"),
     ).toBeNull();
+  });
+
+  it("moves between questions with the arrow keys", () => {
+    renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
+    const all = dots();
+    all[0].focus();
+
+    fireEvent.keyDown(all[0], { key: "ArrowDown" });
+    expect(document.activeElement).toBe(all[1]);
+    expect(dots().map((d) => d.getAttribute("tabindex"))).toEqual(["-1", "0", "-1", "-1"]);
+
+    fireEvent.keyDown(all[1], { key: "ArrowUp" });
+    expect(document.activeElement).toBe(all[0]);
+
+    fireEvent.keyDown(all[0], { key: "End" });
+    expect(document.activeElement).toBe(all[3]);
+
+    fireEvent.keyDown(all[3], { key: "Home" });
+    expect(document.activeElement).toBe(all[0]);
+  });
+
+  it("stops at the ends rather than wrapping", () => {
+    renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
+    const all = dots();
+    all[0].focus();
+    fireEvent.keyDown(all[0], { key: "ArrowUp" });
+    expect(document.activeElement).toBe(all[0]);
+
+    all[3].focus();
+    fireEvent.keyDown(all[3], { key: "ArrowDown" });
+    expect(document.activeElement).toBe(all[3]);
   });
 
   it("takes hidden dots out of the tab order", () => {

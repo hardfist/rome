@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -63,6 +63,13 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
   // track directly is what keeps the computed and painted positions in one
   // coordinate space.
   const trackRef = useRef<HTMLDivElement | null>(null);
+  // The column is one composite control, not forty. Only the roving dot is in
+  // the tab order; arrows move between dots from there. Tabbing every dot would
+  // bury the rest of the page behind dozens of stops in exactly the long chats
+  // this exists for, and dropping them from the tab order altogether would
+  // leave the transcript with no keyboard route back to an earlier question.
+  const [rovingIndex, setRovingIndex] = useState(0);
+  const dotRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
     if (!scroller) {
@@ -113,7 +120,16 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
       timer = window.setTimeout(measure, MEASURE_DEBOUNCE_MS);
     };
 
+    // Always measure once, even while hidden: the node count is what decides
+    // whether the show control renders at all, and skipping this would strand a
+    // reader who hid the rail and then reloaded with no way to bring it back.
     measure();
+    // Beyond that first pass there is nothing to keep in sync while the column
+    // is away, and a streaming reply would otherwise drive a layout flush plus
+    // a re-render every debounce tick for something not on screen. Unhiding
+    // re-runs this effect, so the dots are measured fresh when they return.
+    if (hidden) return () => window.clearTimeout(timer);
+
     const observer = new ResizeObserver(schedule);
     observer.observe(scroller);
     if (content && content !== scroller) observer.observe(content);
@@ -121,7 +137,27 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
       window.clearTimeout(timer);
       observer.disconnect();
     };
-  }, [scroller, content, questions]);
+  }, [scroller, content, questions, hidden]);
+
+  // Clamped rather than reset: questions arrive while the chat runs, and the
+  // caret should not jump back to the top each time one does.
+  const activeDot = Math.min(rovingIndex, Math.max(nodes.length - 1, 0));
+
+  const onDotKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+      const last = nodes.length - 1;
+      let next: number;
+      if (event.key === "ArrowDown" || event.key === "ArrowRight") next = Math.min(index + 1, last);
+      else if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = Math.max(index - 1, 0);
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = last;
+      else return;
+      event.preventDefault();
+      setRovingIndex(next);
+      dotRefs.current[next]?.focus();
+    },
+    [nodes.length],
+  );
 
   const toggleHidden = useCallback(() => {
     setHidden((prev) => {
@@ -161,6 +197,7 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
     // dots, so the native scrollbar and the composer's right edge remain
     // grabbable underneath.
     <div
+      role="navigation"
       aria-label={t("timeline.label")}
       className="group pointer-events-none absolute inset-y-0 right-0 z-10 hidden w-8 @min-[48rem]/transcript:block"
     >
@@ -204,7 +241,7 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
       >
         {empty
           ? null
-          : nodes.map((node) => {
+          : nodes.map((node, index) => {
               const question = questions.find((q) => q.messageId === node.messageId);
               if (!question) return null;
               const label = summarizeQuestion(question.text);
@@ -219,15 +256,19 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
                     aria-describedby, so a "jump to" prefix would make a screen
                     reader announce the question twice.
 
-                    Keyboard-reachable, and focus is styled like hover so the
-                    dot under the caret reads like the one under the cursor.
-                    Hidden dots leave the tab order explicitly rather than
-                    relying on `visibility`, so nothing focusable ever sits
-                    inside `aria-hidden`. */}
+                    Focus is styled like hover, so the dot under the caret
+                    reads like the one under the cursor. Only the roving dot is
+                    tabbable; hidden dots leave the tab order entirely, so
+                    nothing focusable ever sits inside `aria-hidden`. */}
                     <button
                       type="button"
-                      tabIndex={hidden ? -1 : 0}
+                      ref={(el) => {
+                        dotRefs.current[index] = el;
+                      }}
+                      tabIndex={hidden || index !== activeDot ? -1 : 0}
                       aria-label={label}
+                      onKeyDown={(event) => onDotKeyDown(event, index)}
+                      onFocus={() => setRovingIndex(index)}
                       onClick={() => onJump(node.messageId)}
                       style={{ top: `${node.fraction * 100}%` }}
                       className="pointer-events-auto absolute right-6 size-3.5 -translate-y-1/2 translate-x-1/2 rounded-full before:absolute before:inset-[5px] before:rounded-full before:scale-100 before:bg-muted-foreground before:opacity-40 before:transition-[opacity,scale] before:duration-200 before:ease-out motion-reduce:before:transition-none group-hover:before:opacity-70 hover:before:scale-150 hover:before:opacity-100 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring focus-visible:before:scale-150 focus-visible:before:opacity-100"
