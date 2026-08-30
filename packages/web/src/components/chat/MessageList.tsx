@@ -554,14 +554,27 @@ export function MessageList({
             />
           );
           const tail = row === anchorRow ? standalone : null;
-          if (!selection?.active) return [view, tail];
+          // The timeline rail locates its scroll targets by this attribute, and
+          // Chat paints the post-jump landing tint on the same wrapper. It goes
+          // around the view inside every branch, so share mode cannot strip it.
+          // A plain div with no classes adds no box: UserMessage's own `mb-4`
+          // still collapses through it, so row rhythm is unchanged.
+          const anchored = (node: ReactNode, key?: string) =>
+            row.kind === "user" ? (
+              <div key={key} data-timeline-anchor={row.message.id}>
+                {node}
+              </div>
+            ) : (
+              node
+            );
+          if (!selection?.active) return [anchored(view, row.key), tail];
           const { turnId, sessionId } = rowTurnRef(row);
           if (!turnId || sessionId !== selection.selectableSessionId) {
             // Not selectable (child-session row, or no turn): still dim it so the
             // selection state reads clearly across the whole transcript.
             return [
               <div key={row.key} className="pl-9 opacity-60">
-                {view}
+                {anchored(view)}
               </div>,
               tail,
             ];
@@ -573,7 +586,7 @@ export function MessageList({
               onToggle={() => selection.onToggleTurn(turnId)}
               label={selection.selectedTurns.has(turnId) ? "Deselect message" : "Select message"}
             >
-              {view}
+              {anchored(view)}
             </SelectableRow>,
             tail,
           ];

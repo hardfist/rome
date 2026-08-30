@@ -14,6 +14,7 @@ import {
   MessageList,
   type BlockActions,
   type LivePreview,
+  type ShareSelection,
 } from "./MessageList";
 import { buildRows, type AgentIdentity } from "./chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
@@ -486,5 +487,102 @@ describe("MessageList Plan placement", () => {
     expect(recapToggle.getAttribute("aria-expanded")).toBe("true");
     expect(recapContent?.hidden).toBe(false);
     expect(screen.getByText("Concise recap")).toBeTruthy();
+  });
+});
+
+// The timeline rail finds its scroll targets by this attribute, and Chat paints
+// the post-jump landing tint on the same wrapper. Both break silently if a
+// render branch drops it, so each branch is covered.
+function questionTurn(text: string, id: string, turnId?: string): ChatMessage {
+  return {
+    id,
+    sessionId: "s-1",
+    ...(turnId ? { turnId } : {}),
+    role: "user",
+    content: text,
+    createdAt: "2026-06-13T00:00:00.000Z",
+  };
+}
+
+function settledList(messages: ChatMessage[], selection?: ShareSelection) {
+  const actions: BlockActions = {
+    onApprovalResolved: () => {},
+    onSubmitAppComponent: () => {},
+    onDismissAppComponent: () => {},
+    interactionResults: new Map(),
+  };
+  return (
+    <ThemeProvider>
+      <MessageList
+        rows={buildRows(messages, new Map([["s-1", IDENTITY]]), IDENTITY, {
+          runningTurnId: null,
+          isStreaming: false,
+        })}
+        live={{
+          isStreaming: false,
+          runningTurnId: null,
+          snapshot: null,
+          text: "",
+          identity: IDENTITY,
+        }}
+        selection={selection}
+        contentRef={() => {}}
+        onOpenLiveTrace={() => {}}
+        onOpenStoredTrace={() => {}}
+        actions={actions}
+      />
+    </ThemeProvider>
+  );
+}
+
+function anchorIds(container: HTMLElement): (string | null)[] {
+  return [...container.querySelectorAll("[data-timeline-anchor]")].map((el) =>
+    el.getAttribute("data-timeline-anchor"),
+  );
+}
+
+describe("timeline anchors", () => {
+  it("tags every user row with its message id, and nothing else", () => {
+    const first = questionTurn("first question", "u-first");
+    const second = questionTurn("second question", "u-second");
+    const { container } = render(settledList([first, commentary("an answer", "a-answer"), second]));
+
+    expect(anchorIds(container)).toEqual(["u-first", "u-second"]);
+  });
+
+  it("keeps the anchor on a selectable row during share selection", () => {
+    // Share mode wraps the row in SelectableRow with a click overlay. The
+    // anchor has to survive that branch or the rail silently stops working
+    // whenever share mode is on.
+    const question = questionTurn("still addressable", "u-share", "turn-9");
+    const { container } = render(
+      settledList([question], {
+        active: true,
+        selectedTurns: new Set<string>(),
+        selectableSessionId: "s-1",
+        onToggleTurn: () => {},
+      }),
+    );
+
+    expect(anchorIds(container)).toEqual(["u-share"]);
+    // The overlay still works — the anchor wrapper sits inside SelectableRow,
+    // not around it, so it cannot swallow the toggle.
+    expect(screen.getByRole("button", { name: "Select message" })).toBeTruthy();
+  });
+
+  it("keeps the anchor on a row share mode cannot select", () => {
+    // No turnId, so this row is dimmed rather than made selectable — a third
+    // render branch, and it still has to carry the anchor.
+    const question = questionTurn("no turn id", "u-dimmed");
+    const { container } = render(
+      settledList([question], {
+        active: true,
+        selectedTurns: new Set<string>(),
+        selectableSessionId: "s-1",
+        onToggleTurn: () => {},
+      }),
+    );
+
+    expect(anchorIds(container)).toEqual(["u-dimmed"]);
   });
 });
