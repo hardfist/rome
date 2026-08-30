@@ -53,6 +53,9 @@
     "unavailableTitle": "该分享对话不可用",
     "unavailableBody": "链接可能已被撤销或失效。"
   },
+  "timeline": {
+    "label": "提问时间线"
+  },
   "roles": {
     "agent": "助手"
   },

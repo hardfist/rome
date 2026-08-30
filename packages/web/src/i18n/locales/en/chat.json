@@ -53,6 +53,9 @@
     "unavailableTitle": "This shared chat is unavailable",
     "unavailableBody": "The link may have been revoked or is no longer valid."
   },
+  "timeline": {
+    "label": "Question timeline"
+  },
   "roles": {
     "agent": "Assistant"
   },
