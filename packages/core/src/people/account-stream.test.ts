@@ -21,6 +21,7 @@ import {
 import { seedBaseline } from "../test/seeds.js";
 import { readAccountStream } from "./account-directory.js";
 import { readPersonTimeline } from "./timeline.js";
+import { romeChannels } from "../channels/rome-channels.js";
 import { personMessageStores } from "./timeline-sources.js";
 
 /** A WhatsApp contact the mirror holds a conversation for, and whom the
@@ -178,10 +179,19 @@ describe("readAccountStream", () => {
 
   it("costs one grouped pass per store however many accounts are on the stream", async () => {
     const counted = countingDb(testDb.db);
-    // Only the message stores are built from `deps.db`; the address books and
-    // the triage record come from repositories on the unwrapped handle. So what
-    // this counts is exactly the passes the stream makes over the histories.
-    const streamed = { ...deps, db: counted.db };
+    // Every message store on the counted handle: the channels' own mirrors
+    // through the channel list, Rome's two through `db`. The address books and
+    // the triage record stay on the unwrapped handle, so what this counts is
+    // exactly the passes the stream makes over the histories.
+    const streamed = {
+      ...deps,
+      db: counted.db,
+      channels: romeChannels({
+        db: counted.db,
+        whatsAppAccounts: deps.whatsAppAccounts,
+        linkedInAccounts: deps.linkedInAccounts,
+      }),
+    };
 
     const before = counted.passes();
     const small = await readAccountStream(streamed);

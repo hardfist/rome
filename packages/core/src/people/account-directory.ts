@@ -22,8 +22,8 @@ import {
 } from "@rome/api-types/people";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import type { AccountNames } from "../channels/account-names.js";
-import { foldAccounts, addressBookRegistry } from "../channels/account-fold.js";
-import type { Accounts } from "../channels/accounts.js";
+import { foldAccounts } from "../channels/account-fold.js";
+import { addressBooks, type Channels } from "../channels/channel.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
@@ -31,8 +31,9 @@ import { assignAccountHeads } from "./timeline.js";
 import { personMessageStores } from "./timeline-sources.js";
 
 export interface AccountDirectoryDeps {
-  whatsAppAccounts: Accounts;
-  linkedInAccounts: Accounts;
+  /** Every channel Rome mirrors — the address books this folds, and the stores
+   *  the stream reads a history from. */
+  channels: Channels;
   personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings">;
   sentinelLogRepo: Pick<SentinelLogRepository, "listSenderActivity">;
   accountNames: Pick<AccountNames, "displayNames">;
@@ -173,7 +174,9 @@ async function observeAccounts(deps: AccountDirectoryDeps): Promise<DirectoryAcc
   const mappings = persons.flatMap((person) =>
     person.channelMappings.map((mapping) => ({ ...mapping, person })),
   );
-  const fold = await foldAccounts(addressBookRegistry(deps), { stored: [...senders, ...mappings] });
+  const fold = await foldAccounts(addressBooks(deps.channels), {
+    stored: [...senders, ...mappings],
+  });
 
   /** Who holds each account, decided once before any row is built. */
   const linkOf = new Map<string, AccountLink>();

@@ -13,11 +13,10 @@
 // never reaches a person's timeline.
 
 import type { Accounts } from "../channels/accounts.js";
-import { linkedInMessages } from "../channels/linkedin-messages.js";
+import { messageStores, type Channels } from "../channels/channel.js";
 import type { Messages } from "../channels/messages.js";
 import { agentMessages } from "../channels/messages-agent.js";
 import { sentinelLogMessages } from "../channels/messages-sentinel.js";
-import { whatsAppMessages } from "../channels/whatsapp-messages.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { TimelineAccount } from "./timeline.js";
 
@@ -27,24 +26,21 @@ import type { TimelineAccount } from "./timeline.js";
  * row alike.
  *
  * The order is a precedence: a channel mirror holds the conversation as the
- * channel has it, so it outranks Rome's own transcript of the same messages,
- * which in turn outranks the sentinel's triage record. An account only the
- * sentinel saw still gets its exchanges — the sentinel is last, not excluded.
+ * channel has it, so every channel's own store outranks Rome's transcript of
+ * the same messages, which in turn outranks the sentinel's triage record. An
+ * account only the sentinel saw still gets its exchanges — the sentinel is
+ * last, not excluded.
  *
  * The cost of that precedence: an account with a mirrored conversation shows
  * the conversation, and the sentinel's own record of an exchange inside it
  * stays behind Rome's reply as the channel delivered it.
  *
- * Adding a store is one more `Messages` adapter appended here. Nothing above
- * knows how many there are or what they read.
+ * A channel joins by mirroring a history, which is an entry in the channel list
+ * (rome-channels.ts). Rome's own two stores belong to no channel and answer for
+ * every one, which is why they are named here and sit behind all of them.
  */
-export function personMessageStores(deps: { db: DrizzleDb }): Messages[] {
-  return [
-    whatsAppMessages(deps.db),
-    linkedInMessages(deps.db),
-    agentMessages(deps.db),
-    sentinelLogMessages(deps.db),
-  ];
+export function personMessageStores(deps: { db: DrizzleDb; channels: Channels }): Messages[] {
+  return [...messageStores(deps.channels), agentMessages(deps.db), sentinelLogMessages(deps.db)];
 }
 
 /**
@@ -86,11 +82,11 @@ type AddressBook = Accounts;
 /** Each channel's accounts, indexed the two ways the fold reads them: which
  *  account an address belongs to, and every address of that account.
  *
- *  Read only for the channels the links name, since an address book costs a
- *  full read. LinkedIn has one too but is deliberately absent: it stores a
- *  member under its member id and nothing else, so folding it would buy a whole
- *  read and change no answer. It joins here when it starts storing a second
- *  address. */
+ *  Named here rather than read off the channel list, and only for the channels
+ *  the links name, since an address book costs a full read. LinkedIn has one
+ *  too but is deliberately absent: it stores a member under its member id and
+ *  nothing else, so folding it would buy a whole read and change no answer. It
+ *  joins here when it starts storing a second address. */
 async function readAddressBooks(
   deps: { whatsAppAccounts: AddressBook },
   channels: ReadonlySet<string>,

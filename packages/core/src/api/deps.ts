@@ -3,7 +3,7 @@ import type { ActionLoader } from "../actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
-import type { LinkedInAccounts } from "../channels/linkedin-accounts.js";
+import type { Channels } from "../channels/channel.js";
 import type { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import type { AccountNames } from "../channels/account-names.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
@@ -78,10 +78,10 @@ export interface ApiDeps {
   /** WhatsApp's address book over that mirror — who it can reach, folded onto
    *  one account per person, and what was last said to each. */
   whatsAppAccounts: WhatsAppAccounts;
-  /** LinkedIn's address book over its own inbox mirror — the same shape
-   *  WhatsApp's is, and all the API needs of LinkedIn. The mirror behind it is
-   *  the poller's and the timeline's; no route reads it directly. */
-  linkedInAccounts: LinkedInAccounts;
+  /** Every channel Rome mirrors, each carrying its address book and its own
+   *  record of what was said on it. LinkedIn reaches the API only through
+   *  here — no route reads its mirror directly. */
+  channels: Channels;
   /** What each platform calls an account, over every address book Rome mirrors
    *  and the names senders put on their own messages — the display name a
    *  person or account serializer puts on the wire. */

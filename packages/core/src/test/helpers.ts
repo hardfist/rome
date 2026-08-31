@@ -54,6 +54,7 @@ import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
+import { romeChannels } from "../channels/rome-channels.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
@@ -336,6 +337,10 @@ export interface TestDeps extends ApiDeps {
    *  the person timeline reads through it — so a test that wants LinkedIn
    *  history seeds it here rather than through the API's own dependencies. */
   linkedInStoreRepo: LinkedInStoreRepository;
+  /** The address books behind `channels`, kept reachable so a test can rebuild
+   *  the list against a different database handle. */
+  whatsAppAccounts: WhatsAppAccounts;
+  linkedInAccounts: LinkedInAccounts;
   sessionsRepo: SessionsRepository;
   policiesRepo: PoliciesRepository;
   executionJournalRepo: ExecutionJournalRepository;
@@ -408,11 +413,8 @@ export async function buildTestDeps(
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
   const sentinelLogRepo = new SentinelLogRepository(db);
-  const accountNames = createAccountNames({
-    whatsAppAccounts,
-    linkedInAccounts,
-    sentinelLogRepo,
-  });
+  const channels = romeChannels({ db, whatsAppAccounts, linkedInAccounts });
+  const accountNames = createAccountNames({ channels, sentinelLogRepo });
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
   // A private env object per deps bag: route tests exercise apply/remove
@@ -576,6 +578,7 @@ export async function buildTestDeps(
     whatsAppAccounts,
     linkedInStoreRepo,
     linkedInAccounts,
+    channels,
     accountNames,
     sentinelLogRepo,
     approvalsRepo,

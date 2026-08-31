@@ -7,8 +7,8 @@
 // have none at all.
 
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
-import { addressBookRegistry } from "./account-fold.js";
 import type { Accounts } from "./accounts.js";
+import { addressBooks, type Channels } from "./channel.js";
 
 /**
  * What to call an account, on any channel.
@@ -72,14 +72,13 @@ export class AccountNames {
   }
 }
 
-/** A provider joins the directory by taking an entry in {@link addressBookRegistry},
- *  and every caller keeps asking the same one question. */
+/** A provider joins the directory by taking an entry in the channel list
+ *  (rome-channels.ts), and every caller keeps asking the same one question. */
 export function createAccountNames(deps: {
-  whatsAppAccounts: Accounts;
-  linkedInAccounts: Accounts;
+  channels: Channels;
   sentinelLogRepo: SentinelLogRepository;
 }): AccountNames {
-  return new AccountNames(addressBookRegistry<Accounts>(deps), deps.sentinelLogRepo);
+  return new AccountNames(addressBooks(deps.channels), deps.sentinelLogRepo);
 }
 
 const key = (account: { channel: string; channelUserId: string }) =>

@@ -20,8 +20,8 @@ import type { Accounts } from "./accounts.js";
  * survives it: which addresses a channel hands out, which of them is
  * canonical, and what counts as an account at all are the channel's answers,
  * given once behind {@link Accounts}. So a caller's rules stay
- * channel-agnostic, and adding a channel is an entry in
- * {@link addressBookRegistry} rather than another special case above.
+ * channel-agnostic, and adding a channel is an entry in the channel list
+ * (rome-channels.ts) rather than another special case above.
  */
 export interface FoldedAccount {
   channel: string;
@@ -41,21 +41,6 @@ export interface FoldedAccount {
 /** Key a (channel, address) pair for the maps a fold is built out of. */
 export const addressKey = (channel: string, channelUserId: string) =>
   `${channel}\n${channelUserId}`;
-
-/**
- * The channels Rome reads an address book for. A provider joins every fold
- * and every naming read at once by taking an entry here.
- *
- * The address book type is the caller's: a fold needs the whole of
- * {@link Accounts} and a naming read needs only `resolve`, and neither should
- * have to name the channels a second time to say so.
- */
-export function addressBookRegistry<T>(deps: {
-  whatsAppAccounts: T;
-  linkedInAccounts: T;
-}): Readonly<Record<string, T>> {
-  return { whatsapp: deps.whatsAppAccounts, linkedin: deps.linkedInAccounts };
-}
 
 /**
  * The channels a fold reads, each behind its own address book.
