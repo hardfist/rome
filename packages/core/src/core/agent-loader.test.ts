@@ -91,6 +91,37 @@ describe("AgentLoader", () => {
       expect(main.outputSchema).toBeUndefined();
     });
 
+    it("rejects an outputSchema outside the portable-v1 profile during load", async () => {
+      const root = await mkdtemp(join(tmpdir(), "rome-invalid-output-schema-"));
+      await writeFile(
+        join(root, "invalid.yaml"),
+        [
+          "name: invalid",
+          "description: Invalid structured agent.",
+          "tier: small",
+          "permissionMode: bypassPermissions",
+          "tools: []",
+          "systemPromptPrefix: Test agent.",
+          "outputSchema:",
+          "  type: object",
+          "  properties:",
+          "    value:",
+          "      anyOf:",
+          "        - { type: string }",
+          "        - { type: 'null' }",
+          "  required: [value]",
+          "  additionalProperties: false",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      try {
+        await expect(loader.loadAll(root)).rejects.toThrow(/anyOf is not supported by portable-v1/);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
     it("parses agent name, tier, tools, and permissions", async () => {
       const agents = await loader.loadAll(FIXTURES_DIR);
 
