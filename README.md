@@ -270,7 +270,9 @@ The difference is the unit of compounding. Grok Bot compounds hosted bot
 state, Hermes compounds the agent's notes, Manus compounds a machine and its
 files, and Wabi compounds a network of shareable apps. Rome compounds the
 environment: executable, composable capability owned by you ([why that is the
-durable asset](VISION.md)). Proven actions close the cost and reliability
+durable asset](VISION.md)). Building blocks compose: a capability built for
+one task becomes a part in a more ambitious one, so each request can ask for
+more than the last. Proven actions close the cost and reliability
 gap, purpose-built apps close the interface gap, and the direction is
 maintenance that keeps the environment coherent as it grows. Because the
 environment is open,
