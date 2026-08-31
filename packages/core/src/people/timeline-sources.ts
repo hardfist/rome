@@ -25,22 +25,22 @@ import type { TimelineAccount } from "./timeline.js";
  * account — the list `assignAccounts` walks, for the page and for the listing
  * row alike.
  *
- * The order is a precedence: a channel mirror holds the conversation as the
- * channel has it, so every channel's own store outranks Rome's transcript of
+ * The order is a precedence: a channel's own store answers for the conversation
+ * as the channel has it, so every one of them outranks Rome's transcript of
  * the same messages, which in turn outranks the sentinel's triage record. An
  * account only the sentinel saw still gets its exchanges — the sentinel is
  * last, not excluded.
  *
- * The cost of that precedence: an account with a mirrored conversation shows
- * the conversation, and the sentinel's own record of an exchange inside it
+ * The cost of that precedence: an account whose channel answers for the
+ * conversation shows the conversation, and the sentinel's own record of an exchange inside it
  * stays behind Rome's reply as the channel delivered it.
  *
- * A channel joins by mirroring a history, which is an entry in the channel list
- * (mirrored-channels.ts). Rome's own two stores belong to no channel and answer for
+ * A channel joins by answering for a history, which is an entry in the channel list
+ * (channel-list.ts). Rome's own two stores belong to no channel and answer for
  * every one, which is why they are named here and sit behind all of them.
  */
-export function personMessageStores(deps: { db: DrizzleDb; mirroredChannels: Channels }): Messages[] {
-  return [...messageStores(deps.mirroredChannels), agentMessages(deps.db), sentinelLogMessages(deps.db)];
+export function personMessageStores(deps: { db: DrizzleDb; channels: Channels }): Messages[] {
+  return [...messageStores(deps.channels), agentMessages(deps.db), sentinelLogMessages(deps.db)];
 }
 
 /**

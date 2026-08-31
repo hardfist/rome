@@ -6,7 +6,7 @@ import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import { AccountNames, createAccountNames } from "./account-names.js";
 import type { AccountId } from "./accounts.js";
 import { LinkedInAccounts } from "./linkedin-accounts.js";
-import { mirroredChannels } from "./mirrored-channels.js";
+import { channelList } from "./channel-list.js";
 import { WhatsAppAccounts } from "./whatsapp-accounts.js";
 
 const PHONE = "15550007777@s.whatsapp.net";
@@ -40,7 +40,7 @@ describe("AccountNames", () => {
     linkedInStore = new LinkedInStoreRepository(testDb.db);
     sentinelLogRepo = new SentinelLogRepository(testDb.db);
     names = createAccountNames({
-      mirroredChannels: mirroredChannels({
+      channels: channelList({
         db: testDb.db,
         whatsAppAccounts: new WhatsAppAccounts(whatsAppStore),
         linkedInAccounts: new LinkedInAccounts(linkedInStore),

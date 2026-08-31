@@ -2,13 +2,13 @@
  * A channel as the rest of Rome reads one: its name bound to the two ports that
  * answer for it — who it can reach (`Accounts`, accounts.ts) and what was said
  * to them (`Messages`, messages.ts). So a caller reads one list of channels
- * rather than naming each provider's address book and its mirror one at a time.
+ * rather than naming each provider's address book and message store one at a time.
  * Vocabulary: docs/concepts/messaging.md.
  *
  * Read-side. Moving a message belongs to `ProviderAdapter` (adapter.ts) and to
  * the connection registry that owns its lifecycle. The two are apart because a
- * directory read runs off mirrors with nothing connected: a channel that had to
- * be live to be asked about would make every People read depend on whether the
+ * directory read answers with no transport connected: a channel that had to be
+ * live to be asked about would make every People read depend on whether the
  * guardian's phone is reachable.
  */
 
@@ -19,16 +19,13 @@ import type { Messages } from "./messages.js";
 /**
  * A channel Rome reads.
  *
- * The three contracts below are the whole of it. Every channel owes all three:
+ * The two contracts below are the whole of it. Every channel owes both:
  *
  * - **C1 The name is the identity.** One channel per name, one name per
  *   channel, stable for the life of the deployment. It is the `channel` written
  *   on every link, every stored message and every sentinel row, so the name is
  *   not a label a channel can restyle — changing it reassigns history.
- * - **C2 Absence is an answer.** A null port is what the channel can say, not a
- *   gap waiting to be filled, and a caller reads it as the answer rather than
- *   skipping the channel or waiting for a better one.
- * - **C3 What a channel carries is the channel's.** Neither port reaches past
+ * - **C2 What a channel carries is the channel's.** Neither port reaches past
  *   the accounts and the messages of this channel, so a caller can attribute
  *   anything either one answers to the channel it read it from.
  *
@@ -50,26 +47,35 @@ export interface Channel {
    * before. A caller that has to show such an account works from the addresses
    * it already holds — a link, a stored message — which is all the channel can
    * say about who it can reach.
+   *
+   * Null does not say why. A platform that withholds its directory and one
+   * whose directory nobody has read yet answer a caller the same.
    */
   readonly accounts: Accounts | null;
 
   /**
-   * The channel's own record of what was said on it, or null where it keeps
-   * none.
+   * What was said on the channel, as the channel can answer for it, or null
+   * where it can answer nothing.
    *
-   * A mirror holds the conversation as the platform has it, back past the
-   * point Rome started watching. Null means the channel mirrors nothing, and
-   * what was said on it survives only in Rome's own transcript — a store that
-   * belongs to no channel and answers for all of them. So not every channel has
-   * a store, and not every store is a channel's.
+   * A channel that holds the conversation as the platform has it answers back
+   * past the point Rome started watching. Whether it reads a table a sync fills
+   * or calls the platform is its own business, and no caller can tell.
+   *
+   * Null means what was said there survives only in Rome's own transcript — a
+   * store that belongs to no channel and answers for all of them. So not every
+   * channel has a store, and not every store is a channel's.
    */
   readonly messages: Messages | null;
 }
 
 /**
  * A list of channels, in the order they claim an account. Never every channel
- * there is: a list holds the channels its caller can ask something of, and the
- * one Rome reads is `mirroredChannels` (mirrored-channels.ts).
+ * there is: channels are open — a Rome App brings its own — so no list
+ * enumerates them, and the one Rome reads is `channelList` (channel-list.ts).
+ *
+ * A channel the list does not hold answers nothing, and so does one holding two
+ * null ports. A caller reads either as the answer and works from what it
+ * already has, rather than skipping the channel or waiting for a better list.
  *
  * The order is a precedence, and it decides one thing: which channel a caller
  * attributes an address both would answer for. Channels do not overlap by

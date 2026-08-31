@@ -73,12 +73,12 @@ export class AccountNames {
 }
 
 /** A provider joins the directory by taking an entry in the channel list
- *  (mirrored-channels.ts), and every caller keeps asking the same one question. */
+ *  (channel-list.ts), and every caller keeps asking the same one question. */
 export function createAccountNames(deps: {
-  mirroredChannels: Channels;
+  channels: Channels;
   sentinelLogRepo: SentinelLogRepository;
 }): AccountNames {
-  return new AccountNames(addressBooks(deps.mirroredChannels), deps.sentinelLogRepo);
+  return new AccountNames(addressBooks(deps.channels), deps.sentinelLogRepo);
 }
 
 const key = (account: { channel: string; channelUserId: string }) =>

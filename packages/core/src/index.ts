@@ -54,7 +54,7 @@ import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
-import { mirroredChannels } from "./channels/mirrored-channels.js";
+import { channelList } from "./channels/channel-list.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
@@ -236,8 +236,8 @@ async function main() {
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
   const sentinelLogRepo = new SentinelLogRepository(db);
-  const channels = mirroredChannels({ db, whatsAppAccounts, linkedInAccounts });
-  const accountNames = createAccountNames({ mirroredChannels: channels, sentinelLogRepo });
+  const channels = channelList({ db, whatsAppAccounts, linkedInAccounts });
+  const accountNames = createAccountNames({ channels, sentinelLogRepo });
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
 
@@ -1208,7 +1208,7 @@ async function main() {
       personMappingRepo,
       whatsAppStoreRepo,
       whatsAppAccounts,
-      mirroredChannels: channels,
+      channels,
       accountNames,
       webchatRepo,
       webhookInvocationsRepo,
