@@ -210,8 +210,12 @@ comparison is who and what stands behind the app.
 | --- | --- | --- | --- | --- |
 | **Rome** | Actions, skills, and apps as git-tracked code, plus memory and app-private data | A saved action, without re-running the agent | A purpose-built app, plus chat channels (Telegram, Discord, WhatsApp) | Self-hosted or Rome Cloud |
 | **Grok Bot** (xAI) | Per-bot memory, files, and preferences, plus a shared cloud computer, in xAI's cloud | The model, every time | A chat thread | Hosted only |
-| **Hermes Agent** (Nous Research) | Bounded memory notes and skill documents, as text | The model, every time | A chat thread (chat clients, desktop app, or CLI) | Self-hosted |
-| **Manus** | Files, tools, and databases on a persistent cloud computer, plus knowledge and playbooks | The model, every time | A chat session, plus standalone web apps it builds | Hosted, with app-code export |
+| **Hermes Agent** (Nous Research) | Bounded memory notes and skill documents, as text | The model, or a script-only cron job\* | A chat thread (chat clients, desktop app, or CLI) | Self-hosted |
+| **Manus** | Files, tools, and databases on a persistent cloud computer, plus knowledge and playbooks | The model, or scripts left on its machine\* | A chat session, plus standalone web apps it builds | Hosted, with app-code export |
+
+\* Hermes and Manus can schedule plain scripts that skip the model. A script
+answers only to its timer. A Rome action is a building block: agents, apps,
+and interfaces all call it, and it can pause for approval.
 
 **Grok Bot** gives your named agents an always-on cloud computer, tool
 connections, scheduling, and agent-to-agent delegation. Each bot keeps its own
@@ -226,12 +230,13 @@ ask, and every check runs the agent again. Rome gives repeated work an app, in
 an environment that is open, exportable, and model-agnostic.
 
 **Hermes Agent** is the closest in spirit: MIT-licensed, self-hostable, with
-curated memory, self-written skill documents, and a skill marketplace. The
-difference is what persists: Hermes persists text that informs the next
-reasoning run, so every run still pays the model's full cost and variance.
-Rome persists software: executable actions, app-private databases, and
-purpose-built interfaces. A proven action runs the same way every time without
-the agent, so cost and reliability decouple from the model. Rome already
+curated memory, self-written skill documents, and a skill marketplace. What
+persists is text that informs the next reasoning run, plus script-only cron
+jobs that skip the model but answer only to their timer. Rome persists
+software: executable actions, app-private databases, and purpose-built
+interfaces. An action is a building block rather than a loose script: agents,
+routines, and app interfaces all call the same one, it can pause for
+approval, and every run is recorded. Rome already
 discovers and composes capabilities from earlier work, and its agenda extends
 to consolidating, refactoring, and retiring what goes stale
 ([VISION.md](VISION.md)). And Hermes offers one general interface to the agent
@@ -242,10 +247,11 @@ app for each repeated workload.
 stay, installed tools stay, and scheduled jobs, long-running bots, and
 databases can live on the machine. It also builds full-stack web apps whose
 code you can export and host anywhere. The difference is what that persistence
-is made of. A scheduled Manus job re-runs the agent at metered cost, while a
-saved Rome action runs without the agent. A Manus app is a deliverable that
-stands apart from the agent, while a Rome app is also a capability the agent
-discovers and reuses in later work. And the Manus agent itself, with its knowledge,
+is made of. A Manus schedule re-runs the agent at metered cost or fires a
+script parked on the machine, reusable only by finding the file again, while
+a Rome action is a named operation that every surface can call. A Manus app
+is a deliverable that stands apart from the agent, while a Rome app is also a
+capability the agent discovers and reuses in later work. And the Manus agent itself, with its knowledge,
 playbooks, and machine, runs only in its cloud, while Rome self-hosts.
 
 **Wabi** approaches from the personal software side: a social platform where
