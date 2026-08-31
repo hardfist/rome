@@ -1,19 +1,37 @@
-# Messaging: Channels, Policies, Sentinel, Approvals
+# Messaging: Messages, Channels, Policies, Sentinel, Approvals
 
-## Channels
+## Message
 
-Channels are messaging platform integrations — external platforms like Telegram, WhatsApp, and Discord, plus the webchat built into the dashboard. Each channel has an adapter that normalizes platform-specific messages into a common shape carrying the channel, the sender's [account](people.md#account), thread addressing, content, and the raw platform event.
+A message is one thing somebody said — a line a person sent to Rome, or one Rome sent back, with whatever came attached to it. It travels on a [channel](#channels), from or to an [account](people.md#account).
 
 **Contracts:**
 
-- Every inbound message is normalized to the common shape before it reaches routing. The channel's adapter absorbs platform-specific wire formats, so adding a channel changes nothing downstream.
+- Every message names the account that sent or received it and the channel that carried it. Who that account belongs to is the account's [link](people.md#link), so who said something changes only when a link does, retroactively and over their whole history.
+- A message goes one of two ways: to Rome, or from it. Every message declares which, and there is no third direction.
+- A message is what was said, which is not the same as what Rome holds. A platform that keeps its own record has the conversation back past the point Rome started watching. Where Rome keeps the only record, the history starts when Rome did.
+
+**Not to be confused with:**
+
+- **[Channel](#channels)** — the channel is what carried a message. The message is what was said on it.
+- **[Account](people.md#account)** — the account is who said it. The message is what they said.
+- **Notification** — a notification is an out-of-band delivery to the guardian. It lands in the same transcript, but nobody sent it on a channel.
+
+## Channels
+
+A channel is somewhere Rome and a person can reach each other — WhatsApp, Telegram, email, the chat built into the dashboard. Every [message](#message) arrives on one, and everyone Rome can talk to is reached through one. The platform owns the channel. Rome connects to it.
+
+**Contracts:**
+
+- Every inbound message reaches routing in one shape, whatever platform it came from. A channel absorbs its own platform's wire format, so adding a channel changes nothing downstream.
 - Channel connection setup is uniform: enabling any channel drives the same server-owned setup protocol — there is no bespoke per-service connect flow ([channel invariants](../architecture/channels.md#invariants)).
 - Per-channel credentials are kept separate and are revoked independently.
 
 **Not to be confused with:**
 
+- **[Message](#message)** — the message is what was said. The channel is what carried it.
 - **[Person](people.md#person)** — a channel is where a message arrives. The person is who sent it, resolved across channels.
-- **[Hook](apps.md#hooks)** — the `channel-message` hook is how an inbound message enters app code. The channel is the integration that produced it.
+- **Connection** — a connection is what joins the Rome instance to a service, holding the authority the guardian granted. Carrying messages is one of the things that authority buys. The same connection to Slack can also let Rome act on the workspace without messaging anyone.
+- **[Hook](apps.md#hooks)** — the `channel-message` hook is how an inbound message enters app code. The channel is where the message came from.
 
 ## Policies
 

@@ -1,0 +1,98 @@
+/**
+ * A channel as the rest of Rome reads one: its name bound to the two ports that
+ * answer for it — who it can reach (`Accounts`, accounts.ts) and what was said
+ * to them (`Messages`, messages.ts). So a caller reads one list of channels
+ * rather than naming each provider's address book and its mirror one at a time.
+ * Vocabulary: docs/concepts/messaging.md.
+ *
+ * Read-side. Moving a message belongs to `ProviderAdapter` (adapter.ts) and to
+ * the connection registry that owns its lifecycle. The two are apart because a
+ * directory read runs off mirrors with nothing connected: a channel that had to
+ * be live to be asked about would make every People read depend on whether the
+ * guardian's phone is reachable.
+ */
+
+import type { AddressBooks } from "./account-fold.js";
+import type { Accounts } from "./accounts.js";
+import type { Messages } from "./messages.js";
+
+/**
+ * A channel Rome reads.
+ *
+ * The three contracts below are the whole of it. Every channel owes all three:
+ *
+ * - **C1 The name is the identity.** One channel per name, one name per
+ *   channel, stable for the life of the deployment. It is the `channel` written
+ *   on every link, every stored message and every sentinel row, so the name is
+ *   not a label a channel can restyle — changing it reassigns history.
+ * - **C2 Absence is an answer.** A null port is what the channel can say, not a
+ *   gap waiting to be filled, and a caller reads it as the answer rather than
+ *   skipping the channel or waiting for a better one.
+ * - **C3 What a channel carries is the channel's.** Neither port reaches past
+ *   the accounts and the messages of this channel, so a caller can attribute
+ *   anything either one answers to the channel it read it from.
+ *
+ * Channel adds no verb of its own. What a caller asks is what {@link Accounts}
+ * and {@link Messages} already take, and a third way to ask who a channel
+ * reaches or what was said to them is a third answer to disagree with.
+ */
+export interface Channel {
+  /** The channel's name, as every stored row spells it — `whatsapp`,
+   *  `linkedin`, `telegram`. */
+  readonly name: string;
+
+  /**
+   * The channel's address book, or null where the platform gives Rome no way
+   * to enumerate who it reaches.
+   *
+   * Null is the common case rather than the exceptional one: a channel Rome
+   * only receives on knows an address when a message arrives at it and nothing
+   * before. A caller that has to show such an account works from the addresses
+   * it already holds — a link, a stored message — which is all the channel can
+   * say about who it can reach.
+   */
+  readonly accounts: Accounts | null;
+
+  /**
+   * The channel's own record of what was said on it, or null where it keeps
+   * none.
+   *
+   * A mirror holds the conversation as the platform has it, back past the
+   * point Rome started watching. Null means the channel mirrors nothing, and
+   * what was said on it survives only in Rome's own transcript — a store that
+   * belongs to no channel and answers for all of them. So not every channel has
+   * a store, and not every store is a channel's.
+   */
+  readonly messages: Messages | null;
+}
+
+/**
+ * The channels Rome reads, in the order they claim an account.
+ *
+ * The order is a precedence, and it decides one thing: which channel a caller
+ * attributes an address both would answer for. Channels do not overlap by
+ * design — an address belongs to the platform that issued it — so a channel
+ * ordered behind another is only ever reached for what the one ahead disclaims.
+ *
+ * A provider joins every read at once by taking an entry here, and nothing
+ * above knows how many entries there are or which ports they fill.
+ */
+export type Channels = readonly Channel[];
+
+/** Each channel's address book by channel name, for the callers that fold every
+ *  channel's accounts at once. Channels with no address book are absent, which
+ *  is what a fold reads to fall back on the addresses it already holds. */
+export function addressBooks(channels: Channels): AddressBooks {
+  const books: Record<string, Accounts> = {};
+  for (const channel of channels) {
+    if (channel.accounts) books[channel.name] = channel.accounts;
+  }
+  return books;
+}
+
+/** The channels' own message stores, in the channels' order. Rome's stores —
+ *  the agent transcript, the sentinel log — are not here: they belong to no
+ *  channel, and a read that wants them appends them behind these. */
+export function messageStores(channels: Channels): Messages[] {
+  return channels.flatMap((channel) => (channel.messages ? [channel.messages] : []));
+}
