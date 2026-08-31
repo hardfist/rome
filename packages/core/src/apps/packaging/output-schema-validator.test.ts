@@ -25,6 +25,26 @@ const validSchema = {
   additionalProperties: false,
 } satisfies Record<string, unknown>;
 
+function stringEnumWithTotalLength(count: number, totalLength: number): string[] {
+  const prefixes = Array.from({ length: count }, (_, index) => `${index}:`);
+  const prefixLength = prefixes.reduce((total, prefix) => total + prefix.length, 0);
+  const remainingLength = totalLength - prefixLength;
+  const baseSuffixLength = Math.floor(remainingLength / count);
+  const remainder = remainingLength % count;
+  return prefixes.map(
+    (prefix, index) => prefix + "x".repeat(baseSuffixLength + (index < remainder ? 1 : 0)),
+  );
+}
+
+function schemaWithEnum(values: unknown[]): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: { value: { type: "string", enum: values } },
+    required: ["value"],
+    additionalProperties: false,
+  };
+}
+
 describe("portable-v1 outputSchema", () => {
   it("accepts nested strict objects, arrays, and required nullable values", () => {
     expect(validatePortableOutputSchema(validSchema)).toEqual([]);
@@ -101,6 +121,50 @@ describe("portable-v1 outputSchema", () => {
         additionalProperties: false,
       }),
     ).toEqual([expect.stringContaining("characters across property names")]);
+  });
+
+  it("rejects schema values that JSON serialization cannot preserve", () => {
+    expect(
+      validatePortableOutputSchema({
+        type: "object",
+        properties: {
+          value: { type: "number", const: Number.NaN },
+        },
+        required: ["value"],
+        additionalProperties: false,
+      }),
+    ).toEqual([expect.stringContaining('["const"] must be a finite JSON number')]);
+
+    expect(
+      validatePortableOutputSchema({
+        type: "object",
+        properties: {
+          value: { type: "number", minimum: Number.POSITIVE_INFINITY },
+        },
+        required: ["value"],
+        additionalProperties: false,
+      }),
+    ).toEqual([expect.stringContaining('["minimum"] must be a finite JSON number')]);
+
+    expect(validatePortableOutputSchema(schemaWithEnum(["ok", undefined]))).toEqual([
+      expect.stringContaining('["enum"][1] contains a value that is not representable in JSON'),
+    ]);
+  });
+
+  it("enforces the per-enum string character limit above 250 values", () => {
+    expect(
+      validatePortableOutputSchema(schemaWithEnum(stringEnumWithTotalLength(250, 15_001))),
+    ).toEqual([]);
+    expect(
+      validatePortableOutputSchema(schemaWithEnum(stringEnumWithTotalLength(251, 15_000))),
+    ).toEqual([]);
+    expect(
+      validatePortableOutputSchema(schemaWithEnum(stringEnumWithTotalLength(251, 15_001))),
+    ).toEqual([
+      expect.stringContaining(
+        "enum contains 15001 string characters across more than 250 values; maximum is 15000",
+      ),
+    ]);
   });
 
   it("also rejects schemas that pass the profile shape but are invalid JSON Schema", () => {

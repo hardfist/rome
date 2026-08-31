@@ -36,6 +36,8 @@ const MAX_SCHEMA_DEPTH = 10;
 const MAX_SCHEMA_PROPERTIES = 5_000;
 const MAX_ENUM_VALUES = 1_000;
 const MAX_SCHEMA_CHARACTERS = 120_000;
+const ENUM_STRING_CHARACTER_LIMIT_THRESHOLD = 250;
+const MAX_ENUM_STRING_CHARACTERS = 15_000;
 
 export class PortableOutputSchemaError extends Error {
   constructor(readonly issues: string[]) {
@@ -52,6 +54,78 @@ function pathProperty(path: string, key: string): string {
   return `${path}.properties[${JSON.stringify(key)}]`;
 }
 
+function pathValue(path: string, key: string): string {
+  return `${path}[${JSON.stringify(key)}]`;
+}
+
+function validateJsonValue(
+  value: unknown,
+  path: string,
+  issues: string[],
+  ancestors = new Set<object>(),
+): void {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return;
+  }
+  if (typeof value === "number") {
+    issues.push(`${path} must be a finite JSON number`);
+    return;
+  }
+  if (typeof value !== "object") {
+    issues.push(`${path} contains a value that is not representable in JSON`);
+    return;
+  }
+  if (ancestors.has(value)) {
+    issues.push(`${path} contains a circular reference`);
+    return;
+  }
+
+  ancestors.add(value);
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.prototype.hasOwnProperty.call(value, index)) {
+        issues.push(
+          `${path}[${index}] is missing; sparse arrays are not representable losslessly in JSON`,
+        );
+      } else {
+        validateJsonValue(value[index], `${path}[${index}]`, issues, ancestors);
+      }
+    }
+    const indexedKeys = new Set(Array.from({ length: value.length }, (_, index) => String(index)));
+    for (const key of Object.getOwnPropertyNames(value)) {
+      if (key !== "length" && !indexedKeys.has(key)) {
+        issues.push(
+          `${pathValue(path, key)} is an array property that JSON serialization would omit`,
+        );
+      }
+    }
+  } else {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      issues.push(`${path} must be a plain JSON object`);
+    } else {
+      const enumerableKeys = new Set(Object.keys(value));
+      for (const key of Object.getOwnPropertyNames(value)) {
+        if (!enumerableKeys.has(key)) {
+          issues.push(`${pathValue(path, key)} is a property that JSON serialization would omit`);
+        }
+      }
+      for (const [key, child] of Object.entries(value)) {
+        validateJsonValue(child, pathValue(path, key), issues, ancestors);
+      }
+    }
+  }
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    issues.push(`${path} contains symbol-keyed properties that JSON serialization would omit`);
+  }
+  ancestors.delete(value);
+}
+
 /**
  * Validate Rome's portable-v1 provider-output profile. This is the lossless
  * intersection sent unchanged to Claude Agent SDK and Codex app-server.
@@ -63,10 +137,11 @@ export function validatePortableOutputSchema(schema: unknown): string[] {
   let constrainedCharacterCount = 0;
 
   try {
-    if (JSON.stringify(schema) === undefined) return ["$ must be JSON-serializable"];
+    validateJsonValue(schema, "$", issues);
   } catch {
     return ["$ must be JSON-serializable"];
   }
+  if (issues.length > 0) return issues;
 
   const valueCharacterCount = (value: unknown): number => {
     if (typeof value === "string") return value.length;
@@ -121,7 +196,19 @@ export function validatePortableOutputSchema(schema: unknown): string[] {
         issues.push(`${path}.enum must be a non-empty array`);
       } else {
         enumValueCount += node.enum.length;
-        for (const value of node.enum) constrainedCharacterCount += valueCharacterCount(value);
+        let enumStringCharacterCount = 0;
+        for (const value of node.enum) {
+          constrainedCharacterCount += valueCharacterCount(value);
+          if (typeof value === "string") enumStringCharacterCount += value.length;
+        }
+        if (
+          node.enum.length > ENUM_STRING_CHARACTER_LIMIT_THRESHOLD &&
+          enumStringCharacterCount > MAX_ENUM_STRING_CHARACTERS
+        ) {
+          issues.push(
+            `${path}.enum contains ${enumStringCharacterCount} string characters across more than ${ENUM_STRING_CHARACTER_LIMIT_THRESHOLD} values; maximum is ${MAX_ENUM_STRING_CHARACTERS}`,
+          );
+        }
       }
     }
     if (node.const !== undefined) constrainedCharacterCount += valueCharacterCount(node.const);

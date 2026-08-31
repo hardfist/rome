@@ -122,6 +122,34 @@ describe("AgentLoader", () => {
       }
     });
 
+    it("rejects outputSchema values that YAML cannot preserve through JSON", async () => {
+      const root = await mkdtemp(join(tmpdir(), "rome-non-json-output-schema-"));
+      await writeFile(
+        join(root, "invalid.yaml"),
+        [
+          "name: invalid",
+          "description: Invalid structured agent.",
+          "tier: small",
+          "permissionMode: bypassPermissions",
+          "tools: []",
+          "systemPromptPrefix: Test agent.",
+          "outputSchema:",
+          "  type: object",
+          "  properties:",
+          "    value: { type: number, minimum: .inf }",
+          "  required: [value]",
+          "  additionalProperties: false",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      try {
+        await expect(loader.loadAll(root)).rejects.toThrow(/minimum.*finite JSON number/);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
     it("parses agent name, tier, tools, and permissions", async () => {
       const agents = await loader.loadAll(FIXTURES_DIR);
 
