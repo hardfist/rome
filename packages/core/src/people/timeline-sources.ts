@@ -19,11 +19,10 @@ import {
   type StoredAddress,
 } from "../channels/account-fold.js";
 import { addressBooks, messageStores, type Channels } from "../channels/channel.js";
-import type { Messages } from "../channels/messages.js";
+import type { MessageAccount, Messages } from "../channels/messages.js";
 import { agentMessages } from "../channels/messages-agent.js";
 import { sentinelLogMessages } from "../channels/messages-sentinel.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { TimelineAccount } from "./timeline.js";
 
 /**
  * The stores a person's history is read from, in the order they claim an
@@ -66,7 +65,7 @@ export function personMessageStores(deps: { db: DrizzleDb; channels: Channels })
 export async function timelineAccounts(
   deps: { channels: Channels },
   groups: readonly (readonly StoredAddress[])[],
-): Promise<TimelineAccount[][]> {
+): Promise<MessageAccount[][]> {
   const links = groups.flat();
   const fold = await foldAccounts(booksNamed(deps.channels, links), { stored: links });
   return groups.map((group) => accountsOf(fold, group));
@@ -85,8 +84,8 @@ function booksNamed(channels: Channels, links: readonly StoredAddress[]): Addres
 /** One group's links as the accounts they reach, keyed by the account rather
  *  than by the address a link happened to name, so two links onto one account
  *  are one entry. */
-function accountsOf(fold: AccountFold, links: readonly StoredAddress[]): TimelineAccount[] {
-  const byAccount = new Map<string, TimelineAccount>();
+function accountsOf(fold: AccountFold, links: readonly StoredAddress[]): MessageAccount[] {
+  const byAccount = new Map<string, MessageAccount>();
   for (const link of links) {
     const key = fold.key(link.channel, link.channelUserId);
     if (byAccount.has(key)) continue;

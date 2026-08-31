@@ -15,7 +15,12 @@ const account = (id: string, addresses: string[] = [id]): Account => ({
 class FakeAccounts {
   listings = 0;
 
-  constructor(private readonly accounts: readonly Account[]) {}
+  constructor(
+    private readonly accounts: readonly Account[],
+    /** Addresses the listing does not spell out but the channel still answers
+     *  for, as a real address book does: a bare phone number, a profile URL. */
+    private readonly alsoResolves: Readonly<Record<string, string>> = {},
+  ) {}
 
   async listAccounts(_input: { query?: string; cursor?: string; limit: number }) {
     this.listings++;
@@ -23,7 +28,8 @@ class FakeAccounts {
   }
 
   async resolve(address: string): Promise<Account | null> {
-    return this.accounts.find((candidate) => candidate.addresses.includes(address)) ?? null;
+    const named = this.alsoResolves[address] ?? address;
+    return this.accounts.find((candidate) => candidate.addresses.includes(named)) ?? null;
   }
 }
 
@@ -73,6 +79,24 @@ describe("timelineAccounts", () => {
     ]);
     expect(whatsapp.listings).toBe(1);
     expect(telegram.listings).toBe(1);
+  });
+
+  it("folds an address only the channel can resolve onto its account", async () => {
+    // The link names a bare phone number. The listing spells out no such
+    // address, and only the channel knows it reaches Ada — which is why the
+    // fold asks the channel rather than matching the listing itself.
+    const whatsapp = new FakeAccounts([account(ada, [ada, adaLid])], {
+      "+1 202 555 0100": ada,
+    });
+
+    const [accounts] = await timelineAccounts({ channels: channelList({ whatsapp }) }, [
+      [{ channel: "whatsapp", channelUserId: "+1 202 555 0100" }],
+    ]);
+
+    expect(accounts).toHaveLength(1);
+    expect([...(accounts[0]?.addresses ?? [])].sort()).toEqual(
+      ["+1 202 555 0100", ada, adaLid].sort(),
+    );
   });
 
   it("carries every address of an account a mapping names under one of them", async () => {
