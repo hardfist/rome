@@ -274,7 +274,7 @@ durable asset](VISION.md)). Building blocks compose: a capability built for
 one task becomes a part in a more ambitious one, so each request can ask for
 more than the last. An inventory-aging action and a customer-churn skill,
 built for separate tasks, later combine to clear seasonal inventory without a
-broad markdown, the arc VISION.md walks in full.
+broad markdown.
 
 Proven actions close the cost and reliability gap, purpose-built apps close
 the interface gap, and maintenance keeps the environment coherent as it
