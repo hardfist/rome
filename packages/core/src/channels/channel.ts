@@ -67,15 +67,16 @@ export interface Channel {
 }
 
 /**
- * The channels Rome reads, in the order they claim an account.
+ * A list of channels, in the order they claim an account. Never every channel
+ * there is: a list holds the channels its caller can ask something of, and the
+ * one Rome reads is `mirroredChannels` (mirrored-channels.ts).
  *
  * The order is a precedence, and it decides one thing: which channel a caller
  * attributes an address both would answer for. Channels do not overlap by
  * design — an address belongs to the platform that issued it — so a channel
  * ordered behind another is only ever reached for what the one ahead disclaims.
  *
- * A provider joins every read at once by taking an entry here, and nothing
- * above knows how many entries there are or which ports they fill.
+ * Nothing above a list knows how many entries it has or which ports they fill.
  */
 export type Channels = readonly Channel[];
 

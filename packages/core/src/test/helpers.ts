@@ -54,7 +54,7 @@ import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
-import { romeChannels } from "../channels/rome-channels.js";
+import { mirroredChannels } from "../channels/mirrored-channels.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
@@ -413,8 +413,8 @@ export async function buildTestDeps(
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
   const sentinelLogRepo = new SentinelLogRepository(db);
-  const channels = romeChannels({ db, whatsAppAccounts, linkedInAccounts });
-  const accountNames = createAccountNames({ channels, sentinelLogRepo });
+  const channels = mirroredChannels({ db, whatsAppAccounts, linkedInAccounts });
+  const accountNames = createAccountNames({ mirroredChannels: channels, sentinelLogRepo });
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
   // A private env object per deps bag: route tests exercise apply/remove
@@ -578,7 +578,7 @@ export async function buildTestDeps(
     whatsAppAccounts,
     linkedInStoreRepo,
     linkedInAccounts,
-    channels,
+    mirroredChannels: channels,
     accountNames,
     sentinelLogRepo,
     approvalsRepo,

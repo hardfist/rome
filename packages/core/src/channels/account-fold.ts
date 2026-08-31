@@ -21,7 +21,7 @@ import type { Accounts } from "./accounts.js";
  * canonical, and what counts as an account at all are the channel's answers,
  * given once behind {@link Accounts}. So a caller's rules stay
  * channel-agnostic, and adding a channel is an entry in the channel list
- * (rome-channels.ts) rather than another special case above.
+ * (mirrored-channels.ts) rather than another special case above.
  */
 export interface FoldedAccount {
   channel: string;

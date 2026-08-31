@@ -36,11 +36,11 @@ import type { TimelineAccount } from "./timeline.js";
  * stays behind Rome's reply as the channel delivered it.
  *
  * A channel joins by mirroring a history, which is an entry in the channel list
- * (rome-channels.ts). Rome's own two stores belong to no channel and answer for
+ * (mirrored-channels.ts). Rome's own two stores belong to no channel and answer for
  * every one, which is why they are named here and sit behind all of them.
  */
-export function personMessageStores(deps: { db: DrizzleDb; channels: Channels }): Messages[] {
-  return [...messageStores(deps.channels), agentMessages(deps.db), sentinelLogMessages(deps.db)];
+export function personMessageStores(deps: { db: DrizzleDb; mirroredChannels: Channels }): Messages[] {
+  return [...messageStores(deps.mirroredChannels), agentMessages(deps.db), sentinelLogMessages(deps.db)];
 }
 
 /**

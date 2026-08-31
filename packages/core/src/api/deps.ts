@@ -81,7 +81,7 @@ export interface ApiDeps {
   /** Every channel Rome mirrors, each carrying its address book and its own
    *  record of what was said on it. LinkedIn reaches the API only through
    *  here — no route reads its mirror directly. */
-  channels: Channels;
+  mirroredChannels: Channels;
   /** What each platform calls an account, over every address book Rome mirrors
    *  and the names senders put on their own messages — the display name a
    *  person or account serializer puts on the wire. */

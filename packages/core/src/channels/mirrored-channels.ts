@@ -24,7 +24,7 @@ import { whatsAppMessages } from "./whatsapp-messages.js";
  * stored against it, and what was said on it from Rome's own transcript. An
  * entry earns its place by filling at least one port.
  */
-export function romeChannels(deps: {
+export function mirroredChannels(deps: {
   db: DrizzleDb;
   whatsAppAccounts: Accounts;
   linkedInAccounts: Accounts;

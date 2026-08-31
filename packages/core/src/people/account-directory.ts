@@ -33,7 +33,7 @@ import { personMessageStores } from "./timeline-sources.js";
 export interface AccountDirectoryDeps {
   /** Every channel Rome mirrors — the address books this folds, and the stores
    *  the stream reads a history from. */
-  channels: Channels;
+  mirroredChannels: Channels;
   personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings">;
   sentinelLogRepo: Pick<SentinelLogRepository, "listSenderActivity">;
   accountNames: Pick<AccountNames, "displayNames">;
@@ -174,7 +174,7 @@ async function observeAccounts(deps: AccountDirectoryDeps): Promise<DirectoryAcc
   const mappings = persons.flatMap((person) =>
     person.channelMappings.map((mapping) => ({ ...mapping, person })),
   );
-  const fold = await foldAccounts(addressBooks(deps.channels), {
+  const fold = await foldAccounts(addressBooks(deps.mirroredChannels), {
     stored: [...senders, ...mappings],
   });
 

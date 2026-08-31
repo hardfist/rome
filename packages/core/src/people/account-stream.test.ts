@@ -21,7 +21,7 @@ import {
 import { seedBaseline } from "../test/seeds.js";
 import { readAccountStream } from "./account-directory.js";
 import { readPersonTimeline } from "./timeline.js";
-import { romeChannels } from "../channels/rome-channels.js";
+import { mirroredChannels } from "../channels/mirrored-channels.js";
 import { personMessageStores } from "./timeline-sources.js";
 
 /** A WhatsApp contact the mirror holds a conversation for, and whom the
@@ -186,7 +186,7 @@ describe("readAccountStream", () => {
     const streamed = {
       ...deps,
       db: counted.db,
-      channels: romeChannels({
+      mirroredChannels: mirroredChannels({
         db: counted.db,
         whatsAppAccounts: deps.whatsAppAccounts,
         linkedInAccounts: deps.linkedInAccounts,

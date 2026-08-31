@@ -23,7 +23,7 @@ export interface PeopleReadDeps {
   db: DrizzleDb;
   personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings" | "findById">;
   whatsAppAccounts: Accounts;
-  channels: Channels;
+  mirroredChannels: Channels;
   accountNames: Pick<AccountNames, "displayNames">;
 }
 
