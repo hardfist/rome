@@ -209,15 +209,16 @@ comparison is who and what stands behind the app.
 | | What accumulates | What runs repeated work | Where you operate it | Hosting |
 | --- | --- | --- | --- | --- |
 | **Rome** | Actions, skills, and apps as git-tracked code, plus memory and app-private data | A saved action, without re-running the agent | A purpose-built app, plus chat channels (Telegram, Discord, WhatsApp) | Self-hosted or Rome Cloud |
-| **Grok Bot** (xAI) | Per-bot chat history and taught skills, in xAI's cloud | The model, every time | A chat thread | Hosted only |
-| **Hermes Agent** (Nous Research) | Memories and skill documents, as text | The model, every time | A chat thread | Self-hosted |
-| **Manus** | Files, knowledge notes, and playbooks, in a hosted sandbox | The model, every time | A per-task chat thread | Hosted only |
+| **Grok Bot** (xAI) | Per-bot memory, files, and preferences, plus a shared cloud computer, in xAI's cloud | The model, every time | A chat thread | Hosted only |
+| **Hermes Agent** (Nous Research) | Bounded memory notes and skill documents, as text | The model, every time | A chat thread (chat clients, desktop app, or CLI) | Self-hosted |
+| **Manus** | Files, tools, and databases on a persistent cloud computer, plus knowledge and playbooks | The model, every time | A chat session, plus standalone web apps it builds | Hosted, with app-code export |
 
-**Grok Bot** gives each named agent an always-on cloud computer, tool
-connections, scheduling, and agent-to-agent delegation. It is closed, hosted,
-and bound to one vendor's models, so what an agent learns lives in xAI's cloud
-and does not leave with you. Its unit of persistence is the bot, and its
-interface is a messenger thread. A thread is a good place to ask for something
+**Grok Bot** gives your named agents an always-on cloud computer, tool
+connections, scheduling, and agent-to-agent delegation. Each bot keeps its own
+memory, files, and preferences, while all of an account's bots share one cloud
+computer. Everything lives in xAI's hosted stack, bound to one vendor's
+models, so leaving means losing what accumulated. The interface is a messenger
+thread: a good place to ask for something
 once and a poor place to operate: inbox triage needs a queue with statuses, a
 price tracker needs a table with history and thresholds, and approvals need a
 review queue that shows what will change. In chat, state is invisible until you
@@ -225,26 +226,27 @@ ask, and every check runs the agent again. Rome gives repeated work an app, in
 an environment that is open, exportable, and model-agnostic.
 
 **Hermes Agent** is the closest in spirit: MIT-licensed, self-hostable, with
-persistent memory, self-written skill documents, and a skill marketplace. The
+curated memory, self-written skill documents, and a skill marketplace. The
 difference is what persists: Hermes persists text that informs the next
 reasoning run, so every run still pays the model's full cost and variance.
 Rome persists software: executable actions, app-private databases, and
 purpose-built interfaces. A proven action runs the same way every time without
-the agent, so cost and reliability decouple from the model. Rome also
-maintains what accumulates: it composes capabilities from earlier work and
-consolidates, refactors, and retires what goes stale, where Hermes grows its
-memory monotonically. And Hermes stops at the chat thread, a place to talk to
-an agent rather than a place to run a product.
+the agent, so cost and reliability decouple from the model. Rome already
+discovers and composes capabilities from earlier work, and its agenda extends
+to consolidating, refactoring, and retiring what goes stale
+([VISION.md](VISION.md)). And Hermes offers one general interface to the agent
+(chat clients, a desktop app, the terminal), while Rome grows a purpose-built
+app for each repeated workload.
 
-**Manus** is built for one-shot delegation. Describe a goal, and it plans,
-works in a hosted sandbox, and returns a finished artifact such as a report, a
-deck, or a website. It persists files, knowledge notes, and playbooks, but a
-playbook improves the next prompt rather than becoming executable, so every
-task runs the agent again at metered cost. Its output is the artifact. The
-same request in Rome also leaves behind the capability that produced it: an
-action to run again, or an app when the work needs a home. And because Manus
-is closed and hosted, the sandbox and everything accumulated in it stay in its
-cloud.
+**Manus** delegates a goal to an agent on a persistent cloud computer: files
+stay, installed tools stay, and scheduled jobs, long-running bots, and
+databases can live on the machine. It also builds full-stack web apps whose
+code you can export and host anywhere. The difference is what that persistence
+is made of. A scheduled Manus job re-runs the agent at metered cost, while a
+saved Rome action runs without the agent. A Manus app is a deliverable that
+stands apart from the agent, while a Rome app is also a capability the agent
+discovers and reuses in later work. And the Manus agent itself, with its knowledge,
+playbooks, and machine, runs only in its cloud, while Rome self-hosts.
 
 **Wabi** approaches from the personal software side: a social platform where
 anyone prompts a mini app into existence, then shares and remixes it, with
@@ -258,13 +260,14 @@ capability also extends what the agent can do next. Wabi asks you to describe
 an app, while Rome asks you to describe an outcome and leaves an app behind
 when the work deserves one.
 
-The difference is the unit of compounding. Grok Bot compounds the bot, Hermes
-compounds the agent's notes, Manus compounds task artifacts, and Wabi
-compounds a network of shareable apps. Rome compounds the environment:
-executable, composable capability owned by you ([why that is the durable
-asset](VISION.md)). Proven actions close the cost and reliability gap,
-purpose-built apps close the interface gap, and maintenance keeps the
-environment coherent as it grows. Because the environment is open,
+The difference is the unit of compounding. Grok Bot compounds hosted bot
+state, Hermes compounds the agent's notes, Manus compounds a machine and its
+files, and Wabi compounds a network of shareable apps. Rome compounds the
+environment: executable, composable capability owned by you ([why that is the
+durable asset](VISION.md)). Proven actions close the cost and reliability
+gap, purpose-built apps close the interface gap, and the direction is
+maintenance that keeps the environment coherent as it grows. Because the
+environment is open,
 git-tracked, and exportable, it survives a model swap. Users stay for the
 compounding, not the lock-in.
 
