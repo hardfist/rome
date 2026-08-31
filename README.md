@@ -80,8 +80,8 @@ cd rome
 ./scripts/quickstart-docker.sh
 ```
 
-The dashboard comes up at `http://localhost:7663`, bound to loopback only —
-first-run onboarding is open to whoever reaches it first, so exposing it
+The dashboard comes up at `http://localhost:7663`, bound to loopback only.
+First-run onboarding is open to whoever reaches it first, so exposing it
 beyond the machine takes an explicit `--bind`. State lives in named Docker
 volumes, so re-running the script upgrades the container without losing data.
 Telemetry export stays off unless you set `OTEL_EXPORTER_OTLP_ENDPOINT`. Run
@@ -133,7 +133,7 @@ after the browser closes, and when the user comes back tomorrow.
 
 A useful rule of thumb: **a workflow is a verb; an app is a noun**. Use a
 workflow to perform a task and return a result. Build an app when the work needs
-a home of its own—with user-editable data, multiple actions, or a persistent
+a home of its own, with user-editable data, multiple actions, or a persistent
 agent.
 
 ### Rome can build the missing app
@@ -196,6 +196,77 @@ These are the kinds of requests Rome is designed to follow through on:
 
 Rome can handle one-off tasks, scheduled work, long-running follow-through, and
 purpose-built app experiences without forcing everything into one chat window.
+
+## How Rome compares
+
+Rome sits where two product waves meet: persistent agents and personal
+software. The agent products share Rome's thesis that agents should persist
+and improve. There the comparison is what accumulates, what runs when work
+repeats, and where you operate the result. The personal software platforms
+share Rome's thesis that software should be built per person. There the
+comparison is who and what stands behind the app.
+
+| | What accumulates | What runs repeated work | Where you operate it | Hosting |
+| --- | --- | --- | --- | --- |
+| **Rome** | Actions, skills, and apps as git-tracked code, plus memory and app-private data | A saved action, without re-running the agent | A purpose-built app, plus chat channels (Telegram, Discord, WhatsApp) | Self-hosted or Rome Cloud |
+| **Grok Bot** (xAI) | Per-bot chat history and taught skills, in xAI's cloud | The model, every time | A chat thread | Hosted only |
+| **Hermes Agent** (Nous Research) | Memories and skill documents, as text | The model, every time | A chat thread | Self-hosted |
+| **Manus** | Files, knowledge notes, and playbooks, in a hosted sandbox | The model, every time | A per-task chat thread | Hosted only |
+
+**Grok Bot** gives each named agent an always-on cloud computer, tool
+connections, scheduling, and agent-to-agent delegation. It is closed, hosted,
+and bound to one vendor's models, so what an agent learns lives in xAI's cloud
+and does not leave with you. Its unit of persistence is the bot, and its
+interface is a messenger thread. A thread is a good place to ask for something
+once and a poor place to operate: inbox triage needs a queue with statuses, a
+price tracker needs a table with history and thresholds, and approvals need a
+review queue that shows what will change. In chat, state is invisible until you
+ask, and every check runs the agent again. Rome gives repeated work an app, in
+an environment that is open, exportable, and model-agnostic.
+
+**Hermes Agent** is the closest in spirit: MIT-licensed, self-hostable, with
+persistent memory, self-written skill documents, and a skill marketplace. The
+difference is what persists: Hermes persists text that informs the next
+reasoning run, so every run still pays the model's full cost and variance.
+Rome persists software: executable actions, app-private databases, and
+purpose-built interfaces. A proven action runs the same way every time without
+the agent, so cost and reliability decouple from the model. Rome also
+maintains what accumulates: it composes capabilities from earlier work and
+consolidates, refactors, and retires what goes stale, where Hermes grows its
+memory monotonically. And Hermes stops at the chat thread, a place to talk to
+an agent rather than a place to run a product.
+
+**Manus** is built for one-shot delegation. Describe a goal, and it plans,
+works in a hosted sandbox, and returns a finished artifact such as a report, a
+deck, or a website. It persists files, knowledge notes, and playbooks, but a
+playbook improves the next prompt rather than becoming executable, so every
+task runs the agent again at metered cost. Its output is the artifact. The
+same request in Rome also leaves behind the capability that produced it: an
+action to run again, or an app when the work needs a home. And because Manus
+is closed and hosted, the sandbox and everything accumulated in it stay in its
+cloud.
+
+**Wabi** approaches from the personal software side: a social platform where
+anyone prompts a mini app into existence, then shares and remixes it, with
+Wabi hosting everything. It validates half of Rome's bet, software built per
+person rather than for the average user. But there is no worker behind the
+app: a Wabi app is the end product, and you still operate it yourself. A Rome
+app is the interface to a capability, and the capability faces both ways: you
+work through its views, and agents work through its actions, skills, and data
+in later tasks. Every new Wabi app grows your library, and every new Rome
+capability also extends what the agent can do next. Wabi asks you to describe
+an app, while Rome asks you to describe an outcome and leaves an app behind
+when the work deserves one.
+
+The difference is the unit of compounding. Grok Bot compounds the bot, Hermes
+compounds the agent's notes, Manus compounds task artifacts, and Wabi
+compounds a network of shareable apps. Rome compounds the environment:
+executable, composable capability owned by you ([why that is the durable
+asset](VISION.md)). Proven actions close the cost and reliability gap,
+purpose-built apps close the interface gap, and maintenance keeps the
+environment coherent as it grows. Because the environment is open,
+git-tracked, and exportable, it survives a model swap. Users stay for the
+compounding, not the lock-in.
 
 ## Repository map
 
