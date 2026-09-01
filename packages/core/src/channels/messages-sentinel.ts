@@ -4,7 +4,7 @@
 import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import type { Messages } from "./messages.js";
-import { scopePairs, sqlMessages } from "./messages-sql.js";
+import { scopeColumn, scopePairs, sqlMessages } from "./messages-sql.js";
 
 /**
  * What the sentinel logged, one row read as the two lines it records: what the
@@ -13,6 +13,10 @@ import { scopePairs, sqlMessages } from "./messages-sql.js";
  * Both halves share the row's one timestamp, and the ordering puts the reply
  * above the line it answers. Each carries its own `ref`, so the two never
  * collapse to one cursor position.
+ *
+ * A row names both the sender it came from and the thread it was said in, so
+ * the two questions read two different columns of it rather than one column
+ * two ways.
  */
 export function sentinelLogMessages(db: DrizzleDb): Messages {
   // No `channel`: the log holds every channel's triage side by side, so it is
@@ -20,14 +24,20 @@ export function sentinelLogMessages(db: DrizzleDb): Messages {
   return sqlMessages({
     db,
     view(scope) {
-      const addressed = scopePairs(scope, sql`l.channel`, sql`l.channel_user_id`);
-      if (addressed === null) return null;
+      const key = scope.by === "address" ? sql`l.channel_user_id` : sql`l.thread_id`;
+      const named = scopePairs(scope, sql`l.channel`, key);
+      if (named === null) return null;
       // A log row names its sender but not whether they were alone. The
       // session that recorded the same thread does, so a thread Rome knows to
-      // be a group is what the scope subtracts — a row whose thread no session
-      // covers is a direct exchange until something says otherwise.
-      const direct = sql`
-        ${addressed}
+      // be a group is what an account read subtracts — a row whose thread no
+      // session covers is a direct exchange until something says otherwise. A
+      // conversation read subtracts nothing: the thread named is the thread
+      // answered, group or not.
+      const held =
+        scope.by === "conversation"
+          ? named
+          : sql`
+        ${named}
         AND NOT EXISTS (
           SELECT 1 FROM rome_sessions s
           WHERE s.type = 'channel'
@@ -38,23 +48,23 @@ export function sentinelLogMessages(db: DrizzleDb): Messages {
       return sql`
         SELECT
           l.channel AS source,
-          l.channel_user_id AS address,
+          ${key} AS ${scopeColumn(scope)},
           l.created_at AS at,
           0 AS outbound,
           'sentinel:' || l.id AS ref,
           l.text AS body
         FROM sentinel_log l
-        WHERE ${direct}
+        WHERE ${held}
         UNION ALL
         SELECT
           l.channel,
-          l.channel_user_id,
+          ${key},
           l.created_at,
           1,
           'sentinel:' || l.id || ':reply',
           l.response
         FROM sentinel_log l
-        WHERE ${direct} AND l.response IS NOT NULL AND l.response <> ''`;
+        WHERE ${held} AND l.response IS NOT NULL AND l.response <> ''`;
     },
   });
 }

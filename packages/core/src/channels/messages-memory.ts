@@ -7,44 +7,63 @@ import {
   isAfterTimelineCursor,
   type TimelineEntry,
 } from "@rome/api-types/people";
-import type { MessageAccount, MessageRead, Messages } from "./messages.js";
+import type { ConversationRead, MessageAccount, MessageRead, Messages } from "./messages.js";
 
-/** One message the store holds, at the address it arrived on. */
+/** One message the store holds, at the address it arrived on and in the
+ *  conversation it was said in. */
 export interface HeldMessage {
   channel: string;
   address: string;
   entry: TimelineEntry;
+  /**
+   * The thread the message was said in, when that is not the address itself.
+   *
+   * Absent for a direct conversation, which is addressed by the person on it —
+   * so a message held at an address and nothing more is a message in that
+   * person's own thread. A store where the two genuinely differ says so: a
+   * LinkedIn thread is named by the thread and addressed by each member on it,
+   * and a group is named by the group and addressed by nobody.
+   */
+  conversation?: string;
 }
 
 /**
- * `Messages` over `held`, scoped by the `(channel, address)` pair — an address
- * on one channel never selects a message another channel stores under the same
- * string.
+ * `Messages` over `held`, scoped by the `(channel, address)` pair for an
+ * account read and the `(channel, conversation)` pair for a conversation read.
+ * Either way it is the pair — a value on one channel never selects a message
+ * another channel stores under the same string.
  *
  * A message is answered once however many of the given accounts name its
  * address, because a read filters the list rather than making a pass per
  * address.
  */
 export function memoryMessages(held: readonly HeldMessage[]): Messages {
+  const sorted = (messages: readonly HeldMessage[]): TimelineEntry[] =>
+    messages.map((message) => message.entry).sort(compareTimelineEntries);
+
   const full = (accounts: readonly MessageAccount[]): TimelineEntry[] => {
     const scope = new Set(
       accounts.flatMap((account) =>
-        account.addresses.map((address) => addressKey(account.channel, address)),
+        account.addresses.map((address) => key(account.channel, address)),
       ),
     );
-    return held
-      .filter((message) => scope.has(addressKey(message.channel, message.address)))
-      .map((message) => message.entry)
-      .sort(compareTimelineEntries);
+    return sorted(held.filter((message) => scope.has(key(message.channel, message.address))));
   };
+
+  // Newest first, then everything strictly after the cursor, then the page —
+  // the one shape both reads answer in, stated once so neither can drift.
+  const page = (
+    entries: TimelineEntry[],
+    after: TimelineEntry | null,
+    limit: number,
+  ): TimelineEntry[] =>
+    entries
+      .filter((entry) => after === null || isAfterTimelineCursor(entry, after))
+      .slice(0, Math.max(1, Math.floor(limit)));
 
   return {
     async read(request: MessageRead) {
-      const after = request.after ?? null;
-      const limit = Math.max(1, Math.floor(request.limit));
-      return full(request.accounts)
-        .filter((entry) => after === null || isAfterTimelineCursor(entry, after))
-        .slice(0, limit);
+      return page(full(request.accounts), request.after ?? null, request.limit);
     },
 
     async count(accounts) {
@@ -54,7 +73,15 @@ export function memoryMessages(held: readonly HeldMessage[]): Messages {
     async latest(accounts) {
       return full(accounts)[0] ?? null;
     },
+
+    async readConversation(request: ConversationRead) {
+      const wanted = key(request.conversation.channel, request.conversation.id);
+      const inThread = held.filter(
+        (message) => key(message.channel, message.conversation ?? message.address) === wanted,
+      );
+      return page(sorted(inThread), request.after ?? null, request.limit);
+    },
   };
 }
 
-const addressKey = (channel: string, address: string) => `${channel}\n${address}`;
+const key = (channel: string, value: string) => `${channel}\n${value}`;

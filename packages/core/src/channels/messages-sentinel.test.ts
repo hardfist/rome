@@ -73,9 +73,15 @@ async function seed(db: DrizzleDb) {
   // An empty reply is no reply.
   await row(db, "quiet", { at: 1200, text: "hm", response: "", threadId: "tg-quiet-thread" });
 
-  // Out of scope: the thread a group session covers, and another sender.
-  await row(db, "in-group", { at: 900, text: "hi all", response: "hello", threadId: GROUP });
+  // Out of scope: another sender.
   await row(db, "stranger", { at: 1300, text: "who?", channelUserId: "tg-stranger" });
+
+  // The thread a group session covers. No account read reaches it — the
+  // subtraction above takes it out however the row names its sender — and all
+  // of it is what the sentinel logged of that thread. Two rows, each read as
+  // the two lines it records, which is four entries and two ties.
+  await row(db, "in-group", { at: 900, text: "hi all", response: "hello", threadId: GROUP });
+  await row(db, "in-group-2", { at: 950, text: "still here", response: "ack", threadId: GROUP });
 }
 
 describe("sentinelLogMessages", () => {
@@ -152,6 +158,44 @@ describe("sentinelLogMessages", () => {
     expect(await messages.count([])).toBe(0);
     expect(await messages.read({ accounts: [], limit: WHOLE_HISTORY })).toEqual([]);
   });
+
+  describe("read as a conversation", () => {
+    const inThread = (id: string) =>
+      sentinelLogMessages(db).readConversation({
+        conversation: { channel: CHANNEL, id },
+        limit: WHOLE_HISTORY,
+      });
+
+    it("answers a group thread's rows when asked for that thread", async () => {
+      expect((await inThread(GROUP)).map((entry) => entry.ref)).toEqual([
+        "sentinel:in-group-2:reply",
+        "sentinel:in-group-2",
+        "sentinel:in-group:reply",
+        "sentinel:in-group",
+      ]);
+    });
+
+    it("answers none of a group thread's rows to the account read", async () => {
+      const held = await inThread(GROUP);
+      expect(held.length).toBeGreaterThan(0);
+      expect(await refs()).not.toContain("sentinel:in-group");
+      expect(await refs()).not.toContain("sentinel:in-group:reply");
+    });
+
+    it("reads a row with no reply as the inbound message alone", async () => {
+      const entries = (await inThread("tg-unknown-thread")).map((entry) => entry.ref);
+      expect(entries).toContain("sentinel:unheard");
+      expect(entries).not.toContain("sentinel:unheard:reply");
+    });
+
+    it("scopes a thread id to its own channel", async () => {
+      const elsewhere = await sentinelLogMessages(db).readConversation({
+        conversation: { channel: "discord", id: GROUP },
+        limit: WHOLE_HISTORY,
+      });
+      expect(elsewhere).toEqual([]);
+    });
+  });
 });
 
 // One seeded database for the whole suite: every assertion in it reads, so a
@@ -162,7 +206,13 @@ testMessagesContract("sentinelLogMessages", () => {
   enrolled ??= (async () => {
     const { db } = createTestDb();
     await seed(db);
-    return { messages: sentinelLogMessages(db), accounts: [account], silent };
+    return {
+      messages: sentinelLogMessages(db),
+      accounts: [account],
+      silent,
+      conversation: { channel: CHANNEL, id: GROUP },
+      silentConversation: { channel: CHANNEL, id: "tg-no-such-thread" },
+    };
   })();
   return enrolled;
 });

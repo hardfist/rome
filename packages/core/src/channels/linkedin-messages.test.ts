@@ -44,11 +44,17 @@ const threads: ThreadSeed[] = [
     ],
   },
   // Three on the thread: nobody's direct history, whatever LinkedIn's own flag
-  // says about it.
+  // says about it — and all of it is what the thread holds.
   {
     thread: "t-room",
     participants: [SELF, MEMBER, OTHER],
-    messages: [{ id: "f", at: 700, text: "in the room" }],
+    messages: [
+      { id: "f", at: 700, text: "in the room" },
+      { id: "f2", at: 720, self: true, text: "said back" },
+      // The same second as `f2`; the direction settles the tie.
+      { id: "f3", at: 720, text: "crossed in flight" },
+      { id: "f4", at: 900, text: "newest in the room" },
+    ],
   },
   // Two on the thread, but LinkedIn calls it a group.
   {
@@ -172,6 +178,89 @@ describe("linkedInMessages", () => {
     expect(await messages.count(twins)).toBe(1);
   });
 
+  // The acceptance the milestone turns on: the mirror already held these rows
+  // and nothing asked for them.
+  it("answers a group thread's messages when asked for that thread", async () => {
+    const messages = linkedInMessages(testDb.db);
+    const page = await messages.readConversation({
+      conversation: { channel: "linkedin", id: "t-room" },
+      limit: WHOLE_HISTORY,
+    });
+    expect(refs(page)).toEqual(["t-room:f4", "t-room:f2", "t-room:f3", "t-room:f"]);
+    expect(page[0]).toEqual({
+      source: "linkedin",
+      timestamp: 900,
+      direction: "inbound",
+      ref: "t-room:f4",
+      body: "newest in the room",
+    });
+  });
+
+  it("answers none of a group thread's messages to any account read", async () => {
+    const messages = linkedInMessages(testDb.db);
+    const held = await messages.readConversation({
+      conversation: { channel: "linkedin", id: "t-room" },
+      limit: WHOLE_HISTORY,
+    });
+    expect(held.length).toBeGreaterThan(0);
+
+    // Every member of the room asked for as an account, and the thread id
+    // handed over as if it were one.
+    for (const address of [MEMBER, OTHER, SELF, "t-room"]) {
+      const scope: MessageAccount[] = [{ channel: "linkedin", addresses: [address] }];
+      expect(refs(await messages.read({ accounts: scope, limit: WHOLE_HISTORY }))).not.toContain(
+        "t-room:f4",
+      );
+    }
+    const asThread: MessageAccount[] = [{ channel: "linkedin", addresses: ["t-room"] }];
+    expect(await messages.latest(asThread)).toBeNull();
+    expect(await messages.count(asThread)).toBe(0);
+  });
+
+  // LinkedIn's own flag is the other way a thread is a group, and it settles
+  // threads the participant count would call direct.
+  it("answers a thread LinkedIn calls a group when asked for that thread", async () => {
+    const messages = linkedInMessages(testDb.db);
+    const page = await messages.readConversation({
+      conversation: { channel: "linkedin", id: "t-flagged" },
+      limit: WHOLE_HISTORY,
+    });
+    expect(refs(page)).toEqual(["t-flagged:g"]);
+    expect(refs(await messages.read({ accounts, limit: WHOLE_HISTORY }))).not.toContain(
+      "t-flagged:g",
+    );
+  });
+
+  it("answers a direct thread asked for as a conversation exactly as its account reads it", async () => {
+    const messages = linkedInMessages(testDb.db);
+    const byConversation = await messages.readConversation({
+      conversation: { channel: "linkedin", id: "t-direct" },
+      limit: WHOLE_HISTORY,
+    });
+    expect(byConversation).toEqual(await messages.read({ accounts, limit: WHOLE_HISTORY }));
+  });
+
+  it("holds nothing for a conversation on another channel", async () => {
+    const messages = linkedInMessages(testDb.db);
+    expect(
+      await messages.readConversation({
+        conversation: { channel: "whatsapp", id: "t-room" },
+        limit: WHOLE_HISTORY,
+      }),
+    ).toEqual([]);
+  });
+
+  // The store takes the database and nothing else, so the read that reaches a
+  // group answers with no LinkedIn session open.
+  it("answers a conversation from the database alone", async () => {
+    expect(linkedInMessages.length).toBe(1);
+    const page = await linkedInMessages(testDb.db).readConversation({
+      conversation: { channel: "linkedin", id: "t-room" },
+      limit: 1,
+    });
+    expect(refs(page)).toEqual(["t-room:f4"]);
+  });
+
   it("holds nothing for an account on another channel", async () => {
     const messages = linkedInMessages(testDb.db);
     const elsewhere: MessageAccount[] = [{ channel: "whatsapp", addresses: [MEMBER] }];
@@ -265,5 +354,11 @@ describe("linkedInMessages", () => {
 testMessagesContract("linkedInMessages", () => {
   const testDb = createTestDb();
   seedMirror(testDb);
-  return { messages: linkedInMessages(testDb.db), accounts, silent };
+  return {
+    messages: linkedInMessages(testDb.db),
+    accounts,
+    silent,
+    conversation: { channel: "linkedin", id: "t-room" },
+    silentConversation: { channel: "linkedin", id: "t-nobody" },
+  };
 });

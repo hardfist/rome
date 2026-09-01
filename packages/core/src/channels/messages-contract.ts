@@ -10,7 +10,7 @@ import {
   timelineCursor,
   type TimelineEntry,
 } from "@rome/api-types/people";
-import type { MessageAccount, Messages } from "./messages.js";
+import type { MessageAccount, MessageConversation, Messages } from "./messages.js";
 
 /** A limit large enough to hold any history a store can answer — what
  *  messages.ts calls the full read. */
@@ -29,6 +29,17 @@ export interface MessagesContractSubject {
   accounts: MessageAccount[];
   /** Accounts on the store's own channels that it holds nothing for. */
   silent: MessageAccount[];
+  /**
+   * A conversation the store holds messages of, and which none of `accounts`
+   * reaches — a group, since a group is addressed by nobody on it.
+   *
+   * Enroll with at least four messages, two of them in the same second, for
+   * the reason `accounts` gives: a conversation that fits in one page never
+   * pages, and one whose timestamps are all distinct settles no tie.
+   */
+  conversation: MessageConversation;
+  /** A conversation on the store's own channels that it holds nothing of. */
+  silentConversation: MessageConversation;
 }
 
 /** Page size the paging assertions walk with. Smaller than the history the
@@ -139,6 +150,130 @@ export function testMessagesContract(
       expect(await store.messages.read({ accounts: store.silent, limit: WHOLE_HISTORY })).toEqual(
         [],
       );
+    });
+
+    // What a conversation holds, which is the other question a store is asked.
+    // The obligations are `read`'s, restated over a conversation rather than
+    // re-derived: a store that ordered or paged the two differently would
+    // answer one message two ways.
+    describe("read as a conversation", () => {
+      const wholeConversation = async ({ messages, conversation }: MessagesContractSubject) =>
+        messages.readConversation({ conversation, limit: WHOLE_HISTORY });
+
+      it("holds enough of a conversation to prove the law", async () => {
+        const store = await subject();
+        const full = await wholeConversation(store);
+        expect(full.length).toBeGreaterThanOrEqual(4);
+        expect(new Set(full.map((entry) => entry.timestamp)).size).toBeLessThan(full.length);
+      });
+
+      // The whole of it: a conversation nobody is addressed on is reachable
+      // here and nowhere else. A store answering these through an account read
+      // too would have made the new verb a second name for the old one.
+      it("answers a conversation no account read reaches", async () => {
+        const store = await subject();
+        const conversation = await wholeConversation(store);
+        const accounts = await store.messages.read({
+          accounts: store.accounts,
+          limit: WHOLE_HISTORY,
+        });
+        const reached = new Set(accounts.map((entry) => entry.ref));
+        expect(conversation.every((entry) => !reached.has(entry.ref))).toBe(true);
+      });
+
+      it("answers a page newest first, no longer than its limit", async () => {
+        const store = await subject();
+        const page = await store.messages.readConversation({
+          conversation: store.conversation,
+          limit: PAGE,
+        });
+        expect(page.length).toBeLessThanOrEqual(PAGE);
+        expect(page).toEqual([...page].sort(compareTimelineEntries));
+      });
+
+      it("answers only messages strictly after the cursor", async () => {
+        const store = await subject();
+        const first = await store.messages.readConversation({
+          conversation: store.conversation,
+          limit: PAGE,
+        });
+        const cursor = first.at(-1);
+        if (!cursor) throw new Error("the store answered no first page to resume from");
+        const next = await store.messages.readConversation({
+          conversation: store.conversation,
+          after: cursor,
+          limit: WHOLE_HISTORY,
+        });
+        expect(next.every((entry) => isAfterTimelineCursor(entry, cursor))).toBe(true);
+      });
+
+      it("pages to exhaustion over exactly the whole conversation", async () => {
+        const store = await subject();
+        const full = await wholeConversation(store);
+
+        const walked: TimelineEntry[] = [];
+        let after: TimelineEntry | null = null;
+        // Bounded for the reason the account walk above is.
+        for (let page = 0; page <= Math.ceil(full.length / PAGE); page++) {
+          const entries: TimelineEntry[] = await store.messages.readConversation({
+            conversation: store.conversation,
+            after,
+            limit: PAGE,
+          });
+          if (entries.length === 0) break;
+          walked.push(...entries);
+          after = entries[entries.length - 1] ?? null;
+        }
+
+        expect(walked).toEqual(full);
+      });
+
+      it("answers nothing after the conversation's oldest message", async () => {
+        const store = await subject();
+        const full = await wholeConversation(store);
+        const oldest = full.at(-1);
+        expect(oldest).toBeDefined();
+        const past = await store.messages.readConversation({
+          conversation: store.conversation,
+          after: oldest,
+          limit: WHOLE_HISTORY,
+        });
+        expect(past).toEqual([]);
+      });
+
+      it("gives every message its own cursor position", async () => {
+        const store = await subject();
+        const full = await wholeConversation(store);
+        expect(new Set(full.map(timelineCursor)).size).toBe(full.length);
+      });
+
+      // The settled answer for a conversation a store holds nothing of: an
+      // empty page, which is what a store holding the conversation but nothing
+      // said in it answers too. No store needs to tell those apart, and a
+      // second answer for one of them is a case every caller would have to
+      // branch on.
+      it("answers an empty page for a conversation it holds nothing of", async () => {
+        const store = await subject();
+        expect(
+          await store.messages.readConversation({
+            conversation: store.silentConversation,
+            limit: WHOLE_HISTORY,
+          }),
+        ).toEqual([]);
+      });
+
+      it("answers an empty page for a silent conversation resumed from a cursor", async () => {
+        const store = await subject();
+        const cursor = (await wholeConversation(store))[0];
+        if (!cursor) throw new Error("the store answered no entry to resume from");
+        expect(
+          await store.messages.readConversation({
+            conversation: store.silentConversation,
+            after: cursor,
+            limit: WHOLE_HISTORY,
+          }),
+        ).toEqual([]);
+      });
     });
   });
 }

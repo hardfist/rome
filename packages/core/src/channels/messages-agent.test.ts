@@ -85,15 +85,25 @@ async function seed(db: DrizzleDb) {
 
   // Out of scope, each for its own reason.
   await message(db, "m-trace", { sessionId: "s-direct", role: "trace", at: 400 });
-  // Sent by the account, but into a thread the group addresses.
+  await message(db, "m-webchat", { sessionId: "s-webchat", role: "user", at: 600 });
+  await message(db, "m-elsewhere", { sessionId: "s-elsewhere", role: "user", at: 550 });
+
+  // The group's own session. No account addresses it, so none of this reaches
+  // an account read — and all of it is the transcript of that thread.
+  // `m-group` is sent by the account itself, which changes nothing: the line
+  // belongs to the group's thread.
   await message(db, "m-group", {
     sessionId: "s-group",
     role: "user",
     at: 500,
     senderId: DIRECT,
   });
-  await message(db, "m-webchat", { sessionId: "s-webchat", role: "user", at: 600 });
-  await message(db, "m-elsewhere", { sessionId: "s-elsewhere", role: "user", at: 550 });
+  await message(db, "m-group-reply", { sessionId: "s-group", role: "assistant", at: 520 });
+  // The same second as the reply; the direction settles the tie.
+  await message(db, "m-group-crossed", { sessionId: "s-group", role: "user", at: 520 });
+  await message(db, "m-group-later", { sessionId: "s-group", role: "notification", at: 620 });
+  // A turn's own machinery belongs to no conversation, the group's included.
+  await message(db, "m-group-trace", { sessionId: "s-group", role: "trace", at: 640 });
 }
 
 describe("agentMessages", () => {
@@ -140,6 +150,80 @@ describe("agentMessages", () => {
 
   it("leaves out a session that is not a channel's", async () => {
     expect(await refs()).not.toContain("agent:m-webchat");
+  });
+
+  describe("read as a conversation", () => {
+    const inGroup = () =>
+      agentMessages(db).readConversation({
+        conversation: { channel: CHANNEL, id: GROUP },
+        limit: WHOLE_HISTORY,
+      });
+
+    it("answers the group's session when asked for its thread", async () => {
+      expect((await inGroup()).map((entry) => entry.ref)).toEqual([
+        "agent:m-group-later",
+        "agent:m-group-reply",
+        "agent:m-group-crossed",
+        "agent:m-group",
+      ]);
+    });
+
+    it("leaves out a trace row, which belongs to no conversation", async () => {
+      expect((await inGroup()).map((entry) => entry.ref)).not.toContain("agent:m-group-trace");
+    });
+
+    it("leaves out a session that is not a channel's", async () => {
+      const webchat = await agentMessages(db).readConversation({
+        conversation: { channel: CHANNEL, id: "s-webchat" },
+        limit: WHOLE_HISTORY,
+      });
+      expect(webchat).toEqual([]);
+    });
+
+    it("scopes a thread id to its own channel", async () => {
+      const here = await agentMessages(db).readConversation({
+        conversation: { channel: CHANNEL, id: DIRECT },
+        limit: WHOLE_HISTORY,
+      });
+      const there = await agentMessages(db).readConversation({
+        conversation: { channel: OTHER_CHANNEL, id: DIRECT },
+        limit: WHOLE_HISTORY,
+      });
+      expect(here.map((entry) => entry.ref)).not.toContain("agent:m-elsewhere");
+      expect(there.map((entry) => entry.ref)).toEqual(["agent:m-elsewhere"]);
+    });
+
+    it("answers a direct thread exactly as the account read answers it", async () => {
+      const byConversation = await agentMessages(db).readConversation({
+        conversation: { channel: CHANNEL, id: DIRECT },
+        limit: WHOLE_HISTORY,
+      });
+      const byAccount = await agentMessages(db).read({
+        accounts: [{ channel: CHANNEL, addresses: [DIRECT] }],
+        limit: WHOLE_HISTORY,
+      });
+      expect(byConversation).toEqual(byAccount);
+    });
+
+    it("costs one pass per round of conversation calls", async () => {
+      const counted = countingDb(db);
+      const messages = agentMessages(counted.db);
+      const before = counted.passes();
+
+      await Promise.all([
+        messages.readConversation({ conversation: { channel: CHANNEL, id: GROUP }, limit: 2 }),
+        messages.readConversation({
+          conversation: { channel: CHANNEL, id: DIRECT },
+          limit: WHOLE_HISTORY,
+        }),
+        messages.readConversation({
+          conversation: { channel: OTHER_CHANNEL, id: DIRECT },
+          limit: WHOLE_HISTORY,
+        }),
+      ]);
+
+      expect(counted.passes() - before).toBe(1);
+    });
   });
 
   it("names the channel as the source and the direction by the role", async () => {
@@ -300,7 +384,13 @@ testMessagesContract("agentMessages", () => {
   enrolled ??= (async () => {
     const { db } = createTestDb();
     await seed(db);
-    return { messages: agentMessages(db), accounts: [account], silent };
+    return {
+      messages: agentMessages(db),
+      accounts: [account],
+      silent,
+      conversation: { channel: CHANNEL, id: GROUP },
+      silentConversation: { channel: CHANNEL, id: "tg-no-such-thread" },
+    };
   })();
   return enrolled;
 });

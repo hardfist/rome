@@ -9,6 +9,12 @@ import { testMessagesContract, WHOLE_HISTORY } from "./messages-contract.js";
 const PHONE = "1555@s.whatsapp.net";
 const LID = "77@lid";
 const MEMBER = "ACoAA1";
+// A thread the accounts below are not on, carrying messages from two addresses
+// — the shape a LinkedIn thread has, where what addresses a message and what
+// names the conversation it was said in are two different things.
+const ROOM = "li-thread-room";
+const ROOM_A = "ACoAAROOMA";
+const ROOM_B = "ACoAAROOMB";
 
 const entry = (
   source: string,
@@ -30,6 +36,35 @@ const held: HeldMessage[] = [
   // same string as a WhatsApp address on a channel that is not WhatsApp.
   { channel: "whatsapp", address: "9999@s.whatsapp.net", entry: entry("whatsapp", 600, "wa:x") },
   { channel: "linkedin", address: PHONE, entry: entry("linkedin", 700, "li:x") },
+
+  // The room. Every message names its own sender and the one conversation they
+  // were all said in, and no account below is addressed on it.
+  {
+    channel: "linkedin",
+    address: ROOM_A,
+    conversation: ROOM,
+    entry: entry("linkedin", 800, "li:r1"),
+  },
+  {
+    channel: "linkedin",
+    address: ROOM_B,
+    conversation: ROOM,
+    entry: entry("linkedin", 900, "li:r2", "outbound"),
+  },
+  // The same second as li:r2, from the other member: the direction settles the
+  // tie, and both have to survive a page boundary.
+  {
+    channel: "linkedin",
+    address: ROOM_A,
+    conversation: ROOM,
+    entry: entry("linkedin", 900, "li:r3"),
+  },
+  {
+    channel: "linkedin",
+    address: ROOM_B,
+    conversation: ROOM,
+    entry: entry("linkedin", 1000, "li:r4"),
+  },
 ];
 
 const accounts = [
@@ -41,6 +76,8 @@ testMessagesContract("memoryMessages", () => ({
   messages: memoryMessages(held),
   accounts,
   silent: [{ channel: "whatsapp", addresses: ["4444@s.whatsapp.net"] }],
+  conversation: { channel: "linkedin", id: ROOM },
+  silentConversation: { channel: "linkedin", id: "li-thread-nobody" },
 }));
 
 describe("memoryMessages", () => {
@@ -71,5 +108,37 @@ describe("memoryMessages", () => {
     expect(await messages.latest([])).toBeNull();
     expect(await messages.count([])).toBe(0);
     expect(await messages.read({ accounts: [], limit: WHOLE_HISTORY })).toEqual([]);
+  });
+
+  it("merges every address of a conversation into one newest-first history", async () => {
+    const page = await messages.readConversation({
+      conversation: { channel: "linkedin", id: ROOM },
+      limit: WHOLE_HISTORY,
+    });
+    expect(page.map((e) => e.ref)).toEqual(["li:r4", "li:r2", "li:r3", "li:r1"]);
+  });
+
+  // A message held with no conversation of its own was said in the one the
+  // person on it addresses, so asking for that conversation answers exactly
+  // what the person's account read answers.
+  it("names a direct conversation by the address it arrived at", async () => {
+    const byConversation = await messages.readConversation({
+      conversation: { channel: "whatsapp", id: PHONE },
+      limit: WHOLE_HISTORY,
+    });
+    const byAccount = await messages.read({
+      accounts: [{ channel: "whatsapp", addresses: [PHONE] }],
+      limit: WHOLE_HISTORY,
+    });
+    expect(byConversation).toEqual(byAccount);
+  });
+
+  it("scopes a conversation by the channel and the id together", async () => {
+    expect(
+      await messages.readConversation({
+        conversation: { channel: "whatsapp", id: ROOM },
+        limit: WHOLE_HISTORY,
+      }),
+    ).toEqual([]);
   });
 });

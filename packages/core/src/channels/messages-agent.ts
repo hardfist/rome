@@ -5,7 +5,7 @@ import { sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import type { MessagePart } from "../types.js";
 import type { Messages } from "./messages.js";
-import { scopePairs, sqlMessages } from "./messages-sql.js";
+import { scopeColumn, scopePairs, sqlMessages } from "./messages-sql.js";
 
 /**
  * The sender id Rome stamps on a message it sent itself.
@@ -48,12 +48,17 @@ export function agentMessageOutbound(role: SQL, senderId: SQL): SQL {
 /**
  * Rome's own transcript of a channel conversation.
  *
- * Reached through the session's channel address: a channel session is keyed by
- * the thread it belongs to, so a session addressed by the account is that
- * account's direct conversation, and a group's session — addressed by the
- * group rather than by anyone on it — is named by no account and never
- * matches. Which sender a message carries makes no difference: a line the
- * account wrote into a group belongs to the group's thread.
+ * A channel session is keyed by the thread it belongs to, so the session's
+ * thread id is what both questions reach a message through — and the same
+ * column answers each, since a direct conversation is addressed by the account
+ * whose thread it is.
+ *
+ * What differs is which threads each may select. An account read takes the
+ * ones an account addresses, so a group's session — addressed by the group
+ * rather than by anyone on it — is named by no account and never matches.
+ * Which sender a message carries makes no difference either way: a line the
+ * account wrote into a group belongs to the group's thread, and that thread is
+ * what a conversation read asks for.
  */
 export function agentMessages(db: DrizzleDb): Messages {
   // No `channel`: the transcript holds every channel that has no mirror of its
@@ -61,12 +66,18 @@ export function agentMessages(db: DrizzleDb): Messages {
   return sqlMessages({
     db,
     view(scope) {
-      const addressed = scopePairs(scope, sql`s.source_channel`, sql`s.source_thread_id`);
-      if (addressed === null) return null;
+      const named = scopePairs(scope, sql`s.source_channel`, sql`s.source_thread_id`);
+      if (named === null) return null;
+      // Addressing already leaves a group out of an account read, since a
+      // group's session is keyed by the group and no account answers to that.
+      // Said again on the store's own terms so the guarantee survives a caller
+      // that hands over a group id as if it were an account's address.
+      const direct =
+        scope.by === "address" ? sql` AND coalesce(s.source_thread_type, '') <> 'group'` : sql``;
       return sql`
         SELECT
           s.source_channel AS source,
-          s.source_thread_id AS address,
+          s.source_thread_id AS ${scopeColumn(scope)},
           m.created_at AS at,
           ${agentMessageOutbound(sql`m.role`, sql`m.sender_id`)} AS outbound,
           'agent:' || m.id AS ref,
@@ -74,17 +85,12 @@ export function agentMessages(db: DrizzleDb): Messages {
         FROM rome_agent_messages m
         JOIN rome_sessions s ON s.id = m.session_id
         WHERE s.type = 'channel'
-          AND ${addressed}
-          -- Addressing already leaves a group out, since a group's session is
-          -- keyed by the group and no account answers to that. Said again on
-          -- the store's own terms so the guarantee survives a caller that
-          -- hands over a group id as if it were an account's address.
-          AND coalesce(s.source_thread_type, '') <> 'group'
+          AND ${named}${direct}
           -- 'notification' is a line that passed outside a turn — something
           -- the person said without waking the agent, or something Rome sent
           -- untied to one. Either way it is conversation, and the direction
           -- above is what tells the two apart. 'trace' is the turn's own
-          -- machinery and belongs to no conversation.
+          -- machinery and belongs to no conversation, a group's included.
           AND m.role IN ('user', 'assistant', 'notification')`;
     },
     body: messageContentText,
