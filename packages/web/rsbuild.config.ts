@@ -10,6 +10,7 @@ const srcDir = fileURLToPath(new URL("./src", import.meta.url));
 const internalApiPort = process.env.INTERNAL_API_PORT ?? "4141";
 const internalApiTarget = `http://127.0.0.1:${internalApiPort}`;
 const emitSourceMaps = process.env.ROME_DOCKER_APP_CODE_MODE !== "compiled";
+const isDevelopment = process.env.NODE_ENV === "development";
 const packageDir = fileURLToPath(new URL("./", import.meta.url));
 
 // Mirror Vite's envPrefix semantics: only env vars matching these prefixes (or
@@ -103,8 +104,8 @@ export default defineConfig({
     target: "web",
     distPath: { root: "dist" },
     sourceMap: {
-      js: emitSourceMaps ? "source-map" : false,
-      css: emitSourceMaps,
+      js: emitSourceMaps ? (isDevelopment ? "cheap-module-source-map" : "source-map") : false,
+      css: emitSourceMaps && !isDevelopment,
     },
   },
 });
